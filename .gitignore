@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+.env
+
+# Local pipeline runtime data
+qnl_format_registry_builder/work/
+qnl_format_registry_builder/input/
+qnl_format_registry_builder/output/latest/
+qnl_format_registry_builder/output/runs/
+
+# Local databases and logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
