@@ -3,9 +3,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Iterable, Any
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
@@ -25,9 +27,21 @@ def ensure_dir(path: str | Path) -> Path:
     return p
 
 
+def _request_headers(uri: str, user_agent: str) -> dict[str, str]:
+    headers = {"User-Agent": user_agent}
+    parsed = urlparse(uri)
+    if parsed.netloc.lower() == "api.github.com":
+        headers["Accept"] = "application/vnd.github+json"
+        token = os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            headers["X-GitHub-Api-Version"] = "2022-11-28"
+    return headers
+
+
 def read_uri(uri: str, user_agent: str = "QNL-Format-Registry-Builder/0.1") -> tuple[bytes, dict[str, str]]:
     if uri.startswith("http://") or uri.startswith("https://"):
-        req = Request(uri, headers={"User-Agent": user_agent})
+        req = Request(uri, headers=_request_headers(uri, user_agent))
         with urlopen(req, timeout=60) as resp:
             return resp.read(), {k.lower(): v for k, v in resp.headers.items()}
     path = Path(uri)
