@@ -1,0 +1,202 @@
+{
+  "version": "qnl-method-profiles-v1",
+  "description": "Reusable preservation method profiles. Formats inherit family/domain templates and only use format-specific overrides when required.",
+  "profiles": {
+    "generic_preservation": {
+      "label": "Generic preservation baseline",
+      "steps": [
+        "Preserve original file as submitted or acquired.",
+        "Record source, provenance, fixity and technical identifiers.",
+        "Run file identification and characterization where tooling is available.",
+        "Retain evidence of any normalization, migration or derivative creation."
+      ],
+      "validation": [
+        "Run format identification against configured tools or registries.",
+        "Perform fixity validation before and after processing."
+      ],
+      "metadata_extraction": [
+        "Extract available technical metadata.",
+        "Record software/tool versions used during processing."
+      ],
+      "monitoring": [
+        "Monitor authority-source changes and QNL readiness changes."
+      ]
+    },
+    "structured_text": {
+      "label": "Structured text",
+      "inherits": ["generic_preservation"],
+      "steps": [
+        "Preserve the original text-based representation.",
+        "Record character encoding where known."
+      ],
+      "validation": [
+        "Check that the file is readable as text using the declared or detected encoding."
+      ],
+      "metadata_extraction": [
+        "Extract declared encoding, namespaces, schemas or declared syntax where available."
+      ]
+    },
+    "xml_based_structured_text": {
+      "label": "XML-based structured text",
+      "inherits": ["structured_text"],
+      "steps": [
+        "Treat the file as structured data, not only as displayable text.",
+        "Preserve the original XML-based file as the preservation master."
+      ],
+      "validation": [
+        "Check XML well-formedness.",
+        "Validate against schema or documented conventions where available."
+      ],
+      "metadata_extraction": [
+        "Extract root element, namespace, schema references and embedded metadata where available."
+      ],
+      "derivative_guidance": [
+        "Create access or reuse derivatives only when they preserve the intended use case; do not replace the structured original with a flat display derivative."
+      ]
+    },
+    "scientific_data": {
+      "label": "Scientific data modifier",
+      "inherits": ["generic_preservation"],
+      "metadata_extraction": [
+        "Extract domain-specific identifiers, units, measurements, coordinates or experimental context where available."
+      ],
+      "monitoring": [
+        "Monitor domain-tool support as part of readiness."
+      ]
+    },
+    "chemistry_scientific_data": {
+      "label": "Chemistry/scientific data modifier",
+      "inherits": ["scientific_data"],
+      "metadata_extraction": [
+        "Extract molecule identifiers, formulae, atom/bond structures, coordinates and reaction information where available."
+      ],
+      "derivative_guidance": [
+        "Use chemistry-aware tools for derivatives or reuse copies where required.",
+        "Do not treat PDF conversion as sufficient preservation for structured chemical semantics."
+      ],
+      "overrides": [
+        "For CML and similar chemistry formats, preserve the structured source as the master and use chemistry-aware derivative workflows only for access or reuse."
+      ]
+    },
+    "raster_image": {
+      "label": "Raster image",
+      "inherits": ["generic_preservation"],
+      "validation": [
+        "Run image characterization and validation where tools are available.",
+        "Record dimensions, color profile, bit depth, compression and embedded metadata."
+      ],
+      "derivative_guidance": [
+        "Generate access derivatives separately from preservation masters."
+      ]
+    },
+    "office_document": {
+      "label": "Office document",
+      "inherits": ["generic_preservation"],
+      "steps": [
+        "Preserve the original office document.",
+        "Generate tested preservation or access derivatives according to QNL readiness and policy."
+      ],
+      "validation": [
+        "Record creating application/version where available.",
+        "Check whether embedded content, macros or external dependencies are present."
+      ],
+      "derivative_guidance": [
+        "Use tested conversion pathways such as PDF/A only when content and functionality requirements are met."
+      ]
+    },
+    "archive_or_container": {
+      "label": "Archive or container",
+      "inherits": ["generic_preservation"],
+      "steps": [
+        "Preserve the original container.",
+        "Inspect and assess contained files as separate preservation objects where feasible."
+      ],
+      "validation": [
+        "Check container integrity.",
+        "Record internal file list, compression method and nested formats where available."
+      ],
+      "metadata_extraction": [
+        "Extract contained file names, sizes, timestamps and identifiers where feasible."
+      ]
+    },
+    "geospatial_data": {
+      "label": "Geospatial data modifier",
+      "inherits": ["generic_preservation"],
+      "metadata_extraction": [
+        "Extract coordinate reference system, geometry type, bounding boxes and linked resources where available."
+      ],
+      "derivative_guidance": [
+        "Use geospatial-aware derivatives only where they preserve spatial meaning and dependencies."
+      ]
+    },
+    "audiovisual": {
+      "label": "Audiovisual",
+      "inherits": ["generic_preservation"],
+      "validation": [
+        "Extract codec, container, duration, bitrate, frame rate, channel layout and embedded metadata where available."
+      ],
+      "derivative_guidance": [
+        "Separate preservation masters from access derivatives."
+      ]
+    }
+  },
+  "assignment_rules": [
+    {
+      "profile": "xml_based_structured_text",
+      "match": {
+        "identifiers": {
+          "extension": ["xml", "cml", "kml", "gml", "mets", "mods", "tei", "jats", "xhtml", "svg"]
+        }
+      }
+    },
+    {
+      "profile": "chemistry_scientific_data",
+      "match": {
+        "identifiers": {
+          "extension": ["cml"]
+        },
+        "name_contains": ["chemical markup language", "cml"]
+      }
+    },
+    {
+      "profile": "geospatial_data",
+      "match": {
+        "identifiers": {
+          "extension": ["kml", "kmz", "gml", "shp", "geojson"]
+        }
+      }
+    },
+    {
+      "profile": "archive_or_container",
+      "match": {
+        "identifiers": {
+          "extension": ["zip", "kmz", "jar", "warc", "wacz"]
+        }
+      }
+    },
+    {
+      "profile": "office_document",
+      "match": {
+        "identifiers": {
+          "extension": ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"]
+        }
+      }
+    },
+    {
+      "profile": "raster_image",
+      "match": {
+        "identifiers": {
+          "extension": ["tif", "tiff", "jpg", "jpeg", "jp2", "png", "gif", "bmp"]
+        }
+      }
+    },
+    {
+      "profile": "audiovisual",
+      "match": {
+        "identifiers": {
+          "extension": ["wav", "mp3", "mp4", "mov", "mkv", "avi", "flac"]
+        }
+      }
+    }
+  ]
+}
