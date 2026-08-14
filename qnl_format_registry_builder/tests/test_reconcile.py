@@ -65,3 +65,67 @@ def test_hazard_reconciler_is_wired_into_canonical_format():
     assert registry[0].hazard_assessment["band"] == "High"
     assert registry[0].hazard_assessment["basis"] == "corroborated"
     assert registry[0].hazard_assessment["review_required"] is False
+
+
+def test_unique_name_extension_bridge_merges_institution_record_with_nara_authority():
+    records = [
+        RawFormatRecord(
+            source_id="qnl",
+            source_type="institution_policy_xlsx",
+            name="Comma Separated Values",
+            extensions=["csv"],
+            institution_policy={"institution_id": "qnl", "local_risk_level": "Low Risk"},
+        ),
+        RawFormatRecord(
+            source_id="nara",
+            source_type="nara_preservation_csv",
+            source_record_id="NF00143",
+            name="Comma Separated Values",
+            extensions=["csv"],
+            nara_ids=["NF00143"],
+            hazard={"band": "Low", "rating": 1.0},
+        ),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 1
+    fmt = registry[0]
+    assert fmt.canonical_id == "nara-nf00143"
+    assert fmt.hazard_assessment["basis"] == "corroborated"
+    assert fmt.institution_policy_overlays[0]["institution_id"] == "qnl"
+
+
+def test_weak_bridge_does_not_merge_when_two_authority_records_share_name_extension():
+    records = [
+        RawFormatRecord(
+            source_id="qnl",
+            source_type="institution_policy_xlsx",
+            name="Example Format",
+            extensions=["exf"],
+            institution_policy={"institution_id": "qnl", "local_risk_level": "Low Risk"},
+        ),
+        RawFormatRecord(
+            source_id="nara_a",
+            source_type="nara_preservation_csv",
+            source_record_id="NF00001",
+            name="Example Format",
+            extensions=["exf"],
+            nara_ids=["NF00001"],
+            hazard={"band": "Low", "rating": 1.0},
+        ),
+        RawFormatRecord(
+            source_id="nara_b",
+            source_type="nara_preservation_csv",
+            source_record_id="NF00002",
+            name="Example Format",
+            extensions=["exf"],
+            nara_ids=["NF00002"],
+            hazard={"band": "High", "rating": 3.0},
+        ),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 3
+    assert {fmt.canonical_id for fmt in registry} == {"fmt-example-format", "nara-nf00001", "nara-nf00002"}
