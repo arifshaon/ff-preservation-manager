@@ -37,6 +37,7 @@ def test_cml_inherits_xml_and_chemistry_profiles():
 
     method = fmt.preservation_method
     assert method["profile_version"] == "test-method-profiles-v1"
+    assert method["direct_profile_ids"] == ["xml_based_structured_text", "chemistry_scientific_data"]
     assert method["assigned_profile_ids"] == [
         "generic_preservation",
         "structured_text",
@@ -60,33 +61,70 @@ def test_build_preservation_method_deduplicates_inherited_steps():
 
     method = build_preservation_method(["child"], config)
 
+    assert method["direct_profile_ids"] == ["child"]
     assert method["steps"] == ["Preserve original", "Validate structure"]
 
 
-def test_category_contains_can_assign_profile_without_extension_rule():
+def test_category_fallback_does_not_add_profiles_when_primary_rule_matches():
     config = {
-        "version": "test-method-profiles-v2",
+        "version": "test-method-profiles-v1",
         "profiles": {
-            "generic_preservation": {"steps": ["Preserve original"]},
+            "generic_preservation": {},
+            "scientific_data": {"inherits": ["generic_preservation"]},
             "structured_text": {"inherits": ["generic_preservation"]},
-            "structured_data": {"inherits": ["structured_text"], "validation": ["Validate parseability"]},
+            "office_document": {"inherits": ["generic_preservation"]},
         },
         "assignment_rules": [
-            {"profile": "structured_data", "match": {"category_contains": ["structured data"]}}
+            {"profile": "scientific_data", "match": {"identifiers": {"extension": ["fasta"]}}},
+            {
+                "profile": "structured_text",
+                "fallback_only": True,
+                "match": {"category_contains": ["textual and word processing"]},
+            },
+            {
+                "profile": "office_document",
+                "fallback_only": True,
+                "match": {"category_contains": ["word processing"]},
+            },
         ],
     }
     fmt = CanonicalFormat(
-        canonical_id="fmt-local-json-like-format",
-        preferred_name="Local data package",
-        category="Structured Data",
-        identifiers={"extension": ["unknown"]},
+        canonical_id="fmt-fasta",
+        preferred_name="FASTA",
+        category="Textual and Word Processing",
+        identifiers={"extension": ["fasta"]},
     )
 
     assign_method_profiles([fmt], config)
 
-    assert fmt.preservation_method["assigned_profile_ids"] == [
-        "generic_preservation",
-        "structured_text",
-        "structured_data",
-    ]
-    assert "Validate parseability" in fmt.preservation_method["validation"]
+    assert fmt.preservation_method["direct_profile_ids"] == ["scientific_data"]
+    assert "office_document" not in fmt.preservation_method["assigned_profile_ids"]
+    assert "structured_text" not in fmt.preservation_method["assigned_profile_ids"]
+
+
+def test_category_fallback_applies_when_no_primary_rule_matches():
+    config = {
+        "version": "test-method-profiles-v1",
+        "profiles": {
+            "generic_preservation": {},
+            "structured_data": {"inherits": ["generic_preservation"]},
+        },
+        "assignment_rules": [
+            {"profile": "structured_data", "match": {"identifiers": {"extension": ["csv"]}}},
+            {
+                "profile": "structured_data",
+                "fallback_only": True,
+                "match": {"category_contains": ["structured data"]},
+            },
+        ],
+    }
+    fmt = CanonicalFormat(
+        canonical_id="fmt-unknown-structured-data",
+        preferred_name="Institutional Structured Dataset",
+        category="Structured Data",
+        identifiers={},
+    )
+
+    assign_method_profiles([fmt], config)
+
+    assert fmt.preservation_method["direct_profile_ids"] == ["structured_data"]
