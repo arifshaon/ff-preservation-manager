@@ -1,215 +1,23 @@
 from __future__ import annotations
 
-from pathlib import Path
-from zipfile import ZipFile
-import re
-import xml.etree.ElementTree as ET
-from typing import Any
-
-from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes, split_multi
-
-_NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-
-
-def _col_index(cell_ref: str) -> int:
-    letters = "".join(ch for ch in cell_ref if ch.isalpha())
-    value = 0
-    for ch in letters:
-        value = value * 26 + (ord(ch.upper()) - ord("A") + 1)
-    return value - 1
+from registry_builder.adapters.institution_policy_xlsx import (
+    InstitutionPolicyXlsxAdapter,
+    _candidate_headers,
+    _field,
+    _find_header_row,
+    _get,
+    _norm_header,
+    _read_sheet_rows,
+    _resolve_field_map,
+)
 
 
-def _read_shared_strings(zf: ZipFile) -> list[str]:
-    try:
-        data = zf.read("xl/sharedStrings.xml")
-    except KeyError:
-        return []
-    root = ET.fromstring(data)
-    strings: list[str] = []
-    for si in root.findall("a:si", _NS):
-        parts = []
-        for t in si.iterfind(".//a:t", _NS):
-            parts.append(t.text or "")
-        strings.append("".join(parts))
-    return strings
+class QnlPolicyXlsxAdapter(InstitutionPolicyXlsxAdapter):
+    """Deprecated compatibility alias for QNL's institutional policy workbook.
 
-
-def _sheet_paths(zf: ZipFile) -> list[str]:
-    return sorted([p for p in zf.namelist() if p.startswith("xl/worksheets/sheet") and p.endswith(".xml")])
-
-
-def _read_sheet_rows(xlsx_path: str) -> list[list[str]]:
-    with ZipFile(xlsx_path) as zf:
-        shared = _read_shared_strings(zf)
-        sheet_path = _sheet_paths(zf)[0]
-        root = ET.fromstring(zf.read(sheet_path))
-        rows: list[list[str]] = []
-        for row in root.findall(".//a:sheetData/a:row", _NS):
-            values: dict[int, str] = {}
-            for c in row.findall("a:c", _NS):
-                ref = c.attrib.get("r", "A1")
-                idx = _col_index(ref)
-                typ = c.attrib.get("t")
-                v = c.find("a:v", _NS)
-                is_elem = c.find("a:is", _NS)
-                text = ""
-                if typ == "s" and v is not None and v.text is not None:
-                    si = int(v.text)
-                    text = shared[si] if 0 <= si < len(shared) else ""
-                elif typ == "inlineStr" and is_elem is not None:
-                    text = "".join(t.text or "" for t in is_elem.iterfind(".//a:t", _NS))
-                elif v is not None and v.text is not None:
-                    text = v.text
-                values[idx] = text.strip()
-            if values:
-                width = max(values) + 1
-                rows.append([values.get(i, "") for i in range(width)])
-        return rows
-
-
-def _norm_header(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
-
-
-def _find_header_row(rows: list[list[str]]) -> int:
-    for i, row in enumerate(rows[:30]):
-        joined = " | ".join(row).lower()
-        if ("file" in joined and "format" in joined and "extension" in joined) or "qnl format id" in joined:
-            return i
-    return 0
-
-
-def _get(row: dict[str, str], candidates: list[str]) -> str:
-    """Return an exact mapped/header value only.
-
-    The old substring fallback allowed `format` to bind to `qnl_format_id`.
-    Source-specific mappings now belong in config, and missing declared columns
-    raise before extraction begins.
-    """
-    for cand in candidates:
-        if cand in row and row[cand].strip():
-            return row[cand].strip()
-    return ""
-
-
-def _candidate_headers(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return [str(x) for x in value]
-    raise TypeError(f"field_map values must be a string or list of strings, got {type(value).__name__}")
-
-
-def _resolve_field_map(config: dict[str, Any], raw_headers: list[str]) -> dict[str, str]:
-    normalized_headers = {_norm_header(h): h for h in raw_headers if _norm_header(h)}
-    field_map: dict[str, str] = {}
-    for field, header_spec in config.get("field_map", {}).items():
-        candidates = [_norm_header(h) for h in _candidate_headers(header_spec)]
-        match = next((candidate for candidate in candidates if candidate in normalized_headers), None)
-        if match is None:
-            available = ", ".join(sorted(normalized_headers))
-            requested = ", ".join(repr(h) for h in _candidate_headers(header_spec))
-            raise ValueError(
-                f"Configured QNL field_map column for '{field}' was not found. "
-                f"Requested one of: {requested}. Available normalized headers: {available}"
-            )
-        field_map[field] = match
-    return field_map
-
-
-def _field(row: dict[str, str], field_map: dict[str, str], field: str, defaults: list[str], aliases: tuple[str, ...] = ()) -> str:
-    for field_name in (field, *aliases):
-        mapped = field_map.get(field_name)
-        if mapped:
-            return row.get(mapped, "").strip()
-    return _get(row, defaults)
-
-
-class QnlPolicyXlsxAdapter(SourceAdapter):
-    """Adapter for the QNL file-format policy spreadsheet.
-
-    This imports QNL content as an institutional policy overlay, not as the
-    boundary of the canonical registry.
+    New configurations should use `institution_policy_xlsx` with
+    `institution_id`, `institution_name`, and a source-specific `field_map`.
+    This alias remains so existing QNL configs do not break immediately.
     """
 
     type_name = "qnl_policy_xlsx"
-
-    def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
-        for uri in self.config.get("uris", []):
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            local_path = snapshot_dir / f"{digest}.xlsx"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-            ))
-        return snapshots
-
-    def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
-        records: list[RawFormatRecord] = []
-        for snap in snapshots:
-            rows = _read_sheet_rows(snap.local_path)
-            header_idx = self.config.get("header_row")
-            if header_idx is None:
-                header_idx = _find_header_row(rows)
-            else:
-                header_idx = int(header_idx) - 1
-            raw_headers = rows[header_idx]
-            headers = [_norm_header(h) for h in raw_headers]
-            field_map = _resolve_field_map(self.config, raw_headers)
-            for row_no, values in enumerate(rows[header_idx + 1:], start=header_idx + 2):
-                row = {headers[i]: values[i] if i < len(values) else "" for i in range(len(headers)) if headers[i]}
-                name = _field(row, field_map, "name", ["digital_file", "file_format", "file_format_name", "format_name", "name"])
-                qnl_format_id = _field(row, field_map, "source_id", ["qnl_format_id", "qnl_id"])
-                extensions = split_multi(_field(row, field_map, "extensions", ["file_extension_s", "extension", "extensions"]))
-                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type", "mime", "mimetype"]))
-                category = _field(row, field_map, "category", ["category", "format_category", "category_plan", "plan"], aliases=("categories",))
-                description = _field(row, field_map, "description", ["description", "description_and_justification", "description_justification", "justification"])
-                pronom_url = _field(row, field_map, "pronom_url", ["pronom", "pronom_url", "puid"])
-                puids = re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url)
-                loc_url = _field(row, field_map, "loc_url", ["loc", "library_of_congress", "loc_url"])
-                loc_ids = re.findall(r"\bfdd\d+\b", loc_url, flags=re.I)
-                if not name and not qnl_format_id and not extensions:
-                    continue
-                records.append(RawFormatRecord(
-                    source_id=self.source_id,
-                    source_type=self.type_name,
-                    source_record_id=qnl_format_id or f"qnl-row-{row_no}",
-                    name=name,
-                    category=category,
-                    description=description,
-                    extensions=extensions,
-                    mime_types=mime_types,
-                    puids=puids,
-                    loc_ids=loc_ids,
-                    wikidata_ids=re.findall(r"\bQ\d{2,}\b", _field(row, field_map, "wikidata_url", ["wikidata", "wikidata_url"])),
-                    urls={k: v for k, v in {
-                        "pronom": pronom_url,
-                        "loc": loc_url,
-                        "wikidata": _field(row, field_map, "wikidata_url", ["wikidata", "wikidata_url"]),
-                        "archive_team": _field(row, field_map, "archive_team_url", ["archiveteam", "archive_team"]),
-                        "british_library": _field(row, field_map, "british_library_url", ["british_library", "bl"]),
-                    }.items() if v},
-                    qnl={
-                        "qnl_format_id": qnl_format_id,
-                        "spreadsheet_risk_level": _field(row, field_map, "risk_level", ["qnl_risk_level", "risk_level", "risk"]),
-                        "preservation_action": _field(row, field_map, "preservation_action", ["qnl_preservation_action", "preservation_action", "action"]),
-                        "proposed_preservation_plan": _field(row, field_map, "proposed_preservation_plan", ["qnl_proposed_preservation_plan", "proposed_preservation_plan", "plan"]),
-                        "preferred_tools": _field(row, field_map, "preferred_tools", ["preferred_processing_and_conversion_tool_s", "preferred_tools", "tool_s"]),
-                        "conversion_process": _field(row, field_map, "conversion_process", ["conversion_process", "command", "process"]),
-                        "source_file": snap.uri,
-                        "source_row": row_no,
-                    },
-                    raw=row,
-                ))
-        return records
