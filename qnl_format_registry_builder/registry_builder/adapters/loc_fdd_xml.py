@@ -5,8 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
+from registry_builder.models import RawFormatRecord, SourceSnapshot
 
 
 def _local_name(tag: str) -> str:
@@ -32,27 +31,11 @@ class LocFddXmlAdapter(SourceAdapter):
     type_name = "loc_fdd_xml"
 
     def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
         uris = list(self.config.get("uris", []))
         directory = self.config.get("directory")
         if directory:
             uris.extend(str(p) for p in Path(directory).glob("*.xml"))
-        for uri in uris:
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            local_path = snapshot_dir / f"{digest}.xml"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-            ))
-        return snapshots
+        return [self.acquire_uri_snapshot(uri, suffix=".xml") for uri in uris]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
@@ -79,7 +62,12 @@ class LocFddXmlAdapter(SourceAdapter):
                 loc_ids=[loc_id] if loc_id else [],
                 wikidata_ids=wikidata,
                 urls={"loc": snap.uri},
-                evidence=[{"type": "loc_fdd_xml_text", "snapshot_sha256": snap.sha256}],
+                evidence=[{
+                    "type": "loc_fdd_xml_text",
+                    "snapshot_sha256": snap.sha256,
+                    "snapshot_changed": snap.changed,
+                    "snapshot_from_cache": snap.from_cache,
+                }],
                 raw={"snapshot_sha256": snap.sha256},
             ))
         return records
