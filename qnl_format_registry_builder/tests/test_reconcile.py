@@ -78,7 +78,7 @@ def test_unique_name_extension_bridge_merges_institution_record_with_nara_author
         ),
         RawFormatRecord(
             source_id="nara",
-            source_type="nara_preservation_csv",
+            source_type="nara_digital_preservation_framework",
             source_record_id="NF00143",
             name="Comma Separated Values",
             extensions=["csv"],
@@ -96,6 +96,53 @@ def test_unique_name_extension_bridge_merges_institution_record_with_nara_author
     assert fmt.institution_policy_overlays[0]["institution_id"] == "qnl"
 
 
+def test_reconciled_hazard_carries_native_rating_from_any_external_record():
+    records = [
+        RawFormatRecord(
+            source_id="qnl",
+            source_type="institution_policy_xlsx",
+            name="Presentation Open XML",
+            extensions=["pptx"],
+            institution_policy={"institution_id": "qnl", "local_risk_level": "Low Risk"},
+        ),
+        RawFormatRecord(
+            source_id="nara-action",
+            source_type="nara_digital_preservation_framework",
+            source_record_id="NF01000",
+            name="Presentation Open XML",
+            extensions=["pptx"],
+            nara_ids=["NF01000"],
+            hazard={"band": "Moderate", "rating": 2.0},
+        ),
+        RawFormatRecord(
+            source_id="nara-risk-matrix",
+            source_type="nara_digital_preservation_framework",
+            source_record_id="NF01000",
+            name="Presentation Open XML",
+            extensions=["pptx"],
+            nara_ids=["NF01000"],
+            hazard={
+                "band": "Moderate",
+                "rating": 2.0,
+                "external_rating_native": 22.0,
+                "external_rating_native_direction": "higher_is_safer",
+                "external_rating_native_scale": "nara_file_format_risk_matrix",
+            },
+        ),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 1
+    assessment = registry[0].hazard_assessment
+    assert assessment["basis"] == "institution_override"
+    assert assessment["external_rating"] == 2.0
+    assert assessment["institution_rating"] == 1.0
+    assert assessment["external_rating_native"] == 22.0
+    assert assessment["external_rating_native_direction"] == "higher_is_safer"
+    assert assessment["external_native_gap_to_institution_band"] == 1.0
+
+
 def test_weak_bridge_does_not_merge_when_two_authority_records_share_name_extension():
     records = [
         RawFormatRecord(
@@ -107,7 +154,7 @@ def test_weak_bridge_does_not_merge_when_two_authority_records_share_name_extens
         ),
         RawFormatRecord(
             source_id="nara_a",
-            source_type="nara_preservation_csv",
+            source_type="nara_digital_preservation_framework",
             source_record_id="NF00001",
             name="Example Format",
             extensions=["exf"],
@@ -116,7 +163,7 @@ def test_weak_bridge_does_not_merge_when_two_authority_records_share_name_extens
         ),
         RawFormatRecord(
             source_id="nara_b",
-            source_type="nara_preservation_csv",
+            source_type="nara_digital_preservation_framework",
             source_record_id="NF00002",
             name="Example Format",
             extensions=["exf"],
