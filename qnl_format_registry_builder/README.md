@@ -52,7 +52,7 @@ Key documents:
 This implementation includes:
 
 - source-adapter architecture;
-- dotted-path loading for external source adapters and storage backends, so third-party packages do not need core registry edits;
+- `module:ClassName` plugin loading for external source adapters and storage backends, so third-party packages do not need core registry edits;
 - repeatable local runs from a JSON config file;
 - immutable source snapshots with SHA-256 hashes;
 - content-addressed snapshot cache under `work/snapshots/<source_id>/`;
@@ -142,7 +142,7 @@ Built-in adapters and storage backends can still be referenced by short names:
 }
 ```
 
-External packages can be referenced directly by dotted path:
+External packages can be referenced directly by explicit `module:ClassName` plugin path:
 
 ```json
 {
@@ -162,6 +162,10 @@ External storage backends use the same pattern:
   }
 }
 ```
+
+The `module:ClassName` path is a trusted-code boundary. Importing a plugin executes the plugin module's top-level Python code, so plugin paths should come only from trusted configuration and reviewed packages.
+
+The resolver validates plugin classes at load time. Source plugins must subclass `SourceAdapter`; storage plugins must subclass `RegistryStore`. Bad module paths, missing dependencies, missing class names, and wrong base classes fail early with specific messages.
 
 ## Identifier rules
 
