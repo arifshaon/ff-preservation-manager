@@ -18,6 +18,7 @@
       "id": "qnl_policy_current",
       "type": "institution_policy_xlsx",
       "enabled": false,
+      "required": true,
       "institution_id": "qnl",
       "institution_name": "Qatar National Library",
       "institution_format_id_prefix": "QNL",
@@ -44,16 +45,19 @@
       "id": "nara_digital_preservation_framework",
       "type": "nara_digital_preservation_framework",
       "enabled": false,
+      "required": false,
       "retrieval_mode": "published_csv",
       "release_mode": "pinned",
       "release_date": "20260320",
+      "fallback_release_date": "20260320",
       "github_ref": "master",
-      "notes": "External hazard source. Use release_mode:pinned for audit/reproducibility, latest for quarterly refresh, or explicit_uris for special tests. The adapter resolves the dated NARA CSV pair internally."
+      "notes": "External hazard source. Use release_mode:pinned for audit/reproducibility, latest for quarterly refresh, or explicit_uris for special tests. The adapter resolves the dated NARA CSV pair internally. Marked required:false because an upstream NARA/GitHub outage should be recorded but should not destroy a QNL-only registry run."
     },
     {
       "id": "pronom_registry",
       "type": "pronom_registry",
       "enabled": false,
+      "required": false,
       "retrieval_mode": "github_json",
       "github_tree_url": "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1",
       "raw_base_url": "https://raw.githubusercontent.com/nationalarchives/pronom/develop",
@@ -64,12 +68,14 @@
       "id": "example_curated_source",
       "type": "standard_json",
       "enabled": true,
+      "required": true,
       "uris": ["examples/sample_source_package.json"]
     },
     {
       "id": "pronom_droid_signature_file",
       "type": "pronom_droid_xml",
       "enabled": false,
+      "required": false,
       "uris": ["https://www.nationalarchives.gov.uk/aboutapps/pronom/droid-signature-files.htm"],
       "notes": "Representation-specific compatibility adapter for DROID signature XML. Prefer pronom_registry for the source-level PRONOM dataset."
     },
@@ -77,6 +83,7 @@
       "id": "loc_fdd_xml",
       "type": "loc_fdd_xml",
       "enabled": false,
+      "required": false,
       "uris": [],
       "directory": "input/loc_fdd_xml"
     }
