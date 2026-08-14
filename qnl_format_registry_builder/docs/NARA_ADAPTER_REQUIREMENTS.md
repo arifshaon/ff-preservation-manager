@@ -2,10 +2,26 @@
 
 NARA is the first high-value external hazard source because it turns real workbook runs from `institution_only` into actual external-vs-institutional reconciliation.
 
-The implemented adapter is:
+The preferred source-level adapter is:
+
+```text
+nara_digital_preservation_framework
+```
+
+The older adapter name remains available only as a deprecated compatibility alias:
 
 ```text
 nara_preservation_csv
+```
+
+CSV is not the architectural boundary. CSV is simply the current implemented retrieval mode for the NARA Digital Preservation Framework source.
+
+## Current retrieval mode
+
+Implemented retrieval mode:
+
+```text
+published_csv
 ```
 
 It parses NARA Digital Preservation Framework CSV exports, including:
@@ -16,6 +32,8 @@ Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.
 ```
 
 The action-plan CSV contains format names, extensions, categories, NARA format IDs, risk levels, preservation actions, proposed preservation plans, and preferred tools. The numbered risk-matrix CSV contains the native numeric risk rating and related score fields.
+
+Future retrieval modes, such as an API, linked-data endpoint, or other structured NARA source, should be added inside `nara_digital_preservation_framework` rather than creating a new source concept for each file representation.
 
 ## Why NARA matters
 
@@ -36,8 +54,9 @@ Enable NARA as a separate source alongside the institutional workbook:
 ```json
 {
   "id": "nara_digital_preservation_framework",
-  "type": "nara_preservation_csv",
+  "type": "nara_digital_preservation_framework",
   "enabled": true,
+  "retrieval_mode": "published_csv",
   "uris": [
     "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv",
     "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
@@ -83,7 +102,7 @@ No downstream logic should assume that a larger native source rating always mean
 
 The NARA adapter treats `NARA Format ID` values such as `NF00143` as verified NARA identifiers.
 
-PRONOM URLs inside the NARA CSV are retained as useful identifier claims, but the NARA adapter does not make those PUIDs verified PRONOM identifiers. Verified PUID authority still comes from PRONOM/DROID XML or another explicitly trusted PUID authority source.
+PRONOM URLs inside the NARA data are retained as useful identifier claims, but the NARA adapter does not make those PUIDs verified PRONOM identifiers. Verified PUID authority comes from PRONOM itself, for example `pronom_registry` or `pronom_droid_xml`.
 
 ## Reconciliation behavior
 
