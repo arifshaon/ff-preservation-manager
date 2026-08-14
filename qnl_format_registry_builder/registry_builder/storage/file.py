@@ -90,6 +90,17 @@ class FileRegistryStore(RegistryStore):
             return None
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def upsert(self, collection: str, key: str | None, doc: dict[str, Any]) -> str:
+        key = str(key or _document_key(doc))
+        self._write(collection, key, doc)
+        return key
+
+    def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        records = self._read_collection(collection)
+        if filt:
+            records = [record for record in records if all(record.get(k) == v for k, v in filt.items())]
+        return records
+
     def create_run(self, run: dict[str, Any]) -> str:
         run_id = str(run.get("run_id") or run.get("id") or f"run-{_document_key(run)[:12]}")
         stored = deepcopy(run)
