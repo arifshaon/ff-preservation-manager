@@ -160,6 +160,36 @@ def test_nara_latest_offline_uses_cached_release_index(tmp_path):
     assert all(source["release_mode"] == "latest" for source in sources)
 
 
+def test_nara_local_files_release_mode_snapshots_admin_supplied_files(tmp_path):
+    action = tmp_path / "NARA_PreservationActionPlan_FileFormats_20260320.csv"
+    risk = tmp_path / "NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
+    action.write_text(
+        "Format Name,File Extension(s),NARA Format ID,NARA Risk Level\n"
+        "Comma Separated Values,csv,NF00143,Low Risk\n",
+        encoding="utf-8",
+    )
+    risk.write_text(
+        "Format Name,File Extension(s),NARA Format ID,Numeric Risk Rating\n"
+        "Comma Separated Values,csv,NF00143,24.00\n",
+        encoding="utf-8",
+    )
+    adapter = NaraDigitalPreservationFrameworkAdapter(
+        {"id": "nara_test", "release_mode": "local_files", "local_files": [str(action), {"path": str(risk)}]},
+        tmp_path,
+    )
+
+    sources = adapter._resolved_sources()
+    snapshots = adapter.acquire()
+
+    assert [source["kind"] for source in sources] == ["preservation_action_plan", "risk_matrix_numbered"]
+    assert all(source["release_mode"] == "local_files" for source in sources)
+    assert all(source["source_location"] == "local_file" for source in sources)
+    assert all(source["release_date"] == "20260320" for source in sources)
+    assert all(snapshot.metadata["admin_supplied"] is True for snapshot in snapshots)
+    assert all(snapshot.metadata["source_location"] == "local_file" for snapshot in snapshots)
+    assert all(snapshot.changed is True for snapshot in snapshots)
+
+
 def test_nara_latest_discovery_failure_uses_cached_release_index(tmp_path, monkeypatch):
     release_dir = tmp_path / "snapshots" / "nara_test"
     release_dir.mkdir(parents=True)
@@ -186,6 +216,29 @@ def test_nara_latest_discovery_failure_uses_cached_release_index(tmp_path, monke
     sources = adapter._resolved_sources()
 
     assert all(source["release_mode"] == "latest_cached_fallback" for source in sources)
+    assert all("release_resolution_error" in source for source in sources)
+
+
+def test_nara_latest_discovery_failure_uses_admin_local_fallback_files(tmp_path, monkeypatch):
+    action = tmp_path / "NARA_PreservationActionPlan_FileFormats_20260320.csv"
+    risk = tmp_path / "NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
+    action.write_text("Format Name,File Extension(s),NARA Format ID\nCSV,csv,NF00143\n", encoding="utf-8")
+    risk.write_text("Format Name,File Extension(s),NARA Format ID,Numeric Risk Rating\nCSV,csv,NF00143,24.00\n", encoding="utf-8")
+    adapter = NaraDigitalPreservationFrameworkAdapter(
+        {
+            "id": "nara_test",
+            "release_mode": "latest",
+            "fallback_local_files": [str(action), str(risk)],
+        },
+        tmp_path,
+    )
+    monkeypatch.setattr(adapter, "_latest_sources_online", lambda: (_ for _ in ()).throw(URLError("rate limit")))
+
+    sources = adapter._resolved_sources()
+
+    assert all(source["release_mode"] == "latest_local_fallback" for source in sources)
+    assert all(source["source_location"] == "local_file" for source in sources)
+    assert all(source["admin_supplied"] is True for source in sources)
     assert all("release_resolution_error" in source for source in sources)
 
 
