@@ -6,10 +6,10 @@ A useful lesson from the QNL workbook run: fixing the format-name field and mapp
 
 That means the system needs two complementary matching layers:
 
-1. **Extension rules** for common, high-confidence cases.
-2. **Category fallback rules** for long-term scalability.
+1. **Primary rules** for common, high-confidence cases, usually extension/source/evidence driven.
+2. **Fallback-only category rules** for long-term scalability when no primary rule matched.
 
-Extension lists are useful but will always lag a growing registry. Categories and descriptions provide a safer fallback when a format is ordinary but not yet enumerated in a profile rule.
+Extension lists are useful but will always lag a growing registry. Categories and descriptions provide a fallback when a format is ordinary but not yet enumerated in a profile rule. They should not be additive broad classifiers.
 
 ## Institutional field-map requirements
 
@@ -34,7 +34,7 @@ Multiple candidate headers are allowed for a single field. Extraction fails loud
 
 ## Assignment-rule improvements
 
-The method profile config should include both explicit extensions and category fallbacks.
+The method profile config should include both explicit extensions and fallback-only categories.
 
 Examples of missing ordinary extensions that should be covered:
 
@@ -53,17 +53,50 @@ mol/cif/sdf/pdb          → chemistry_scientific_data
 fasta/fastq              → scientific_data
 ```
 
+Category rules should be marked with:
+
+```json
+{ "fallback_only": true }
+```
+
+This means:
+
+```text
+If a primary rule matches, keep the primary profile(s) only.
+If no primary rule matches, try fallback-only category rules.
+```
+
+This avoids precision failures such as assigning `office_document` to FASTA, CIF, or XSD simply because they sit inside a broad institutional category like `Textual and Word Processing`.
+
 Recommended fallback categories:
 
 ```text
 Structured Data                  → structured_data
-Textual and Word Processing      → structured_text and/or office_document
+Textual and Word Processing      → structured_text
 Scientific Data                  → scientific_data
 Geospatial / GIS                 → geospatial_data
 Raster Image / Still Image       → raster_image
 Audio / Video / Audiovisual      → audiovisual
 Archive / Container / Compressed → archive_or_container
 ```
+
+The office-document fallback should be narrow. Avoid matching the phrase `word processing` by itself when the source category is broader than office documents.
+
+## Metrics to watch
+
+The run report should track both coverage and assignment precision:
+
+```text
+formats_with_method_profiles
+average_direct_method_profiles_per_format
+average_effective_method_profiles_per_format
+max_direct_method_profiles_per_format
+max_effective_method_profiles_per_format
+```
+
+The most useful precision metric is `average_direct_method_profiles_per_format`. If it rises unexpectedly, broad rules may be over-firing.
+
+`average_effective_method_profiles_per_format` includes inherited profiles, so it will naturally be higher.
 
 ## Interpretation
 
@@ -73,7 +106,8 @@ Before adding highly specific method profiles, check:
 
 - whether source fields needed by existing matching rules are actually imported;
 - whether common extensions are missing from existing profiles;
-- whether category-based fallback rules are available;
+- whether fallback-only category rules are available;
+- whether broad category rules are inflating assignments;
 - whether the unmatched formats truly need new profiles or only better assignment rules.
 
 ## Next diagnostics
@@ -82,6 +116,8 @@ After running against the real workbook, inspect:
 
 - total canonical records;
 - records with assigned method profiles;
+- average direct profiles per format;
+- average effective profiles per format;
 - records with category populated;
 - records with description populated;
 - records with MIME type populated;
