@@ -7,8 +7,8 @@ from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
 from registry_builder.hazard import BAND_TO_SCORE
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes, split_multi
+from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.utils import split_multi
 
 _NARA_NATIVE_SCALE = "nara_file_format_risk_matrix"
 _NARA_NATIVE_DIRECTION = "higher_is_safer"
@@ -147,25 +147,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         return list(self.config.get("uris") or self.default_uris)
 
     def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
-        for uri in self._uris():
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            suffix = Path(uri.split("?")[0]).suffix or ".csv"
-            local_path = snapshot_dir / f"{digest}{suffix}"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-                note="retrieval_mode=published_csv",
-            ))
-        return snapshots
+        return [
+            self.acquire_uri_snapshot(uri, suffix=Path(uri.split("?")[0]).suffix or ".csv", note="retrieval_mode=published_csv")
+            for uri in self._uris()
+        ]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
@@ -191,6 +176,8 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         "retrieval_mode": "published_csv",
                         "source_file": snap.uri,
                         "source_row": row_no,
+                        "snapshot_changed": snap.changed,
+                        "snapshot_from_cache": snap.from_cache,
                         "nara_preservation_action": action,
                         "nara_preservation_plan": plan,
                         "nara_preferred_tools": tools,
