@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from registry_builder.adapters import ADAPTERS
+from registry_builder.adapters import resolve_adapter
 from registry_builder.change_detection import compact_change_summary, detect_registry_changes
 from registry_builder.db import write_sqlite
+from registry_builder.identifier_rules import load_identifier_rules
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
 from registry_builder.models import CanonicalFormat, RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
@@ -311,6 +312,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     run_id = _new_run_id()
     config = load_config(config_path)
     offline = bool(offline or config.get("offline", False))
+    identifier_rules = load_identifier_rules(config.get("identifier_kinds"))
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
     storage_config = _storage_config(config)
@@ -346,9 +348,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
 
         try:
             source_type = source["type"]
-            adapter_cls = ADAPTERS.get(source_type)
-            if adapter_cls is None:
-                raise ValueError(f"No adapter registered for source type: {source_type}")
+            adapter_cls = resolve_adapter(source_type)
             source_config = dict(source)
             if offline:
                 source_config["offline"] = True
@@ -356,7 +356,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             snapshots = adapter.acquire()
             extracted = adapter.extract(snapshots)
             all_snapshots.extend(snapshots)
-            raw_records.extend(normalize_record(r) for r in extracted)
+            raw_records.extend(normalize_record(r, identifier_rules=identifier_rules) for r in extracted)
             source_summaries.append({
                 "source_id": source["id"],
                 "source_type": source_type,
@@ -385,7 +385,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
                 raise
             continue
 
-    registry = reconcile(raw_records)
+    registry = reconcile(raw_records, identifier_rules=identifier_rules)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     errors, warnings = validate_registry(registry)
     warning_summary = summarize_validation_warnings(warnings)
@@ -426,6 +426,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "collection_prefix": storage_config.get("collection_prefix"),
         },
         "sources": source_summaries,
+        "identifier_kinds": identifier_rules,
         "source_status_counts": dict(Counter(s.get("status", "unknown") for s in source_summaries)),
         "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in completed_sources)),
         "raw_records": len(raw_records),
