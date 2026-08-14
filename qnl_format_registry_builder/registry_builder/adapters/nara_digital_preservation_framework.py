@@ -153,14 +153,24 @@ def _release_date_from_text(value: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _kind_from_file_name(value: str) -> str | None:
+    name = Path(value).name
+    if re.search(r"PreservationActionPlan_FileFormats_20\d{6}\.csv$", name):
+        return "preservation_action_plan"
+    if re.search(r"File_Format_Risk_Matrix_20\d{6}_Numbered\.csv$", name):
+        return "risk_matrix_numbered"
+    return None
+
+
 class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     """Acquire and parse NARA Digital Preservation Framework data.
 
-    This is a source-level adapter. It supports three release modes:
+    This is a source-level adapter. It supports four release modes:
 
     - explicit_uris: use configured URIs exactly;
     - pinned: resolve the two dated NARA CSV filenames for a configured release;
-    - latest: discover the latest dated CSV pair from NARA's GitHub contents API.
+    - latest: discover the latest dated CSV pair from NARA's GitHub contents API;
+    - local_files: use administrator-supplied CSV files as source material.
     """
 
     type_name = "nara_digital_preservation_framework"
@@ -173,7 +183,15 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         mode = str(self.config.get("release_mode") or "").strip().lower()
         if not mode:
             return "explicit_uris" if self.config.get("uris") else "pinned"
-        aliases = {"explicit": "explicit_uris", "uris": "explicit_uris", "date": "pinned"}
+        aliases = {
+            "explicit": "explicit_uris",
+            "uris": "explicit_uris",
+            "date": "pinned",
+            "file": "local_files",
+            "files": "local_files",
+            "local_file": "local_files",
+            "manual": "local_files",
+        }
         return aliases.get(mode, mode)
 
     def _fallback_release_date(self) -> str:
@@ -206,6 +224,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 "release_date": release_date,
                 "github_ref": self._github_ref(),
                 "github_path": action_path,
+                "source_location": "remote_uri",
             },
             {
                 "uri": self._raw_uri_for_path(risk_path),
@@ -214,6 +233,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 "release_date": release_date,
                 "github_ref": self._github_ref(),
                 "github_path": risk_path,
+                "source_location": "remote_uri",
             },
         ]
         if resolution_error:
@@ -230,14 +250,75 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         return [
             {
                 "uri": uri,
-                "kind": "explicit_uri",
+                "kind": _kind_from_file_name(uri) or "explicit_uri",
                 "release_mode": "explicit_uris",
                 "release_date": release_date,
                 "github_ref": self._github_ref(),
                 "github_path": None,
+                "source_location": "remote_uri",
             }
             for uri in uris
         ]
+
+    def _local_file_entries(self, *, fallback: bool = False) -> list[Any]:
+        if fallback:
+            return list(
+                self.config.get("fallback_local_files")
+                or self.config.get("manual_fallback_files")
+                or self.config.get("fallback_files")
+                or []
+            )
+        return list(self.config.get("local_files") or self.config.get("files") or [])
+
+    def _local_file_sources(
+        self,
+        entries: list[Any] | None = None,
+        *,
+        release_mode: str = "local_files",
+        resolution_error: str | None = None,
+    ) -> list[dict[str, Any]]:
+        entries = self._local_file_entries() if entries is None else entries
+        if not entries:
+            raise ValueError("NARA release_mode local_files requires local_files or files")
+        sources: list[dict[str, Any]] = []
+        for entry in entries:
+            if isinstance(entry, str):
+                path = entry
+                item: dict[str, Any] = {}
+            elif isinstance(entry, dict):
+                item = dict(entry)
+                path = item.get("path") or item.get("local_path") or item.get("file") or item.get("uri")
+                if not path:
+                    raise ValueError(f"NARA local file entry requires path/local_path/file/uri: {entry!r}")
+            else:
+                raise TypeError(f"NARA local file entries must be strings or objects, got {type(entry).__name__}")
+            path_text = str(path)
+            release_date = item.get("release_date") or _release_date_from_text(path_text)
+            kind = item.get("kind") or _kind_from_file_name(path_text) or "local_file"
+            source = {
+                "uri": path_text,
+                "kind": kind,
+                "release_mode": release_mode,
+                "release_date": _normalize_release_date(release_date) if release_date else None,
+                "github_ref": item.get("github_ref") or self._github_ref(),
+                "github_path": item.get("github_path"),
+                "source_location": "local_file",
+                "admin_supplied": True,
+            }
+            for key in ("github_blob_sha", "github_html_url", "note"):
+                if item.get(key):
+                    source[key] = item[key]
+            if resolution_error:
+                source["release_resolution_error"] = resolution_error
+            sources.append(source)
+        return sources
+
+    def _fallback_local_file_sources(self, *, release_mode: str, resolution_error: str) -> list[dict[str, Any]] | None:
+        entries = self._local_file_entries(fallback=True)
+        if not entries:
+            return None
+        logger.warning("NARA latest discovery failed; using administrator-supplied local fallback files")
+        return self._local_file_sources(entries, release_mode=release_mode, resolution_error=resolution_error)
 
     def _fetch_github_directory(self, directory: str) -> list[dict[str, Any]]:
         uri = f"{_NARA_REPO_API_BASE}/{directory}?ref={self._github_ref()}"
@@ -282,6 +363,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 "github_path": path,
                 "github_blob_sha": item.get("sha"),
                 "github_html_url": item.get("html_url"),
+                "source_location": "remote_uri",
             })
         index = self._load_release_index()
         index["latest"] = {
@@ -297,8 +379,12 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         latest = self._load_release_index().get("latest") or {}
         sources = latest.get("sources") or []
         if not sources:
+            if resolution_error:
+                fallback = self._fallback_local_file_sources(release_mode="latest_local_fallback", resolution_error=resolution_error)
+                if fallback:
+                    return fallback
             raise FileNotFoundError(
-                "Offline NARA release_mode latest requires a cached .nara_release_index.json created by a previous online latest run"
+                "Offline NARA release_mode latest requires a cached .nara_release_index.json created by a previous online latest run or fallback_local_files"
             )
         out = []
         for source in sources:
@@ -316,6 +402,9 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             if self._release_index_path().exists():
                 logger.warning("NARA latest discovery failed (%s); using cached release index", exc)
                 return self._latest_sources_offline(release_mode="latest_cached_fallback", resolution_error=error)
+            fallback = self._fallback_local_file_sources(release_mode="latest_local_fallback", resolution_error=error)
+            if fallback:
+                return fallback
             fallback_date = self._fallback_release_date()
             logger.warning(
                 "NARA latest discovery failed (%s); falling back to pinned %s",
@@ -332,8 +421,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             release_date = _normalize_release_date(self.config.get("release_date") or _DEFAULT_NARA_RELEASE_DATE)
             return self._pinned_sources(release_date, release_mode="pinned")
         if mode == "latest":
-            return self._latest_sources_offline() if self.offline else self._latest_sources_with_fallback()
-        raise ValueError("NARA release_mode must be one of: explicit_uris, pinned, latest")
+            return self._latest_sources_offline(resolution_error="offline=true") if self.offline else self._latest_sources_with_fallback()
+        if mode == "local_files":
+            return self._local_file_sources()
+        raise ValueError("NARA release_mode must be one of: explicit_uris, pinned, latest, local_files")
 
     def acquire(self) -> list[SourceSnapshot]:
         snapshots: list[SourceSnapshot] = []
@@ -345,17 +436,29 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                     f"nara_release_mode={source.get('release_mode')}",
                     f"nara_release_date={source.get('release_date')}" if source.get("release_date") else None,
                     f"nara_file_kind={source.get('kind')}",
+                    f"source_location={source.get('source_location')}" if source.get("source_location") else None,
                     "release_resolution_error=true" if source.get("release_resolution_error") else None,
                 ] if x
             )
-            snapshots.append(
-                self.acquire_uri_snapshot(
-                    uri,
-                    suffix=Path(uri.split("?")[0]).suffix or ".csv",
-                    note=note,
-                    metadata={k: v for k, v in source.items() if k != "uri"},
+            metadata = {k: v for k, v in source.items() if k != "uri"}
+            if source.get("source_location") == "local_file":
+                snapshots.append(
+                    self.acquire_file_snapshot(
+                        uri,
+                        suffix=Path(uri).suffix or ".csv",
+                        note=note,
+                        metadata=metadata,
+                    )
                 )
-            )
+            else:
+                snapshots.append(
+                    self.acquire_uri_snapshot(
+                        uri,
+                        suffix=Path(uri.split("?")[0]).suffix or ".csv",
+                        note=note,
+                        metadata=metadata,
+                    )
+                )
         return snapshots
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
@@ -385,12 +488,14 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         "source_row": row_no,
                         "snapshot_changed": snap.changed,
                         "snapshot_from_cache": snap.from_cache,
+                        "source_location": metadata.get("source_location"),
                         "nara_release_mode": metadata.get("release_mode"),
                         "nara_release_date": metadata.get("release_date"),
                         "nara_file_kind": metadata.get("kind"),
                         "github_ref": metadata.get("github_ref"),
                         "github_path": metadata.get("github_path"),
                         "github_blob_sha": metadata.get("github_blob_sha"),
+                        "admin_supplied": metadata.get("admin_supplied"),
                         "release_resolution_error": metadata.get("release_resolution_error"),
                         "nara_preservation_action": action,
                         "nara_preservation_plan": plan,
