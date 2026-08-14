@@ -1,10 +1,10 @@
 import pytest
 
-from registry_builder.adapters.institution_policy_xlsx import _field, _get, _resolve_field_map
+from registry_builder.adapters.qnl_policy_xlsx import _field, _get, _resolve_field_map
 
 
 def test_get_does_not_fuzzy_bind_format_to_institution_format_id():
-    row = {"institution_format_id": "QNL_099_Comma_Separated_Values", "digital_file": "Comma Separated Values"}
+    row = {"qnl_format_id": "QNL_099_Comma_Separated_Values", "digital_file": "Comma Separated Values"}
     assert _get(row, ["format"]) == ""
     assert _get(row, ["digital_file"]) == "Comma Separated Values"
 
@@ -17,21 +17,21 @@ def test_configured_field_map_resolves_digital_file_header():
 
 
 def test_configured_field_map_accepts_multiple_candidate_headers():
-    raw_headers = ["QNL Format ID", "Digital file", "Description/Justification", "MIME", "Category/Plan"]
+    raw_headers = ["QNL Format ID", "Digital file", "Description/Justification", "MIME type(s)", "Category/Plan(s)"]
     field_map = _resolve_field_map(
         {
             "field_map": {
                 "description": ["Description and Justification", "Description/Justification"],
-                "mime_types": ["MIME Type", "MIME"],
-                "category": ["Category", "Category/Plan"],
+                "mime_types": ["MIME", "MIME type(s)"],
+                "category": ["Category", "Category/Plan(s)"],
             }
         },
         raw_headers,
     )
     row = {
         "description_justification": "Domain-specific XML format for chemistry data",
-        "mime": "chemical/x-cml",
-        "category_plan": "Scientific data",
+        "mime_type_s": "chemical/x-cml",
+        "category_plan_s": "Scientific data",
     }
     assert _field(row, field_map, "description", []) == "Domain-specific XML format for chemistry data"
     assert _field(row, field_map, "mime_types", []) == "chemical/x-cml"
@@ -41,3 +41,21 @@ def test_configured_field_map_accepts_multiple_candidate_headers():
 def test_configured_field_map_missing_column_fails_loudly():
     with pytest.raises(ValueError):
         _resolve_field_map({"field_map": {"name": "Digital file"}}, ["QNL Format ID", "File Extension(s)"])
+
+
+def test_configured_field_map_reports_all_missing_columns():
+    with pytest.raises(ValueError) as exc:
+        _resolve_field_map(
+            {
+                "field_map": {
+                    "mime_types": ["MIME", "MIME Type"],
+                    "category": ["Category/Plan", "Category"],
+                    "preferred_tools": ["Preferred Processing and Conversion Tool(s)"],
+                }
+            },
+            ["QNL Format ID", "Digital file", "File Extension(s)"],
+        )
+    message = str(exc.value)
+    assert "mime_types" in message
+    assert "category" in message
+    assert "preferred_tools" in message
