@@ -40,7 +40,7 @@ nara_digital_preservation_framework
 pronom_registry
 ```
 
-Third-party adapters can be loaded directly from config with a dotted path:
+Third-party adapters can be loaded directly from config with an explicit `module:ClassName` plugin path:
 
 ```json
 {
@@ -51,7 +51,22 @@ Third-party adapters can be loaded directly from config with a dotted path:
 }
 ```
 
-The resolver first checks the built-in registry. If the value is not a built-in short name, it imports the dotted path. This means external packages can ship adapters without changing `registry_builder/adapters/__init__.py`.
+The resolver first checks the built-in registry. If the value is not a built-in short name, it imports the `module:ClassName` path and validates that the resolved class is a `SourceAdapter` subclass. This means external packages can ship adapters without changing `registry_builder/adapters/__init__.py`.
+
+Use the colon form only. The older-looking `module.ClassName` form is intentionally not supported because it is ambiguous: the final component may be either a module or a class attribute.
+
+### Plugin trust boundary
+
+Plugin configuration is a trusted-code boundary. Importing a plugin module executes that module's top-level Python code. Only use plugin paths from configuration controlled by trusted maintainers, and install third-party plugin packages through the same review process used for other executable dependencies.
+
+Bad plugin specs fail early:
+
+```text
+wrong module path      -> Plugin module ... not found
+missing dependency     -> plugin exists but one of its dependencies is missing
+missing class name     -> Module ... has no attribute ...
+wrong base class       -> not a subclass of SourceAdapter / RegistryStore
+```
 
 The same pattern works for storage backends:
 
@@ -155,7 +170,7 @@ class ExampleSourceAdapter(SourceAdapter):
         return records
 ```
 
-You can either add this adapter to the built-in registry, or use the dotted path directly in config:
+You can either add this adapter to the built-in registry, or use the `module:ClassName` plugin path directly in config:
 
 ```json
 {
@@ -184,7 +199,7 @@ Common fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | Unique configured source instance. Used in snapshots and evidence. |
-| `type` | Built-in adapter short name or dotted path. |
+| `type` | Built-in adapter short name or `module:ClassName` plugin path. |
 | `enabled` | Whether the pipeline runs this source. |
 | `required` | Whether source failure aborts the whole run. Defaults to required when not set. |
 | `retrieval_mode` | Human-readable source retrieval mode. |
@@ -364,7 +379,7 @@ Every new adapter should have tests for:
 4. Snapshot metadata and SHA handling.
 5. Offline/cache behavior if supported.
 6. Failure behavior for missing required config.
-7. Dotted-path loading if it ships outside this repo.
+7. `module:ClassName` plugin loading if it ships outside this repo.
 8. A pipeline-level smoke test if the adapter is expected to be used in production.
 
 Every new storage backend should have tests for:
@@ -373,7 +388,7 @@ Every new storage backend should have tests for:
 2. Current registry view filtering.
 3. Identifier lookup.
 4. Change event persistence.
-5. Dotted-path loading.
+5. `module:ClassName` plugin loading.
 
 ## Export adapter direction
 
