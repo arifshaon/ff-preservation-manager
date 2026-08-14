@@ -13,6 +13,8 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
     ids = set()
     identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
     verified_identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
+    qnl_policy_id_seen: dict[str, list[str]] = defaultdict(list)
+
     for fmt in registry:
         if fmt.canonical_id in ids:
             errors.append(f"duplicate canonical_id: {fmt.canonical_id}")
@@ -25,10 +27,22 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
         for claim in fmt.identifier_claims:
             if claim.get("verified"):
                 verified_identifier_seen[(claim.get("kind"), claim.get("value"))].append(fmt.canonical_id)
+        for qnl in fmt.qnl_policy_overlay:
+            qnl_format_id = (qnl.get("qnl_format_id") or "").strip()
+            if qnl_format_id:
+                qnl_policy_id_seen[qnl_format_id].append(
+                    f"{fmt.canonical_id}@row:{qnl.get('source_row', 'unknown')}"
+                )
+
     for (kind, value), owners in verified_identifier_seen.items():
         if len(set(owners)) > 1 and kind in _STRONG_IDENTIFIER_KINDS:
             errors.append(f"verified identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
     for (kind, value), owners in identifier_seen.items():
         if len(set(owners)) > 1 and kind not in _STRONG_IDENTIFIER_KINDS:
             warnings.append(f"weak identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
+    for qnl_format_id, owners in qnl_policy_id_seen.items():
+        if len(owners) > 1:
+            warnings.append(
+                f"QNL policy identifier {qnl_format_id} appears in multiple source rows/canonical records: {owners}"
+            )
     return errors, warnings
