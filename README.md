@@ -2,7 +2,7 @@
 
 File Format Preservation Manager is a repository for tools and workflows that help institutions record, assess, monitor, and manage file-format preservation risks. The focus is not only on listing file formats, but on maintaining evidence, risk assessments, decisions, recommended actions, change history, and operational follow-up work in a repeatable way.
 
-The repository is intended to hold multiple related components. Each component should be self-contained, documented in its own directory, and usable on its own where possible. The root README explains how the components fit together and where to start.
+The repository is intended to hold multiple related components. Each component should be self-contained, documented in its own directory, and usable on its own where possible.
 
 ## Repository structure
 
@@ -19,11 +19,11 @@ At the moment, `qnl_format_registry_builder` is the main implemented component.
 
 It runs a repeatable pipeline over configured sources such as:
 
-- institutional file-format policy workbooks;
-- NARA Digital Preservation Framework CSV releases;
+- NARA Digital Preservation Framework releases;
 - PRONOM registry data;
 - PRONOM/DROID XML signature data;
 - LOC FDD XML records;
+- institutional file-format policy workbooks;
 - structured JSON source packages;
 - future third-party adapters loaded by explicit `module:ClassName` plugin path.
 
@@ -38,7 +38,7 @@ Source acquisition
   -> identifier normalization
   -> conservative reconciliation
   -> hazard/readiness/trend assessment
-  -> action and method-profile assignment
+  -> method-profile assignment
   -> storage through a selected RegistryStore backend
   -> baseline/change detection
   -> optional exports and reports
@@ -55,30 +55,28 @@ Source acquisition
 - Configurable identifier authority and strong-key matching rules.
 - Generic identifier namespaces, so new sources do not need new model fields.
 - Source-owned native hazard scale/direction metadata.
+- Source-by-source augmentation using active evidence contributions.
 - Pluggable source adapters and storage backends through short names or explicit `module:ClassName` plugin paths.
 - Storage backends: memory, file/JSON document store, and MongoDB.
 - Optional exports: JSON, JSONL, CSV, SQLite, Markdown reports.
 - Change detection between runs, including bulk-change collapse into source-level events.
 
-### Where to start
-
-For implementation and operation details, start inside the component directory:
-
-```text
-qnl_format_registry_builder/README.md
-```
-
-Useful documents:
+## Where to start
 
 | Need | Document |
 | --- | --- |
 | Run the format registry builder | [`qnl_format_registry_builder/README.md`](qnl_format_registry_builder/README.md) |
 | Find the right documentation page | [`qnl_format_registry_builder/docs/DOCUMENTATION_MAP.md`](qnl_format_registry_builder/docs/DOCUMENTATION_MAP.md) |
-| Understand the architecture | [`qnl_format_registry_builder/docs/ARCHITECTURE.md`](qnl_format_registry_builder/docs/ARCHITECTURE.md) |
+| Interpret registry outputs and review fields | [`qnl_format_registry_builder/docs/READING_THE_REGISTRY.md`](qnl_format_registry_builder/docs/READING_THE_REGISTRY.md) |
+| Understand architecture and source-adapter boundaries | [`qnl_format_registry_builder/docs/ARCHITECTURE.md`](qnl_format_registry_builder/docs/ARCHITECTURE.md) |
+| Understand source-by-source augmentation | [`qnl_format_registry_builder/docs/INCREMENTAL_SOURCE_UPDATES.md`](qnl_format_registry_builder/docs/INCREMENTAL_SOURCE_UPDATES.md) |
+| Understand verified identifier reconciliation | [`qnl_format_registry_builder/docs/IDENTIFIER_RECONCILIATION.md`](qnl_format_registry_builder/docs/IDENTIFIER_RECONCILIATION.md) |
 | Configure existing adapters | [`qnl_format_registry_builder/docs/ADAPTER_REFERENCE.md`](qnl_format_registry_builder/docs/ADAPTER_REFERENCE.md) |
 | Implement a new adapter/backend | [`qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
 | Understand source retrieval, cache, offline mode, and fallbacks | [`qnl_format_registry_builder/docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](qnl_format_registry_builder/docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md) |
 | Configure storage and exports | [`qnl_format_registry_builder/docs/STORAGE_AND_EXPORT_CONFIG.md`](qnl_format_registry_builder/docs/STORAGE_AND_EXPORT_CONFIG.md) |
+| Understand MongoDB collections and fields | [`qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md) |
+| Contribute safely | [`qnl_format_registry_builder/CONTRIBUTING.md`](qnl_format_registry_builder/CONTRIBUTING.md) |
 
 ## Quick start for the current component
 
@@ -90,7 +88,7 @@ python -m pip install -e ".[dev,mongo]"
 pytest
 ```
 
-Run the sample pipeline:
+Run the default NARA quickstart:
 
 ```bash
 python -m registry_builder run \
@@ -99,7 +97,15 @@ python -m registry_builder run \
   --out output
 ```
 
-Run from cached snapshots only:
+The default config downloads the pinned public NARA Digital Preservation Framework CSVs from GitHub and produces a real registry with external hazard evidence.
+
+Read the generated outputs with:
+
+```text
+qnl_format_registry_builder/docs/READING_THE_REGISTRY.md
+```
+
+Run from cached snapshots only after an online run has populated the cache:
 
 ```bash
 python -m registry_builder run \
