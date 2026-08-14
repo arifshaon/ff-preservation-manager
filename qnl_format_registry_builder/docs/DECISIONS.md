@@ -38,9 +38,27 @@ Consequences:
 - Keep `qnl_policy_xlsx` only as a deprecated compatibility alias.
 - Add `config/institutions/qnl.example.json` as the first institutional profile example.
 
-## 2026-08-14: NARA CSV adapter and conservative external matching
+## 2026-08-14: Source-first adapter names
 
-Decision: add `nara_preservation_csv` as the first real external hazard-source adapter.
+Decision: source adapters should be named for the authority/source, not for the current file representation.
+
+Rationale:
+
+- Sources such as NARA, PRONOM and LOC may expose CSV, XLSX, XML, JSON, APIs, linked data, or web pages at different times.
+- The architecture needs a stable source-level boundary: the adapter understands the source and can add retrieval modes internally.
+- Representation-specific names make the project look like it expects every source to provide a CSV or XML file.
+
+Consequences:
+
+- Prefer `nara_digital_preservation_framework` over `nara_preservation_csv`.
+- Prefer `pronom_registry` over representation-specific PRONOM names for new PRONOM work.
+- Keep `nara_preservation_csv` as a deprecated compatibility alias because it already existed.
+- Keep `pronom_droid_xml` as a representation-specific adapter for DROID signature XML.
+- Document retrieval modes such as `published_csv` and `github_json` separately from source identity.
+
+## 2026-08-14: NARA source adapter and conservative external matching
+
+Decision: add `nara_digital_preservation_framework` as the first real external hazard-source adapter, with `published_csv` as the current retrieval mode.
 
 Rationale:
 
@@ -51,8 +69,24 @@ Rationale:
 
 Consequences:
 
-- Parse both NARA preservation action plan CSV and NARA numbered risk matrix CSV.
+- Parse both NARA preservation action plan CSV and NARA numbered risk matrix CSV under the source-level NARA adapter.
 - Treat NARA Format IDs as verified NARA identifiers.
-- Keep PUIDs found in NARA PRONOM URLs as unverified PUID claims unless PRONOM/DROID confirms them.
+- Keep PUIDs found in NARA PRONOM URLs as unverified PUID claims unless PRONOM confirms them.
 - Store NARA native numeric risk rating and `native_direction: higher_is_safer` alongside normalized hazard rating.
 - Allow `name + extension` weak matching only when it uniquely bridges a non-authority/institutional group to exactly one verified authority group.
+
+## 2026-08-14: PRONOM registry GitHub JSON adapter
+
+Decision: add `pronom_registry` as the source-level PRONOM adapter, with `github_json` as the current implemented retrieval mode.
+
+Rationale:
+
+- PRONOM data is available as a GitHub JSON dataset, which avoids scraping PRONOM web pages.
+- PUID authority should come from PRONOM source data, not from PUID strings copied into unrelated spreadsheets or URLs.
+- Targeted PUID retrieval and full tree-based retrieval are both useful: targeted runs are fast for tests; tree-based runs support source refresh.
+
+Consequences:
+
+- `pronom_registry` can retrieve explicit PUIDs, explicit raw JSON URIs, or the recursive GitHub tree listing.
+- PUIDs emitted by `pronom_registry` are verified PUID identifiers.
+- `pronom_droid_xml` remains available as a DROID XML representation-specific adapter.
