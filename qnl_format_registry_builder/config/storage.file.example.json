@@ -1,0 +1,10 @@
+{
+  "storage": {
+    "type": "file",
+    "path": "output/file_registry_store"
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "Storage-only run. The registry is persisted as JSON documents under storage.path. Set exports.enabled true only when separate review/export files are needed."
+  }
+}
