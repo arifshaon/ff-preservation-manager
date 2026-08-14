@@ -175,7 +175,11 @@ class FileRegistryStore(RegistryStore):
         self._write("assessment_changes", str(stored["change_id"]), stored)
 
     def get_current_registry_view(self) -> list[dict[str, Any]]:
-        records = self._read_collection("canonical_formats")
+        records = [
+            record
+            for record in self._read_collection("canonical_formats")
+            if record.get("current", True) is not False
+        ]
         return sorted(records, key=lambda x: str(x.get("preferred_name") or "").lower())
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
@@ -183,7 +187,9 @@ class FileRegistryStore(RegistryStore):
             if identifier.get("type") == identifier_type and identifier.get("value") == value:
                 format_id = identifier.get("format_id") or identifier.get("canonical_id")
                 if format_id:
-                    return self._read_one("canonical_formats", str(format_id))
+                    record = self._read_one("canonical_formats", str(format_id))
+                    if record and record.get("current", True) is not False:
+                        return record
         return None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
@@ -197,7 +203,7 @@ class FileRegistryStore(RegistryStore):
         records = []
         for format_id in sorted(ids):
             record = self._read_one("canonical_formats", format_id)
-            if record:
+            if record and record.get("current", True) is not False:
                 records.append(record)
         return records
 
