@@ -131,7 +131,7 @@ def test_source_by_source_runs_reuse_prior_evidence_and_augment_canonical_record
     first = run_pipeline(nara_config, tmp_path / "work-nara", tmp_path / "out-nara")
     assert first["canonical_formats"] == 1
     assert first["raw_records_extracted"] == 1
-    assert first["prior_source_records_reused"] == 0
+    assert first["stored_source_records_used_for_augmentation"] == 0
     assert first["active_source_records"] == 1
 
     pronom_source = tmp_path / "pronom.json"
@@ -153,7 +153,7 @@ def test_source_by_source_runs_reuse_prior_evidence_and_augment_canonical_record
 
     assert second["canonical_formats"] == 1
     assert second["raw_records_extracted"] == 1
-    assert second["prior_source_records_reused"] == 1
+    assert second["stored_source_records_used_for_augmentation"] == 1
     assert second["active_source_records"] == 2
     assert second["change_detection"]["change_counts"].get("record_removed", 0) == 0
 
