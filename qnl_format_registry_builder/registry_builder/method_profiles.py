@@ -20,12 +20,12 @@ def load_method_profile_config(path: str | Path) -> dict[str, Any]:
 def assign_method_profiles(registry: Iterable[CanonicalFormat], config: dict[str, Any]) -> list[CanonicalFormat]:
     """Assign reusable preservation method profiles to canonical formats.
 
-    The assignment result is stored as a generated current view on each
-    CanonicalFormat. It is not intended to replace institutional policy review.
-    The goal is to provide scalable action-plan templates such as XML-based
-    structured text, raster image, office document, audiovisual,
-    archive/container, etc., plus narrow modifiers like chemistry/scientific
-    data for CML.
+    Primary rules should be precise, usually based on identifiers such as
+    extensions or verified source evidence. Fallback rules are broader category
+    catches and are applied only when no primary rule matched. This prevents
+    broad institutional categories such as "Textual and Word Processing" from
+    adding office-document guidance to formats already identified as FASTA, CIF,
+    XSD, or another more precise non-office format.
     """
     for fmt in registry:
         assigned = _matching_profile_ids(fmt, config.get("assignment_rules", []))
@@ -35,12 +35,14 @@ def assign_method_profiles(registry: Iterable[CanonicalFormat], config: dict[str
 
 def build_preservation_method(profile_ids: list[str], config: dict[str, Any]) -> dict[str, Any]:
     profiles = config.get("profiles", {})
+    direct_ids = _dedupe(profile_ids)
     ordered_ids: list[str] = []
-    for profile_id in profile_ids:
+    for profile_id in direct_ids:
         _append_with_inheritance(profile_id, profiles, ordered_ids)
 
     method: dict[str, Any] = {
         "profile_version": config.get("version", "unversioned"),
+        "direct_profile_ids": direct_ids,
         "assigned_profile_ids": ordered_ids,
         "steps": [],
         "validation": [],
@@ -76,13 +78,27 @@ def _append_with_inheritance(profile_id: str, profiles: dict[str, Any], ordered_
 
 
 def _matching_profile_ids(fmt: CanonicalFormat, rules: list[dict[str, Any]]) -> list[str]:
-    matched: list[str] = []
-    for rule in rules:
-        if _matches(fmt, rule.get("match", {})):
-            profile_id = rule.get("profile")
-            if profile_id and profile_id not in matched:
-                matched.append(profile_id)
-    return matched
+    """Return direct profile ids for a format.
+
+    Rules marked `fallback_only: true` are evaluated only if no primary rules
+    matched. This makes category rules a safety net rather than an additive
+    broad classifier.
+    """
+    primary = [
+        rule.get("profile")
+        for rule in rules
+        if not rule.get("fallback_only") and _matches(fmt, rule.get("match", {}))
+    ]
+    primary = _dedupe([profile_id for profile_id in primary if profile_id])
+    if primary:
+        return primary
+
+    fallback = [
+        rule.get("profile")
+        for rule in rules
+        if rule.get("fallback_only") and _matches(fmt, rule.get("match", {}))
+    ]
+    return _dedupe([profile_id for profile_id in fallback if profile_id])
 
 
 def _matches(fmt: CanonicalFormat, matcher: dict[str, Any]) -> bool:
@@ -107,6 +123,14 @@ def _matches(fmt: CanonicalFormat, matcher: dict[str, Any]) -> bool:
         if expected and actual.isdisjoint(expected):
             return False
     return True
+
+
+def _dedupe(values: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
 
 
 def _extend_unique(target: list[Any], values: list[Any]) -> None:
