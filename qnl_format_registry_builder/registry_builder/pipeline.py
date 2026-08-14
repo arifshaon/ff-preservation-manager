@@ -36,6 +36,30 @@ def maybe_assign_method_profiles(registry, config: dict[str, Any], config_path: 
     return assign_method_profiles(registry, profile_config), profile_config.get("version")
 
 
+def _average(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 3)
+
+
+def _method_profile_metrics(registry) -> dict[str, Any]:
+    direct_counts = [
+        len(fmt.preservation_method.get("direct_profile_ids", []))
+        for fmt in registry
+    ]
+    effective_counts = [
+        len(fmt.preservation_method.get("assigned_profile_ids", []))
+        for fmt in registry
+    ]
+    return {
+        "formats_with_method_profiles": sum(1 for count in effective_counts if count > 0),
+        "average_direct_method_profiles_per_format": _average(direct_counts),
+        "average_effective_method_profiles_per_format": _average(effective_counts),
+        "max_direct_method_profiles_per_format": max(direct_counts, default=0),
+        "max_effective_method_profiles_per_format": max(effective_counts, default=0),
+    }
+
+
 def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path) -> dict[str, Any]:
     started_at = utc_now_iso()
     config = load_config(config_path)
@@ -70,6 +94,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     registry = reconcile(raw_records)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     errors, warnings = validate_registry(registry)
+    method_metrics = _method_profile_metrics(registry)
 
     registry_dicts = [fmt.to_dict() for fmt in registry]
     write_jsonl(outdir / "registry.jsonl", registry_dicts)
@@ -92,11 +117,12 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "loc_ids": ";".join(ids.get("loc", [])),
             "nara_ids": ";".join(ids.get("nara", [])),
             "has_institution_policy": "yes" if d.get("institution_policy_overlays") else "no",
+            "direct_method_profiles": ";".join(method.get("direct_profile_ids", [])),
             "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
             "source_count": len(d.get("source_records", [])),
         })
     write_csv(outdir / "registry.csv", csv_rows, [
-        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_institution_policy", "method_profiles", "source_count"
+        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_institution_policy", "direct_method_profiles", "method_profiles", "source_count"
     ])
 
     write_sqlite(outdir / "registry.sqlite", registry)
@@ -111,7 +137,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
         "method_profiles_enabled": bool(config.get("method_profiles", {}).get("enabled", False)),
         "method_profile_version": method_profile_version,
-        "formats_with_method_profiles": sum(1 for x in registry if x.preservation_method.get("assigned_profile_ids")),
+        **method_metrics,
         "validation_errors": errors,
         "validation_warnings": warnings,
         "outputs": ["registry.json", "registry.jsonl", "registry.csv", "registry.sqlite", "source_snapshots.json", "coverage_report.md"],
@@ -141,6 +167,8 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Institutional policy formats missing PUID: {len(missing_puid)}",
         f"- Institutional policy formats missing LOC identifier: {len(missing_loc)}",
         f"- Canonical formats with preservation method profiles: {len(with_methods)}",
+        f"- Average direct method profiles per format: {report.get('average_direct_method_profiles_per_format', 0)}",
+        f"- Average effective method profiles per format: {report.get('average_effective_method_profiles_per_format', 0)}",
         "",
         "## Source runs",
         "",
