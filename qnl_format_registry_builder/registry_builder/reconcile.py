@@ -25,6 +25,10 @@ def _all_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[I
     return identifiers
 
 
+def _institution_policy(record: RawFormatRecord) -> dict:
+    return record.institution_policy or record.qnl or {}
+
+
 def strongest_key(record: RawFormatRecord) -> tuple[str, str]:
     """Return the strongest safe matching key for a raw record.
 
@@ -89,12 +93,20 @@ def _first_score(values: list[float | None]) -> float | None:
     return next((x for x in values if x is not None), None)
 
 
+def _local_risk_score(policy: dict) -> float | None:
+    for key in ("local_risk_level", "risk_level", "spreadsheet_risk_level"):
+        score = _risk_to_score(policy.get(key))
+        if score is not None:
+            return score
+    return None
+
+
 def _hazard_assessment(cf: CanonicalFormat) -> dict:
     external_score = _first_score([_hazard_score_from_dict(x) for x in cf.external_hazard])
-    qnl_score = _first_score([_risk_to_score(x.get("spreadsheet_risk_level")) for x in cf.qnl_policy_overlay])
-    result = reconcile_hazard(external_score, qnl_score)
+    institution_score = _first_score([_local_risk_score(x) for x in cf.institution_policy_overlays])
+    result = reconcile_hazard(external_score, institution_score)
     result["computed_at"] = utc_now_iso()
-    result["basis_notes"] = "Hazard is reconciled from external and QNL estimators; scores are not added."
+    result["basis_notes"] = "Hazard is reconciled from external and institutional estimators; scores are not added."
     return result
 
 
@@ -139,8 +151,9 @@ def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
                 "source_record_id": r.source_record_id,
                 "urls": r.urls,
             })
-            if r.qnl:
-                cf.qnl_policy_overlay.append(r.qnl)
+            policy = _institution_policy(r)
+            if policy:
+                cf.institution_policy_overlays.append(policy)
             if r.hazard:
                 cf.external_hazard.append(r.hazard | {"source_id": r.source_id})
             if r.readiness:
