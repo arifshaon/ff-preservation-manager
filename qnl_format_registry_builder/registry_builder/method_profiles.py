@@ -21,10 +21,11 @@ def assign_method_profiles(registry: Iterable[CanonicalFormat], config: dict[str
     """Assign reusable preservation method profiles to canonical formats.
 
     The assignment result is stored as a generated current view on each
-    CanonicalFormat. It is not intended to replace QNL policy review. The goal
-    is to provide scalable action-plan templates such as XML-based structured
-    text, raster image, office document, audiovisual, archive/container, etc.,
-    plus narrow modifiers like chemistry/scientific data for CML.
+    CanonicalFormat. It is not intended to replace institutional policy review.
+    The goal is to provide scalable action-plan templates such as XML-based
+    structured text, raster image, office document, audiovisual,
+    archive/container, etc., plus narrow modifiers like chemistry/scientific
+    data for CML.
     """
     for fmt in registry:
         assigned = _matching_profile_ids(fmt, config.get("assignment_rules", []))
