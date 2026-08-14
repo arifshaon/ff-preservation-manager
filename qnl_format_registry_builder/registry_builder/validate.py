@@ -13,7 +13,7 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
     ids = set()
     identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
     verified_identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
-    qnl_policy_id_seen: dict[str, list[str]] = defaultdict(list)
+    institution_policy_id_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
 
     for fmt in registry:
         if fmt.canonical_id in ids:
@@ -27,11 +27,12 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
         for claim in fmt.identifier_claims:
             if claim.get("verified"):
                 verified_identifier_seen[(claim.get("kind"), claim.get("value"))].append(fmt.canonical_id)
-        for qnl in fmt.qnl_policy_overlay:
-            qnl_format_id = (qnl.get("qnl_format_id") or "").strip()
-            if qnl_format_id:
-                qnl_policy_id_seen[qnl_format_id].append(
-                    f"{fmt.canonical_id}@row:{qnl.get('source_row', 'unknown')}"
+        for policy in fmt.institution_policy_overlays:
+            institution_id = (policy.get("institution_id") or "unknown").strip()
+            institution_format_id = (policy.get("institution_format_id") or "").strip()
+            if institution_format_id:
+                institution_policy_id_seen[(institution_id, institution_format_id)].append(
+                    f"{fmt.canonical_id}@row:{policy.get('source_row', 'unknown')}"
                 )
 
     for (kind, value), owners in verified_identifier_seen.items():
@@ -40,9 +41,9 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
     for (kind, value), owners in identifier_seen.items():
         if len(set(owners)) > 1 and kind not in _STRONG_IDENTIFIER_KINDS:
             warnings.append(f"weak identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
-    for qnl_format_id, owners in qnl_policy_id_seen.items():
+    for (institution_id, institution_format_id), owners in institution_policy_id_seen.items():
         if len(owners) > 1:
             warnings.append(
-                f"QNL policy identifier {qnl_format_id} appears in multiple source rows/canonical records: {owners}"
+                f"institutional policy identifier {institution_id}:{institution_format_id} appears in multiple source rows/canonical records: {owners}"
             )
     return errors, warnings
