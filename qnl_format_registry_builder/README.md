@@ -52,6 +52,7 @@ Key documents:
 This implementation includes:
 
 - source-adapter architecture;
+- dotted-path loading for external source adapters and storage backends, so third-party packages do not need core registry edits;
 - repeatable local runs from a JSON config file;
 - immutable source snapshots with SHA-256 hashes;
 - content-addressed snapshot cache under `work/snapshots/<source_id>/`;
@@ -65,20 +66,22 @@ This implementation includes:
   - LOC FDD XML records;
   - NARA Digital Preservation Framework data;
 - deprecated compatibility aliases for older/narrower adapter names such as `qnl_policy_xlsx` and `nara_preservation_csv`;
-- normalization of extensions, MIME types, PUIDs, LOC IDs, NARA IDs and related identifiers;
-- conservative identifier-led reconciliation;
+- generic identifier namespaces through `Identifier(kind, value, ...)`, with configurable strength and authority verification rules;
+- compatibility mirrors for older typed identifier fields such as `puids`, `loc_ids`, and `nara_ids`;
+- conservative identifier-led reconciliation using configured strong identifier kinds;
 - institution policy overlays attached to canonical format records;
 - external hazard reconciliation against institutional estimators where available;
-- NARA native rating preservation with explicit native scale direction;
+- native external rating preservation with adapter-supplied scale and direction metadata;
 - baseline-vs-change detection across runs;
 - bulk change collapse into source-level events when a source/configuration shift touches a large fraction of the registry;
 - reusable preservation method profiles assigned after reconciliation;
 - `RegistryStore` persistence with `memory`, `file`/`json_file`, and `mongodb` backends;
+- a narrowed `RegistryStore` extension contract based on generic `upsert()` and `query()` methods, with concrete shared helper methods;
 - MongoDB collections for runs, source snapshots, source records, canonical formats, identifiers, institutional overlays, hazard assessments, readiness assessments, trend observations, and change records;
 - optional JSON, JSONL, CSV, SQLite and Markdown exports;
 - coverage reporting;
 - validation checks;
-- tests for source adapters, reconciliation, hazard reconciliation, storage persistence, MongoDB-safe serialization, change detection, cache/offline behavior, and preservation method profiles.
+- tests for source adapters, reconciliation, hazard reconciliation, storage persistence, MongoDB-safe serialization, change detection, cache/offline behavior, plugin loading, configurable identifier rules, and preservation method profiles.
 
 ## Installation
 
@@ -128,6 +131,60 @@ output/coverage_report.md
 ```
 
 These files are optional export products, not the registry storage layer.
+
+## External plugin loading
+
+Built-in adapters and storage backends can still be referenced by short names:
+
+```json
+{
+  "type": "nara_digital_preservation_framework"
+}
+```
+
+External packages can be referenced directly by dotted path:
+
+```json
+{
+  "id": "dpc_bit_list",
+  "type": "mypkg.adapters.dpc:DpcBitListAdapter",
+  "enabled": true,
+  "required": false
+}
+```
+
+External storage backends use the same pattern:
+
+```json
+{
+  "storage": {
+    "type": "mypkg.storage.sql:SqlRegistryStore"
+  }
+}
+```
+
+## Identifier rules
+
+New identifier namespaces are configured, not hardcoded:
+
+```json
+{
+  "identifier_kinds": {
+    "dpc": {
+      "strength": "strong",
+      "verified_from": ["dpc_bit_list"]
+    }
+  }
+}
+```
+
+A third-party adapter can emit:
+
+```python
+Identifier("dpc", "DPC-001", "dpc_bit_list", False, source_record_id)
+```
+
+Normalization verifies it because `dpc_bit_list` is listed in `verified_from`, and reconciliation can use it as a strong identity key because `strength` is `strong`.
 
 ## Source retrieval modes, cache, and fallback logic
 
@@ -212,20 +269,7 @@ Use `latest` for quarterly refresh runs. Its fallback order is:
 4. pinned fallback_release_date
 ```
 
-If a fallback is used, the snapshot metadata records the fallback mode and original error. For example:
-
-```text
-release_mode: latest_cached_fallback
-release_resolution_error: HTTPError: HTTP Error 403
-```
-
-or:
-
-```text
-release_mode: latest_local_fallback
-source_location: local_file
-admin_supplied: true
-```
+If a fallback is used, the snapshot metadata records the fallback mode and original error.
 
 Use `local_files` when an admin has downloaded and staged the NARA CSVs:
 
@@ -374,35 +418,34 @@ qnl_policy_xlsx
 
 New configurations should use `institution_policy_xlsx`.
 
-## Implementing or configuring adapters
+## External source adapters
 
-For implementation logic, read these in order:
+The preferred NARA adapter is source-level:
 
-1. [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md)
-2. [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md)
-3. [`docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md)
+```text
+nara_digital_preservation_framework
+```
 
-The source adapter contract is:
+Its current retrieval mode is `published_csv`, using NARA's public Digital Preservation Framework CSV files. The deprecated `nara_preservation_csv` adapter name remains available only as a compatibility alias.
+
+The preferred PRONOM adapter is:
+
+```text
+pronom_registry
+```
+
+Its current retrieval mode is `github_json`, using PRONOM's public GitHub JSON dataset. The existing `pronom_droid_xml` adapter remains available for DROID signature XML.
+
+## Source adapter pattern
+
+Each source adapter implements two methods:
 
 ```python
 acquire() -> list[SourceSnapshot]
 extract(snapshots) -> list[RawFormatRecord]
 ```
 
-Source adapters acquire and parse source material. They do not persist directly to MongoDB or write exports. Persistence belongs to `RegistryStore`; optional files belong to exporters.
-
-The implemented source adapter types are documented in `docs/ADAPTER_REFERENCE.md`:
-
-```text
-standard_json
-institution_policy_xlsx
-nara_digital_preservation_framework
-nara_preservation_csv      # deprecated alias
-pronom_registry
-pronom_droid_xml
-loc_fdd_xml
-qnl_policy_xlsx            # deprecated alias
-```
+Source adapters understand source acquisition and parsing. They do not persist directly to MongoDB. Persistence belongs to `RegistryStore`; exports belong to exporter adapters.
 
 ## Storage adapter pattern
 
@@ -416,7 +459,7 @@ file / json_file
 mongodb
 ```
 
-Future backends can be added without changing source adapters or assessment logic by implementing the `RegistryStore` interface in `registry_builder/storage/base.py`.
+Future backends can be added without changing source adapters or assessment logic by implementing the generic `RegistryStore` core in `registry_builder/storage/base.py`.
 
 ## Export direction
 
