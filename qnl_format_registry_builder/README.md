@@ -2,7 +2,7 @@
 
 This project is a **registry-building system**, not a manually curated static registry.
 
-It builds a local file-format registry by running a repeatable pipeline over configured source datasets such as an institutional policy spreadsheet, PRONOM/DROID XML, LOC FDD XML, NARA or other standardized source packages, and future adapters.
+It builds a local file-format registry by running a repeatable pipeline over configured sources such as an institutional policy spreadsheet, PRONOM registry data, PRONOM/DROID XML, LOC FDD XML, NARA Digital Preservation Framework data, and future adapters.
 
 ## Core principle
 
@@ -29,16 +29,9 @@ The pipeline follows the agreed preservation-risk model:
 
 ## Architecture documentation
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and logic covering:
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and logic covering source adapters, storage adapters, export adapters, MongoDB-first queryable registry design, hazard/readiness/trend/exposure separation, and reconciliation rather than additive scoring.
 
-- source adapters;
-- storage adapters;
-- export adapters;
-- MongoDB-first queryable registry design;
-- rules for avoiding redundancy;
-- hazard/readiness/trend/exposure separation;
-- reconciliation rather than additive scoring;
-- proposed package structure and next implementation steps.
+See [`docs/SOURCE_ADAPTERS.md`](docs/SOURCE_ADAPTERS.md) for the source-first adapter model. Source adapters retrieve and parse source material, emit `RawFormatRecord` objects, and leave persistence to the storage layer.
 
 See [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) for the institution-neutral model used to support QNL and future institutional policy spreadsheets.
 
@@ -54,17 +47,20 @@ This starter implementation includes:
 - source extraction adapters for:
   - standardized JSON source packages;
   - institution policy XLSX files;
+  - PRONOM registry GitHub JSON data;
   - PRONOM/DROID XML signature files;
   - LOC FDD XML records;
-- deprecated compatibility alias for the older `qnl_policy_xlsx` adapter name;
-- normalization of extensions, MIME types, PUIDs, LOC IDs and related identifiers;
+  - NARA Digital Preservation Framework data;
+- deprecated compatibility aliases for older/narrower adapter names such as `qnl_policy_xlsx` and `nara_preservation_csv`;
+- normalization of extensions, MIME types, PUIDs, LOC IDs, NARA IDs and related identifiers;
 - conservative identifier-led reconciliation;
 - institution policy overlays attached to canonical format records;
+- external hazard reconciliation against institutional estimators where available;
 - reusable preservation method profiles assigned after reconciliation;
 - JSON, JSONL, CSV and SQLite demonstration exports;
 - coverage reporting;
 - validation checks;
-- tests for reconciliation, hazard-reconciliation, storage skeletons and preservation method profiles;
+- tests for source adapters, reconciliation, hazard reconciliation, storage skeletons and preservation method profiles;
 - initial storage and exporter interface skeletons for the next refactor.
 
 ## Installation
@@ -188,6 +184,24 @@ qnl_policy_xlsx
 
 New configurations should use `institution_policy_xlsx`.
 
+## External source adapters
+
+The preferred NARA adapter is source-level:
+
+```text
+nara_digital_preservation_framework
+```
+
+Its current retrieval mode is `published_csv`, using NARA's public Digital Preservation Framework CSV files. The deprecated `nara_preservation_csv` adapter name remains available only as a compatibility alias.
+
+The preferred PRONOM adapter is:
+
+```text
+pronom_registry
+```
+
+Its current retrieval mode is `github_json`, using PRONOM's public GitHub JSON dataset. The existing `pronom_droid_xml` adapter remains available for DROID signature XML.
+
 ## Source adapter pattern
 
 Each source adapter implements two methods:
@@ -197,7 +211,7 @@ acquire() -> list[SourceSnapshot]
 extract(snapshots) -> list[RawFormatRecord]
 ```
 
-This keeps source-specific behaviour isolated. To add NARA, DPC, COPTR, PAR, or other sources later, add a new adapter and register it in `registry_builder/adapters/__init__.py`.
+Source adapters understand source acquisition and parsing. They do not persist directly to MongoDB. Persistence belongs to `RegistryStore`; exports belong to exporter adapters.
 
 ## Storage adapter direction
 
