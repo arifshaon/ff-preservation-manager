@@ -34,8 +34,8 @@ class RegistryStore(ABC):
         """Create or update a format identifier record."""
 
     @abstractmethod
-    def save_qnl_policy_overlay(self, record: dict[str, Any]) -> None:
-        """Persist QNL-specific policy overlay data."""
+    def save_institution_policy_overlay(self, record: dict[str, Any]) -> None:
+        """Persist institution-specific policy overlay data."""
 
     @abstractmethod
     def save_hazard_assessment(self, record: dict[str, Any]) -> None:
@@ -43,7 +43,7 @@ class RegistryStore(ABC):
 
     @abstractmethod
     def save_readiness_assessment(self, record: dict[str, Any]) -> None:
-        """Persist QNL readiness/coverage assessment data."""
+        """Persist institutional readiness/coverage assessment data."""
 
     @abstractmethod
     def save_trend_observation(self, record: dict[str, Any]) -> None:
@@ -62,8 +62,8 @@ class RegistryStore(ABC):
         """Find a canonical format by identifier."""
 
     @abstractmethod
-    def list_qnl_policy_formats(self) -> list[dict[str, Any]]:
-        """Return formats with an attached QNL policy overlay."""
+    def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
+        """Return formats with an attached institutional policy overlay."""
 
     @abstractmethod
     def list_changes_since(self, since: str) -> list[dict[str, Any]]:
