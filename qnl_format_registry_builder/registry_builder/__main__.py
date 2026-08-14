@@ -17,6 +17,7 @@ def main() -> None:
     run.add_argument("--config", required=True)
     run.add_argument("--workdir", default="work")
     run.add_argument("--out", default="out")
+    run.add_argument("--offline", action="store_true", help="Use cached source snapshots only; do not fetch remote sources")
 
     val = sub.add_parser("validate", help="Validate a generated registry.json")
     val.add_argument("--registry", required=True)
@@ -24,7 +25,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "run":
-        report = run_pipeline(args.config, args.workdir, args.out)
+        report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline)
         print(json.dumps(report, indent=2, ensure_ascii=False))
     elif args.command == "validate":
         rows = json.loads(Path(args.registry).read_text(encoding="utf-8"))
