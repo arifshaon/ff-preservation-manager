@@ -10,7 +10,7 @@ def test_reconcile_corroborated():
 
 def test_reconcile_divergence_surfaces_review():
     result = reconcile_hazard(1.0, 3.0, divergence_threshold=0.5)
-    assert result["basis"] == "qnl_override"
+    assert result["basis"] == "institution_override"
     assert result["divergence_flag"] is True
     assert result["review_required"] is True
 
