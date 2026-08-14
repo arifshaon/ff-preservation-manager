@@ -37,6 +37,40 @@ Consequences:
 - PyMongo is an optional dependency installed with `python -m pip install -e ".[mongo]"`.
 - `storage.type: memory` remains the default in the sample config so a clean clone can still run without infrastructure.
 
+## 2026-08-14: File JSON storage backend
+
+Decision: implement file-backed JSON storage as a real `RegistryStore` backend.
+
+Rationale:
+
+- File storage lets the team validate the storage contract before connecting MongoDB.
+- It should exercise the same pipeline/store calls as MongoDB rather than reusing export files as fake storage.
+- One active backend per run remains the rule: `file`, `mongodb`, or another future backend.
+
+Consequences:
+
+- `storage.type: file` writes one JSON document per record under collection directories.
+- `json_file` is an alias for `file`.
+- The file backend stores the same logical collections as MongoDB, including `assessment_changes`.
+- Export files remain separate from file storage; `exports.enabled: false` can still produce a complete file-backed registry store.
+
+## 2026-08-14: Baseline and change detection
+
+Decision: detect registry changes by comparing the previous current registry view in the selected store with the newly built registry.
+
+Rationale:
+
+- The registry-builder design exists to detect meaningful changes when upstream sources such as NARA, PRONOM, LOC, or institutional policies are refreshed.
+- Deterministic canonical IDs and a storage backend make it possible to compare run n-1 to run n without relying on exported JSON files.
+- NARA native numeric movement can be meaningful even when Low/Moderate/High bands do not change.
+
+Consequences:
+
+- The first run against an empty store is a `baseline` run and does not emit one `record_added` change per format.
+- Later runs emit typed `assessment_changes`, including `record_added`, `record_removed`, `hazard_band_changed`, `hazard_basis_changed`, `external_rating_native_changed`, `divergence_opened`, and `divergence_resolved`.
+- Removed canonical records are retained for history but marked `current:false` with `last_removed_run_id` and `removed_at`.
+- `get_current_registry_view()` returns only records where `current` is not false, so removals do not keep repeating on later runs.
+
 ## 2026-08-14: Institutional policy overlays
 
 Decision: make the core policy overlay model institution-neutral.
