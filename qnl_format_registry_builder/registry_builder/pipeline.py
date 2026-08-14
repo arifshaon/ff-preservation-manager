@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
 from registry_builder.utils import ensure_dir, write_csv, write_json, write_jsonl
 from registry_builder.validate import validate_registry
+
+_NON_DISCRIMINATING_METHOD_PROFILES = {"generic_preservation"}
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -42,22 +45,54 @@ def _average(values: list[int]) -> float:
     return round(sum(values) / len(values), 3)
 
 
+def _discriminating(profile_ids: list[str]) -> list[str]:
+    return [x for x in profile_ids if x not in _NON_DISCRIMINATING_METHOD_PROFILES]
+
+
 def _method_profile_metrics(registry) -> dict[str, Any]:
-    direct_counts = [
-        len(fmt.preservation_method.get("direct_profile_ids", []))
+    direct_profile_lists = [
+        _discriminating(fmt.preservation_method.get("direct_profile_ids", []))
         for fmt in registry
     ]
-    effective_counts = [
-        len(fmt.preservation_method.get("assigned_profile_ids", []))
+    effective_profile_lists = [
+        _discriminating(fmt.preservation_method.get("assigned_profile_ids", []))
         for fmt in registry
     ]
-    return {
+    direct_counts = [len(x) for x in direct_profile_lists]
+    effective_counts = [len(x) for x in effective_profile_lists]
+    direct_distribution = Counter(profile_id for ids in direct_profile_lists for profile_id in ids)
+    effective_distribution = Counter(profile_id for ids in effective_profile_lists for profile_id in ids)
+    generic_count = sum(
+        1
+        for fmt in registry
+        if "generic_preservation" in fmt.preservation_method.get("assigned_profile_ids", [])
+    )
+    metrics = {
         "formats_with_method_profiles": sum(1 for count in effective_counts if count > 0),
-        "average_direct_method_profiles_per_format": _average(direct_counts),
-        "average_effective_method_profiles_per_format": _average(effective_counts),
-        "max_direct_method_profiles_per_format": max(direct_counts, default=0),
-        "max_effective_method_profiles_per_format": max(effective_counts, default=0),
+        "non_discriminating_method_profiles": sorted(_NON_DISCRIMINATING_METHOD_PROFILES),
+        "generic_preservation_count": generic_count,
+        "average_direct_discriminating_method_profiles_per_format": _average(direct_counts),
+        "average_effective_discriminating_method_profiles_per_format": _average(effective_counts),
+        "max_direct_discriminating_method_profiles_per_format": max(direct_counts, default=0),
+        "max_effective_discriminating_method_profiles_per_format": max(effective_counts, default=0),
+        "direct_method_profile_distribution": dict(sorted(direct_distribution.items())),
+        "effective_method_profile_distribution": dict(sorted(effective_distribution.items())),
     }
+    # Backwards-compatible aliases. These now intentionally mean discriminating
+    # profiles only; `generic_preservation` is tracked separately above.
+    metrics["average_direct_method_profiles_per_format"] = metrics[
+        "average_direct_discriminating_method_profiles_per_format"
+    ]
+    metrics["average_effective_method_profiles_per_format"] = metrics[
+        "average_effective_discriminating_method_profiles_per_format"
+    ]
+    metrics["max_direct_method_profiles_per_format"] = metrics[
+        "max_direct_discriminating_method_profiles_per_format"
+    ]
+    metrics["max_effective_method_profiles_per_format"] = metrics[
+        "max_effective_discriminating_method_profiles_per_format"
+    ]
+    return metrics
 
 
 def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path) -> dict[str, Any]:
@@ -167,12 +202,24 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Institutional policy formats missing PUID: {len(missing_puid)}",
         f"- Institutional policy formats missing LOC identifier: {len(missing_loc)}",
         f"- Canonical formats with preservation method profiles: {len(with_methods)}",
-        f"- Average direct method profiles per format: {report.get('average_direct_method_profiles_per_format', 0)}",
-        f"- Average effective method profiles per format: {report.get('average_effective_method_profiles_per_format', 0)}",
+        f"- Generic preservation baseline count: {report.get('generic_preservation_count', 0)}",
+        f"- Average direct discriminating method profiles per format: {report.get('average_direct_discriminating_method_profiles_per_format', 0)}",
+        f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
         "",
-        "## Source runs",
+        "## Method profile distribution",
         "",
     ]
+    direct_distribution = report.get("direct_method_profile_distribution", {}) or {}
+    if direct_distribution:
+        lines.append("### Direct profiles")
+        lines.extend(f"- {profile}: {count}" for profile, count in direct_distribution.items())
+    else:
+        lines.append("- No direct method profiles assigned.")
+    effective_distribution = report.get("effective_method_profile_distribution", {}) or {}
+    if effective_distribution:
+        lines.append("\n### Effective profiles, excluding generic baseline")
+        lines.extend(f"- {profile}: {count}" for profile, count in effective_distribution.items())
+    lines.extend(["", "## Source runs", ""])
     for src in report.get("sources", []):
         if not src.get("enabled", True):
             lines.append(f"- {src.get('source_id')}: disabled")
