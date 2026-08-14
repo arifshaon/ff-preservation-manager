@@ -5,6 +5,9 @@ import json
 from collections import Counter
 from typing import Any
 
+_BULK_CHANGE_MIN_COUNT = 25
+_BULK_CHANGE_FRACTION = 0.25
+
 
 def _stable_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
@@ -12,6 +15,11 @@ def _stable_json(value: Any) -> str:
 
 def _change_id(run_id: str, change_type: str, canonical_id: str, field: str | None = None) -> str:
     seed = "|".join([run_id, change_type, canonical_id, field or ""])
+    return "chg-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+
+
+def _bulk_change_id(run_id: str, change_type: str, collapsed_type: str) -> str:
+    seed = "|".join([run_id, change_type, collapsed_type])
     return "chg-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
 
 
@@ -37,6 +45,17 @@ def _identifiers(record: dict[str, Any] | None) -> dict[str, list[str]]:
     return {str(k): sorted(str(x) for x in v) for k, v in sorted(identifiers.items())}
 
 
+def _source_ids(record: dict[str, Any] | None) -> list[str]:
+    if not record:
+        return []
+    source_ids = []
+    for source_record in record.get("source_records", []) or []:
+        source_id = source_record.get("source_id")
+        if source_id and source_id not in source_ids:
+            source_ids.append(source_id)
+    return sorted(source_ids)
+
+
 def _summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
     if not record:
         return None
@@ -46,6 +65,7 @@ def _summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
         "preferred_name": record.get("preferred_name"),
         "category": record.get("category"),
         "identifiers": _identifiers(record),
+        "source_ids": _source_ids(record),
         "hazard_band": hazard.get("band"),
         "hazard_basis": hazard.get("basis"),
         "review_required": hazard.get("review_required"),
@@ -66,6 +86,7 @@ def _action(change_type: str) -> str:
         "external_rating_native_changed": "Review the native external rating movement; it may indicate deterioration or improvement within the same band.",
         "divergence_opened": "Review the new external-vs-institutional divergence and decide whether to keep the institutional override or revise policy.",
         "divergence_resolved": "Confirm the resolved divergence and close any associated review action.",
+        "source_coverage_changed": "Review the source-level change first. A broad upstream source/configuration shift may need adapter or source validation before per-format review.",
     }
     return actions.get(change_type, "Review this registry change.")
 
@@ -124,6 +145,51 @@ def _field_change(
     )
 
 
+def _collapse_bulk_changes(
+    changes: list[dict[str, Any]],
+    *,
+    run_id: str,
+    created_at: str,
+    registry_size: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if registry_size <= 0:
+        return changes, []
+    counts = Counter(change["change_type"] for change in changes)
+    threshold = max(_BULK_CHANGE_MIN_COUNT, int(registry_size * _BULK_CHANGE_FRACTION))
+    bulk_types = {change_type for change_type, count in counts.items() if count >= threshold}
+    if not bulk_types:
+        return changes, []
+
+    kept: list[dict[str, Any]] = []
+    bulk_events: list[dict[str, Any]] = []
+    for change_type in sorted(bulk_types):
+        affected = [change for change in changes if change["change_type"] == change_type]
+        sample_ids = [change.get("canonical_id") for change in affected[:25] if change.get("canonical_id")]
+        source_counter: Counter[str] = Counter()
+        for change in affected:
+            for side in ("previous", "current"):
+                summary = change.get(side) or {}
+                for source_id in summary.get("source_ids", []) or []:
+                    source_counter[source_id] += 1
+        bulk_events.append({
+            "change_id": _bulk_change_id(run_id, "source_coverage_changed", change_type),
+            "run_id": run_id,
+            "created_at": created_at,
+            "change_type": "source_coverage_changed",
+            "collapsed_change_type": change_type,
+            "affected_count": len(affected),
+            "affected_fraction": round(len(affected) / registry_size, 4),
+            "registry_size": registry_size,
+            "sample_canonical_ids": sample_ids,
+            "dominant_source_ids": dict(source_counter.most_common(10)),
+            "severity": "review",
+            "recommended_actions": [_action("source_coverage_changed")],
+            "note": "Bulk per-format changes were collapsed to keep actionable format-level changes visible.",
+        })
+    kept = [change for change in changes if change["change_type"] not in bulk_types]
+    return kept + bulk_events, bulk_events
+
+
 def detect_registry_changes(
     previous_registry: list[dict[str, Any]],
     current_registry: list[dict[str, Any]],
@@ -146,6 +212,7 @@ def detect_registry_changes(
             "current_canonical_formats": len(current_by_id),
             "changes": [],
             "change_counts": {},
+            "bulk_changes": [],
             "baseline_note": "No previous current registry view was available; this run establishes the baseline.",
         }
 
@@ -179,99 +246,39 @@ def detect_registry_changes(
         previous_hazard = _hazard(previous)
         current_hazard = _hazard(current)
         candidates = [
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="preferred_name_changed",
-                field="preferred_name",
-                previous=previous.get("preferred_name"),
-                current=current.get("preferred_name"),
-                severity="info",
-            ),
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="category_changed",
-                field="category",
-                previous=previous.get("category"),
-                current=current.get("category"),
-                severity="review",
-            ),
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="identifiers_changed",
-                field="identifiers",
-                previous=_identifiers(previous),
-                current=_identifiers(current),
-                severity="review",
-            ),
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="hazard_band_changed",
-                field="hazard_assessment.band",
-                previous=previous_hazard.get("band"),
-                current=current_hazard.get("band"),
-                severity="review",
-            ),
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="hazard_basis_changed",
-                field="hazard_assessment.basis",
-                previous=previous_hazard.get("basis"),
-                current=current_hazard.get("basis"),
-                severity="review",
-            ),
-            _field_change(
-                run_id=run_id,
-                created_at=created_at,
-                canonical_id=canonical_id,
-                change_type="external_rating_native_changed",
-                field="hazard_assessment.external_rating_native",
-                previous=previous_hazard.get("external_rating_native"),
-                current=current_hazard.get("external_rating_native"),
-                severity="review",
-            ),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="preferred_name_changed", field="preferred_name", previous=previous.get("preferred_name"), current=current.get("preferred_name"), severity="info"),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="category_changed", field="category", previous=previous.get("category"), current=current.get("category"), severity="review"),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="identifiers_changed", field="identifiers", previous=_identifiers(previous), current=_identifiers(current), severity="review"),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="hazard_band_changed", field="hazard_assessment.band", previous=previous_hazard.get("band"), current=current_hazard.get("band"), severity="review"),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="hazard_basis_changed", field="hazard_assessment.basis", previous=previous_hazard.get("basis"), current=current_hazard.get("basis"), severity="review"),
+            _field_change(run_id=run_id, created_at=created_at, canonical_id=canonical_id, change_type="external_rating_native_changed", field="hazard_assessment.external_rating_native", previous=previous_hazard.get("external_rating_native"), current=current_hazard.get("external_rating_native"), severity="review"),
         ]
         changes.extend(change for change in candidates if change is not None)
 
         previously_divergent = _divergent(previous)
         currently_divergent = _divergent(current)
         if not previously_divergent and currently_divergent:
-            changes.append(_event(
-                run_id=run_id,
-                created_at=created_at,
-                change_type="divergence_opened",
-                canonical_id=canonical_id,
-                previous=_summary(previous),
-                current=_summary(current),
-                severity="review",
-            ))
+            changes.append(_event(run_id=run_id, created_at=created_at, change_type="divergence_opened", canonical_id=canonical_id, previous=_summary(previous), current=_summary(current), severity="review"))
         elif previously_divergent and not currently_divergent:
-            changes.append(_event(
-                run_id=run_id,
-                created_at=created_at,
-                change_type="divergence_resolved",
-                canonical_id=canonical_id,
-                previous=_summary(previous),
-                current=_summary(current),
-                severity="info",
-            ))
+            changes.append(_event(run_id=run_id, created_at=created_at, change_type="divergence_resolved", canonical_id=canonical_id, previous=_summary(previous), current=_summary(current), severity="info"))
 
-    counts = Counter(change["change_type"] for change in changes)
+    raw_counts = Counter(change["change_type"] for change in changes)
+    registry_size = max(len(previous_by_id), len(current_by_id))
+    collapsed_changes, bulk_events = _collapse_bulk_changes(
+        changes,
+        run_id=run_id,
+        created_at=created_at,
+        registry_size=registry_size,
+    )
+    counts = Counter(change["change_type"] for change in collapsed_changes)
     return {
         "run_kind": "change",
         "previous_canonical_formats": len(previous_by_id),
         "current_canonical_formats": len(current_by_id),
-        "changes": changes,
+        "changes": collapsed_changes,
         "change_counts": dict(sorted(counts.items())),
+        "raw_change_counts": dict(sorted(raw_counts.items())),
+        "bulk_changes": bulk_events,
     }
 
 
@@ -283,6 +290,8 @@ def compact_change_summary(change_report: dict[str, Any], *, sample_limit: int =
         "current_canonical_formats": change_report.get("current_canonical_formats", 0),
         "total_changes": len(changes),
         "change_counts": change_report.get("change_counts", {}),
+        "raw_change_counts": change_report.get("raw_change_counts", {}),
+        "bulk_changes": change_report.get("bulk_changes", []),
         "baseline_note": change_report.get("baseline_note"),
         "sample_changes": changes[:sample_limit],
     }
