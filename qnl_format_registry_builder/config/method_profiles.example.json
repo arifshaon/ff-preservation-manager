@@ -1,5 +1,5 @@
 {
-  "version": "qnl-method-profiles-v1",
+  "version": "method-profiles-v2",
   "description": "Reusable preservation method profiles. Formats inherit family/domain templates and only use format-specific overrides when required.",
   "profiles": {
     "generic_preservation": {
@@ -19,11 +19,11 @@
         "Record software/tool versions used during processing."
       ],
       "monitoring": [
-        "Monitor authority-source changes and QNL readiness changes."
+        "Monitor authority-source changes and institutional readiness changes."
       ]
     },
     "structured_text": {
-      "label": "Structured text",
+      "label": "Structured or plain text",
       "inherits": ["generic_preservation"],
       "steps": [
         "Preserve the original text-based representation.",
@@ -34,6 +34,23 @@
       ],
       "metadata_extraction": [
         "Extract declared encoding, namespaces, schemas or declared syntax where available."
+      ]
+    },
+    "structured_data": {
+      "label": "Structured data",
+      "inherits": ["structured_text"],
+      "steps": [
+        "Treat the file as structured data, not only as displayable text.",
+        "Preserve delimiters, schema references, field names and structural conventions."
+      ],
+      "validation": [
+        "Validate syntax or parseability where a parser or schema is available."
+      ],
+      "metadata_extraction": [
+        "Extract declared schema, field names, delimiter conventions, encoding and record structure where available."
+      ],
+      "derivative_guidance": [
+        "Generate access or analysis derivatives only when the original structured semantics remain preserved."
       ]
     },
     "xml_based_structured_text": {
@@ -94,7 +111,7 @@
       "inherits": ["generic_preservation"],
       "steps": [
         "Preserve the original office document.",
-        "Generate tested preservation or access derivatives according to QNL readiness and policy."
+        "Generate tested preservation or access derivatives according to institutional readiness and policy."
       ],
       "validation": [
         "Record creating application/version where available.",
@@ -145,7 +162,23 @@
       "profile": "xml_based_structured_text",
       "match": {
         "identifiers": {
-          "extension": ["xml", "cml", "kml", "gml", "mets", "mods", "tei", "jats", "xhtml", "svg"]
+          "extension": ["xml", "cml", "kml", "gml", "mets", "mods", "tei", "jats", "xhtml", "svg", "dtd", "xsd", "rdf", "rss", "atom"]
+        }
+      }
+    },
+    {
+      "profile": "structured_data",
+      "match": {
+        "identifiers": {
+          "extension": ["csv", "tsv", "json", "jsonl", "ndjson", "yaml", "yml"]
+        }
+      }
+    },
+    {
+      "profile": "structured_text",
+      "match": {
+        "identifiers": {
+          "extension": ["txt", "text", "md", "markdown", "log", "ini", "cfg", "conf"]
         }
       }
     },
@@ -153,16 +186,23 @@
       "profile": "chemistry_scientific_data",
       "match": {
         "identifiers": {
-          "extension": ["cml"]
-        },
-        "name_contains": ["chemical markup language", "cml"]
+          "extension": ["cml", "mol", "mol2", "sdf", "cif", "pdb"]
+        }
+      }
+    },
+    {
+      "profile": "scientific_data",
+      "match": {
+        "identifiers": {
+          "extension": ["fasta", "fa", "fastq", "fq"]
+        }
       }
     },
     {
       "profile": "geospatial_data",
       "match": {
         "identifiers": {
-          "extension": ["kml", "kmz", "gml", "shp", "geojson"]
+          "extension": ["kml", "kmz", "gml", "shp", "geojson", "gpkg"]
         }
       }
     },
@@ -170,7 +210,7 @@
       "profile": "archive_or_container",
       "match": {
         "identifiers": {
-          "extension": ["zip", "kmz", "jar", "warc", "wacz"]
+          "extension": ["zip", "kmz", "jar", "warc", "wacz", "tar", "gz", "tgz", "7z", "rar"]
         }
       }
     },
@@ -178,7 +218,7 @@
       "profile": "office_document",
       "match": {
         "identifiers": {
-          "extension": ["doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp"]
+          "extension": ["doc", "docx", "docm", "dot", "dotx", "dotm", "xls", "xlsx", "xlsm", "xlt", "xltx", "xltm", "ppt", "pptx", "pptm", "pot", "potx", "potm", "odt", "ods", "odp", "rtf"]
         }
       }
     },
@@ -186,7 +226,7 @@
       "profile": "raster_image",
       "match": {
         "identifiers": {
-          "extension": ["tif", "tiff", "jpg", "jpeg", "jp2", "png", "gif", "bmp"]
+          "extension": ["tif", "tiff", "jpg", "jpeg", "jp2", "png", "gif", "bmp", "webp"]
         }
       }
     },
@@ -194,8 +234,62 @@
       "profile": "audiovisual",
       "match": {
         "identifiers": {
-          "extension": ["wav", "mp3", "mp4", "mov", "mkv", "avi", "flac"]
+          "extension": ["wav", "mp3", "mp4", "mov", "mkv", "avi", "flac", "aif", "aiff", "m4a", "m4v"]
         }
+      }
+    },
+    {
+      "profile": "structured_data",
+      "match": {
+        "category_contains": ["structured data", "tabular data", "data interchange", "dataset"]
+      }
+    },
+    {
+      "profile": "structured_text",
+      "match": {
+        "category_contains": ["textual and word processing", "plain text", "text format"]
+      }
+    },
+    {
+      "profile": "office_document",
+      "match": {
+        "category_contains": ["office document", "word processing", "spreadsheet", "presentation"]
+      }
+    },
+    {
+      "profile": "xml_based_structured_text",
+      "match": {
+        "category_contains": ["xml", "markup", "schema"]
+      }
+    },
+    {
+      "profile": "scientific_data",
+      "match": {
+        "category_contains": ["scientific data", "research data", "bioinformatics"]
+      }
+    },
+    {
+      "profile": "geospatial_data",
+      "match": {
+        "category_contains": ["geospatial", "gis", "spatial data"]
+      }
+    },
+    {
+      "profile": "archive_or_container",
+      "match": {
+        "category_contains": ["archive", "container", "compressed"]
+      }
+    },
+    {
+      "profile": "raster_image",
+      "match": {
+        "category_contains": ["raster image", "still image", "image", "graphics"]
+      }
+    },
+    {
+      "profile": "audiovisual",
+      "match": {
+        "category_contains": ["audio", "video", "audiovisual", "moving image"]
       }
     }
   ]
