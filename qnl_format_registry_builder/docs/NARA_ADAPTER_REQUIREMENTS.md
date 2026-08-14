@@ -1,79 +1,108 @@
-# NARA Adapter Requirements
+# NARA Adapter
 
-NARA is the next high-value source adapter because it provides an external hazard estimator. Until NARA is ingested, real QNL workbook runs will correctly report hazards as `qnl_only`.
+NARA is the first high-value external hazard source because it turns real workbook runs from `institution_only` into actual external-vs-institutional reconciliation.
+
+The implemented adapter is:
+
+```text
+nara_preservation_csv
+```
+
+It parses NARA Digital Preservation Framework CSV exports, including:
+
+```text
+Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv
+Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv
+```
+
+The action-plan CSV contains format names, extensions, categories, NARA format IDs, risk levels, preservation actions, proposed preservation plans, and preferred tools. The numbered risk-matrix CSV contains the native numeric risk rating and related score fields.
 
 ## Why NARA matters
 
-The current pipeline can reconcile two estimators, but the real QNL workbook currently supplies only one estimator: the QNL spreadsheet risk level. NARA adds an external baseline so the following assessment paths become real operational outputs rather than unit-test-only paths:
+The reconciler can compare two estimators, but an institutional workbook alone supplies only one estimator: the local institutional risk level.
+
+With NARA enabled, the following assessment paths become real operational outputs:
 
 - `external_only`
 - `corroborated`
-- `qnl_override`
+- `institution_override`
 - divergence detection
 - review-required signals
 
-## Preserve NARA native rating
+## Recommended config
 
-Do not collapse NARA's numeric rating into only `Low`, `Moderate`, or `High`.
-
-The NARA rating should be stored in native form, for example:
+Enable NARA as a separate source alongside the institutional workbook:
 
 ```json
 {
-  "source_id": "nara_digital_preservation_framework",
-  "source_type": "nara_lod",
-  "native_rating": -12,
-  "native_scale": "nara_obsolescence_rating_v1",
-  "native_scale_min": -46,
-  "native_scale_max": 37,
-  "native_direction": "higher_is_safer",
-  "native_band": "Moderate",
-  "normalized_band": "Moderate",
-  "normalized_rating": 2.0
+  "id": "nara_digital_preservation_framework",
+  "type": "nara_preservation_csv",
+  "enabled": true,
+  "uris": [
+    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv",
+    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
+  ]
 }
 ```
 
-The normalized band/rating can support current QNL Low/Moderate/High reconciliation, but the native value must remain available for trend calculation, calibration, threshold analysis, and explaining edge cases such as nearly-High or barely-Moderate formats.
+Using both CSVs is preferred. The preservation action plan gives the descriptive/action context; the numbered risk matrix gives the native numeric rating.
 
-## Direction matters
+## Preserve NARA native rating
 
-NARA's numeric direction is inverted relative to intuitive hazard scoring: higher means safer. The adapter must record this explicitly.
+NARA's numeric rating must not be collapsed into only `Low`, `Moderate`, or `High`.
 
-Recommended fields:
+The adapter emits both a normalized value for the current reconciler and native NARA evidence for future calibration/trend analysis:
 
 ```json
 {
-  "native_rating": 14,
-  "native_scale": "nara_obsolescence_rating_v1",
+  "external_band": "Moderate",
+  "rating": 2.0,
+  "normalized_rating": 2.0,
+  "native_rating": -12,
+  "native_scale": "nara_file_format_risk_matrix",
+  "native_direction": "higher_is_safer",
+  "native_band": "Moderate Risk"
+}
+```
+
+The normalized value supports current Low/Moderate/High reconciliation. The native value remains available for trend calculation, calibration, threshold analysis, and explaining edge cases such as nearly-High or barely-Moderate formats.
+
+## Direction matters
+
+NARA's native numeric direction is inverted relative to intuitive hazard scoring: higher means safer. The adapter records this explicitly:
+
+```json
+{
   "native_direction": "higher_is_safer"
 }
 ```
 
 No downstream logic should assume that a larger native source rating always means higher hazard.
 
-## Mapping rule
+## Identifier authority
 
-The adapter should emit both:
+The NARA adapter treats `NARA Format ID` values such as `NF00143` as verified NARA identifiers.
+
+PRONOM URLs inside the NARA CSV are retained as useful identifier claims, but the NARA adapter does not make those PUIDs verified PRONOM identifiers. Verified PUID authority still comes from PRONOM/DROID XML or another explicitly trusted PUID authority source.
+
+## Reconciliation behavior
+
+NARA records normally have verified NARA IDs, while institutional spreadsheet rows usually do not. To let the two sources meet safely, the reconciler supports a conservative weak bridge:
 
 ```text
-native source evidence
-+ QNL-normalized reconciliation inputs
+name + extension
 ```
 
-The normalized value is for current hazard-band reconciliation. The native value is for provenance, trend, calibration, and reporting.
-
-## Reconciliation rule
-
-NARA evidence should be treated as an external estimator of intrinsic format hazard. It should not be added to QNL's assessment. The reconciler should compare estimators, surface corroboration or divergence, and retain both original evidence trails.
+This bridge is used only when it uniquely connects one institutional/non-authority group to exactly one verified authority group across different sources. If two authority groups share the same weak key, the bridge does not merge them.
 
 ## Validation expectations
 
-A first NARA adapter implementation should include tests for:
+The adapter and reconciler now have regression tests for:
 
-- native numeric rating is preserved;
-- native direction is preserved;
-- normalized band/rating is supplied separately;
-- NARA + QNL agreement produces `corroborated`;
-- NARA + QNL disagreement produces divergence/review;
-- missing QNL overlay produces `external_only`;
-- NARA identifiers are treated as verified only for identifiers actually controlled or asserted by NARA/linked authority data.
+- native numeric rating preserved;
+- native direction preserved;
+- normalized band/rating supplied separately;
+- NARA ID verified as a NARA identifier;
+- PUIDs from NARA PRONOM URL kept unverified;
+- NARA + institutional agreement produces `corroborated`;
+- ambiguous weak matches do not merge multiple NARA authority records.
