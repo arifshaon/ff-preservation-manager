@@ -82,15 +82,38 @@ def _find_header_row(rows: list[list[str]]) -> int:
 
 
 def _get(row: dict[str, str], candidates: list[str]) -> str:
+    """Return an exact mapped/header value only.
+
+    The old substring fallback allowed `format` to bind to `qnl_format_id`.
+    Source-specific mappings now belong in config, and missing declared columns
+    raise before extraction begins.
+    """
     for cand in candidates:
         if cand in row and row[cand].strip():
             return row[cand].strip()
-    # fuzzy fallback
-    for key, value in row.items():
-        for cand in candidates:
-            if cand in key and value.strip():
-                return value.strip()
     return ""
+
+
+def _resolve_field_map(config: dict[str, Any], raw_headers: list[str]) -> dict[str, str]:
+    normalized_headers = {_norm_header(h): h for h in raw_headers if _norm_header(h)}
+    field_map: dict[str, str] = {}
+    for field, header in config.get("field_map", {}).items():
+        norm = _norm_header(str(header))
+        if norm not in normalized_headers:
+            available = ", ".join(sorted(normalized_headers))
+            raise ValueError(
+                f"Configured QNL field_map column for '{field}' was not found: {header!r}. "
+                f"Available normalized headers: {available}"
+            )
+        field_map[field] = norm
+    return field_map
+
+
+def _field(row: dict[str, str], field_map: dict[str, str], field: str, defaults: list[str]) -> str:
+    mapped = field_map.get(field)
+    if mapped:
+        return row.get(mapped, "").strip()
+    return _get(row, defaults)
 
 
 class QnlPolicyXlsxAdapter(SourceAdapter):
@@ -130,16 +153,18 @@ class QnlPolicyXlsxAdapter(SourceAdapter):
                 header_idx = _find_header_row(rows)
             else:
                 header_idx = int(header_idx) - 1
-            headers = [_norm_header(h) for h in rows[header_idx]]
+            raw_headers = rows[header_idx]
+            headers = [_norm_header(h) for h in raw_headers]
+            field_map = _resolve_field_map(self.config, raw_headers)
             for row_no, values in enumerate(rows[header_idx + 1:], start=header_idx + 2):
                 row = {headers[i]: values[i] if i < len(values) else "" for i in range(len(headers)) if headers[i]}
-                name = _get(row, ["file_format", "format", "file_format_name", "format_name", "name"])
-                qnl_format_id = _get(row, ["qnl_format_id", "qnl_id"])
-                extensions = split_multi(_get(row, ["extension", "extensions", "file_extension_s"] ))
-                mime_types = split_multi(_get(row, ["mime_type", "mime", "mimetype"] ))
-                pronom_url = _get(row, ["pronom", "pronom_url", "puid"])
+                name = _field(row, field_map, "name", ["digital_file", "file_format", "file_format_name", "format_name", "name"])
+                qnl_format_id = _field(row, field_map, "source_id", ["qnl_format_id", "qnl_id"])
+                extensions = split_multi(_field(row, field_map, "extensions", ["file_extension_s", "extension", "extensions"] ))
+                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type", "mime", "mimetype"] ))
+                pronom_url = _field(row, field_map, "pronom_url", ["pronom", "pronom_url", "puid"])
                 puids = re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url)
-                loc_url = _get(row, ["loc", "library_of_congress", "loc_url"])
+                loc_url = _field(row, field_map, "loc_url", ["loc", "library_of_congress", "loc_url"])
                 loc_ids = re.findall(r"\bfdd\d+\b", loc_url, flags=re.I)
                 if not name and not qnl_format_id and not extensions:
                     continue
@@ -148,27 +173,27 @@ class QnlPolicyXlsxAdapter(SourceAdapter):
                     source_type=self.type_name,
                     source_record_id=qnl_format_id or f"qnl-row-{row_no}",
                     name=name,
-                    category=_get(row, ["category", "format_category", "plan"]),
-                    description=_get(row, ["description", "description_and_justification", "justification"]),
+                    category=_field(row, field_map, "category", ["category", "format_category", "plan"]),
+                    description=_field(row, field_map, "description", ["description", "description_and_justification", "justification"]),
                     extensions=extensions,
                     mime_types=mime_types,
                     puids=puids,
                     loc_ids=loc_ids,
-                    wikidata_ids=re.findall(r"\bQ\d{2,}\b", _get(row, ["wikidata", "wikidata_url"])),
+                    wikidata_ids=re.findall(r"\bQ\d{2,}\b", _field(row, field_map, "wikidata_url", ["wikidata", "wikidata_url"])),
                     urls={k: v for k, v in {
                         "pronom": pronom_url,
                         "loc": loc_url,
-                        "wikidata": _get(row, ["wikidata", "wikidata_url"]),
-                        "archive_team": _get(row, ["archiveteam", "archive_team"]),
-                        "british_library": _get(row, ["british_library", "bl"]),
+                        "wikidata": _field(row, field_map, "wikidata_url", ["wikidata", "wikidata_url"]),
+                        "archive_team": _field(row, field_map, "archive_team_url", ["archiveteam", "archive_team"]),
+                        "british_library": _field(row, field_map, "british_library_url", ["british_library", "bl"]),
                     }.items() if v},
                     qnl={
                         "qnl_format_id": qnl_format_id,
-                        "spreadsheet_risk_level": _get(row, ["qnl_risk_level", "risk_level", "risk"]),
-                        "preservation_action": _get(row, ["qnl_preservation_action", "preservation_action", "action"]),
-                        "proposed_preservation_plan": _get(row, ["qnl_proposed_preservation_plan", "proposed_preservation_plan", "plan"]),
-                        "preferred_tools": _get(row, ["preferred_processing_and_conversion_tool_s", "preferred_tools", "tool_s"]),
-                        "conversion_process": _get(row, ["conversion_process", "command", "process"]),
+                        "spreadsheet_risk_level": _field(row, field_map, "risk_level", ["qnl_risk_level", "risk_level", "risk"]),
+                        "preservation_action": _field(row, field_map, "preservation_action", ["qnl_preservation_action", "preservation_action", "action"]),
+                        "proposed_preservation_plan": _field(row, field_map, "proposed_preservation_plan", ["qnl_proposed_preservation_plan", "proposed_preservation_plan", "plan"]),
+                        "preferred_tools": _field(row, field_map, "preferred_tools", ["preferred_processing_and_conversion_tool_s", "preferred_tools", "tool_s"]),
+                        "conversion_process": _field(row, field_map, "conversion_process", ["conversion_process", "command", "process"]),
                         "source_file": snap.uri,
                         "source_row": row_no,
                     },
