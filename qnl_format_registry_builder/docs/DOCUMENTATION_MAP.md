@@ -1,56 +1,119 @@
 # Documentation map
 
-This project has three audiences:
+This map is the starting point for the documentation. Use it to avoid reading every file.
 
-1. **Operators** who run the registry build.
-2. **Administrators** who stage source files, set release modes, and choose storage.
-3. **Developers** who add new source, storage, or export adapters.
+## Audiences
 
-Use this map to avoid reading every document in the repository.
+| Audience | Start here |
+| --- | --- |
+| New user or operator | `README.md` |
+| Preservation officer reading outputs | `READING_THE_REGISTRY.md` |
+| Administrator configuring sources/storage | `ADAPTER_REFERENCE.md`, `STORAGE_AND_EXPORT_CONFIG.md` |
+| Developer adding an adapter | `ADAPTER_IMPLEMENTATION_GUIDE.md` |
+| Developer changing matching/update logic | `IDENTIFIER_RECONCILIATION.md`, `INCREMENTAL_SOURCE_UPDATES.md` |
+| Maintainer planning future work | `NEXT_STEPS.md` |
 
 ## Start here
 
 | Need | Read |
 | --- | --- |
-| Understand the project goal and run the pipeline | `README.md` |
-| Understand the end-to-end architecture | `docs/ARCHITECTURE.md` |
-| Choose online, cached, offline, pinned, latest, or local-file retrieval | `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md` |
-| Add a new source adapter | `docs/ADAPTER_IMPLEMENTATION_GUIDE.md` |
-| Configure an existing adapter | `docs/ADAPTER_REFERENCE.md` |
+| Understand the project goal and run the default NARA quickstart | `README.md` |
+| Navigate all documentation | `docs/DOCUMENTATION_MAP.md` |
+| Interpret `registry.csv`, `registry.json`, MongoDB records, hazard fields, review flags, and change events | `docs/READING_THE_REGISTRY.md` |
+| Understand the end-to-end architecture and source-adapter concept | `docs/ARCHITECTURE.md` |
+| Understand source retrieval, cache, offline replay, local files, and fallback logic | `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md` |
+| Understand source-by-source augmentation and active evidence reuse | `docs/INCREMENTAL_SOURCE_UPDATES.md` |
+| Understand verified-only strong identifier reconciliation | `docs/IDENTIFIER_RECONCILIATION.md` |
+| Configure existing adapter types | `docs/ADAPTER_REFERENCE.md` |
+| Build a new source/storage/export adapter | `docs/ADAPTER_IMPLEMENTATION_GUIDE.md` |
 | Understand NARA release modes and local admin files | `docs/NARA_LOCAL_FILES.md` and `docs/NARA_ADAPTER_REQUIREMENTS.md` |
-| Choose MongoDB, file, or memory storage | `docs/STORAGE_AND_EXPORT_CONFIG.md` |
-| Understand MongoDB collections, fields, indexes, and verification queries | `docs/MONGODB_STORAGE_SCHEMA.md` |
+| Configure MongoDB, file storage, and exports | `docs/STORAGE_AND_EXPORT_CONFIG.md` |
+| Understand MongoDB collections, fields, indexes, and queries | `docs/MONGODB_STORAGE_SCHEMA.md` |
 | Understand institutional policy overlays such as QNL | `docs/INSTITUTIONAL_OVERLAYS.md` |
 | Understand preservation method profiles | `docs/PRESERVATION_METHOD_PROFILES.md` |
+| Understand method coverage states and caveats | `docs/METHOD_COVERAGE_NOTES.md` |
 | Understand implementation decisions and constraints | `docs/DECISIONS.md` |
+| Review current roadmap | `docs/NEXT_STEPS.md` |
+
+## Live reference documents
+
+| Document | Status | Purpose |
+| --- | --- | --- |
+| `DOCUMENTATION_MAP.md` | Live | This navigation map. |
+| `ARCHITECTURE.md` | Live | Core design, source-adapter concept, storage/export boundaries. |
+| `READING_THE_REGISTRY.md` | Live | User-facing glossary and examples for preservation officers. |
+| `SOURCE_RETRIEVAL_AND_FALLBACKS.md` | Live | Online, cached, offline, local-file, fallback and required/optional behavior. |
+| `INCREMENTAL_SOURCE_UPDATES.md` | Live | Source-by-source augmentation model and active evidence reuse. |
+| `IDENTIFIER_RECONCILIATION.md` | Live | Verified identifier rules and strong-key matching behavior. |
+| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Live | How to implement adapters. |
+| `ADAPTER_REFERENCE.md` | Live | Existing adapter configuration and behavior. |
+| `NARA_ADAPTER_REQUIREMENTS.md` | Live | Detailed NARA requirements and hazard/rating behavior. |
+| `NARA_LOCAL_FILES.md` | Live | Admin-downloaded NARA CSV workflows. |
+| `STORAGE_AND_EXPORT_CONFIG.md` | Live | Storage backends and optional exports. |
+| `MONGODB_STORAGE_SCHEMA.md` | Live | MongoDB collection and field reference. |
+| `INSTITUTIONAL_OVERLAYS.md` | Live | Institution-specific policy and decision overlays. |
+| `PRESERVATION_METHOD_PROFILES.md` | Live | Method-profile assignment model. |
+| `METHOD_COVERAGE_NOTES.md` | Live | Coverage-state interpretation and caveats. |
+| `DECISIONS.md` | Live | Design decisions and rationale. |
+| `NEXT_STEPS.md` | Live | Remaining work and roadmap. |
+
+## Historical notes
+
+Historical planning or refactor notes live under:
+
+```text
+docs/history/
+```
+
+They are kept for context, not as current implementation guidance.
+
+| Historical note | Why it exists |
+| --- | --- |
+| `docs/history/ADAPTER_REFACTOR_PLAN.md` | Completed storage/export refactor tracking note. |
 
 ## How the documents fit together
 
 ```text
 README.md
-  -> quick start, operator path, storage/retrieval overview
+  -> quickstart and common operator path
+
+DOCUMENTATION_MAP.md
+  -> choose the right document
+
+READING_THE_REGISTRY.md
+  -> understand generated outputs and MongoDB records
 
 ARCHITECTURE.md
-  -> design model and data flow
+  -> design model, adapter boundaries, storage/export separation
 
 SOURCE_RETRIEVAL_AND_FALLBACKS.md
   -> acquisition modes, cache, offline, local files, required/optional sources
 
-ADAPTER_IMPLEMENTATION_GUIDE.md
-  -> how to build a new adapter
+INCREMENTAL_SOURCE_UPDATES.md
+  -> source-by-source registry augmentation
+
+IDENTIFIER_RECONCILIATION.md
+  -> verified identifiers and strong-key matching
 
 ADAPTER_REFERENCE.md
-  -> existing adapter types and config examples
+  -> configure built-in adapters
 
-NARA_ADAPTER_REQUIREMENTS.md / NARA_LOCAL_FILES.md
-  -> detailed NARA-specific behavior
+ADAPTER_IMPLEMENTATION_GUIDE.md
+  -> build a new adapter
 
-STORAGE_AND_EXPORT_CONFIG.md
-  -> storage backends and optional exports
-
-MONGODB_STORAGE_SCHEMA.md
-  -> MongoDB implementation details, collections, fields, indexes, and example queries
+STORAGE_AND_EXPORT_CONFIG.md + MONGODB_STORAGE_SCHEMA.md
+  -> storage and database details
 ```
+
+## Adapter documentation boundary
+
+The adapter docs have a clean split:
+
+| Document | Boundary |
+| --- | --- |
+| `ARCHITECTURE.md` | Concept: what a source adapter is and where it fits. |
+| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Build: how to implement a new adapter. |
+| `ADAPTER_REFERENCE.md` | Configure: how existing adapters work. |
 
 ## Naming rules
 
@@ -66,15 +129,6 @@ institution_policy_xlsx
 Avoid naming a new adapter after a temporary file representation unless that representation is truly the source boundary. For example, CSV is only NARA's current publication format, so the preferred adapter is `nara_digital_preservation_framework`, not `nara_csv`.
 
 Compatibility aliases can remain for old names, but new configuration should use the source-level name.
-
-## Implementation flow for a new source
-
-1. Read `ADAPTER_IMPLEMENTATION_GUIDE.md`.
-2. Copy the small source-adapter skeleton.
-3. Add the adapter class under `registry_builder/adapters/` or ship it as an external package loaded with `module:ClassName`.
-4. Add an example source block to `config/sources.example.json` if it is generally useful.
-5. Add tests under `tests/`.
-6. Document the adapter in `ADAPTER_REFERENCE.md`.
 
 ## Documentation standard for each adapter
 
