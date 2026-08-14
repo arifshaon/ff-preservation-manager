@@ -1,32 +1,46 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Iterable
 
-from registry_builder.models import RawFormatRecord, CanonicalFormat, utc_now_iso
+from registry_builder.hazard import BAND_TO_SCORE, reconcile_hazard
+from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, utc_now_iso
 from registry_builder.utils import slugify
+
+_STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
+
+
+def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
+    identifiers = [x for x in record.identifiers if x.verified]
+    if kind:
+        identifiers = [x for x in identifiers if x.kind == kind]
+    return identifiers
+
+
+def _all_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
+    identifiers = list(record.identifiers)
+    if kind:
+        identifiers = [x for x in identifiers if x.kind == kind]
+    return identifiers
 
 
 def strongest_key(record: RawFormatRecord) -> tuple[str, str]:
-    """Return the strongest available matching key for a raw record.
+    """Return the strongest safe matching key for a raw record.
 
-    Priority is identifier-led. QNL spreadsheet rows are deliberately not treated
-    as the canonical universe; they are overlays attached to a canonical record.
+    Strong one-to-one identifiers may group records only when the identifier was
+    verified by its owning authority. Weak identifiers such as MIME types and
+    extensions are not primary grouping keys because they can describe broad
+    format classes or families.
     """
-    if record.puids:
-        return ("puid", record.puids[0])
-    if record.loc_ids:
-        return ("loc", record.loc_ids[0])
-    if record.nara_ids:
-        return ("nara", record.nara_ids[0])
-    if record.mime_types:
-        return ("mime", record.mime_types[0])
+    for kind in ("puid", "loc", "nara"):
+        verified = _verified_identifiers(record, kind)
+        if verified:
+            return (kind, verified[0].value)
     if record.extensions and record.name:
         return ("name_ext", f"{record.name.lower()}|{','.join(record.extensions)}")
     if record.name:
         return ("name", record.name.lower())
-    if record.extensions:
-        return ("extension", ",".join(record.extensions))
     return ("source_record", f"{record.source_id}:{record.source_record_id}")
 
 
@@ -34,27 +48,67 @@ def canonical_id_for(key: tuple[str, str], name: str | None) -> str:
     kind, value = key
     if kind == "puid":
         return "puid-" + value.replace("/", "-")
-    if kind in {"loc", "nara", "mime"}:
+    if kind in {"loc", "nara"}:
         return kind + "-" + slugify(value)
     return "fmt-" + slugify(name or value)
+
+
+def _risk_to_score(value: str | None) -> float | None:
+    if not value:
+        return None
+    text = re.sub(r"\s+", " ", value).strip().lower()
+    if not text:
+        return None
+    if "high" in text:
+        return BAND_TO_SCORE["High"]
+    if "moderate" in text or "medium" in text:
+        return BAND_TO_SCORE["Moderate"]
+    if "low" in text:
+        return BAND_TO_SCORE["Low"]
+    return None
+
+
+def _hazard_score_from_dict(data: dict) -> float | None:
+    for key in ("rating", "score", "hazard_rating", "risk_score"):
+        value = data.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                pass
+    for key in ("band", "risk_level", "hazard_band"):
+        score = _risk_to_score(data.get(key))
+        if score is not None:
+            return score
+    return None
+
+
+def _first_score(values: list[float | None]) -> float | None:
+    return next((x for x in values if x is not None), None)
+
+
+def _hazard_assessment(cf: CanonicalFormat) -> dict:
+    external_score = _first_score([_hazard_score_from_dict(x) for x in cf.external_hazard])
+    qnl_score = _first_score([_risk_to_score(x.get("spreadsheet_risk_level")) for x in cf.qnl_policy_overlay])
+    result = reconcile_hazard(external_score, qnl_score)
+    result["computed_at"] = utc_now_iso()
+    result["basis_notes"] = "Hazard is reconciled from external and QNL estimators; scores are not added."
+    return result
 
 
 def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
 
-    # First pass: group by strongest key. This is intentionally conservative.
     for record in records:
         key = strongest_key(record)
         groups[key].append(record)
-        for puid in record.puids:
-            alias_keys[("puid", puid)] = key
-        for loc in record.loc_ids:
-            alias_keys[("loc", loc)] = key
-        for nara in record.nara_ids:
-            alias_keys[("nara", nara)] = key
+        for identifier in _verified_identifiers(record):
+            if identifier.kind in _STRONG_IDENTIFIER_KINDS:
+                alias_keys[(identifier.kind, identifier.value)] = key
 
-    # Second pass: collapse groups that share a stronger identifier discovered in aliases.
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     for key, items in groups.items():
         target = alias_keys.get(key, key)
@@ -71,18 +125,14 @@ def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
             provenance={"created_at": utc_now_iso(), "reconciliation_key": {"kind": key[0], "value": key[1]}},
         )
         for r in items:
-            for ext in r.extensions:
-                cf.add_identifier("extension", ext)
-            for mime in r.mime_types:
-                cf.add_identifier("mime", mime)
-            for puid in r.puids:
-                cf.add_identifier("puid", puid)
-            for loc in r.loc_ids:
-                cf.add_identifier("loc", loc)
-            for nara in r.nara_ids:
-                cf.add_identifier("nara", nara)
-            for wd in r.wikidata_ids:
-                cf.add_identifier("wikidata", wd)
+            for identifier in _all_identifiers(r):
+                cf.add_identifier(
+                    identifier.kind,
+                    identifier.value,
+                    source=identifier.source,
+                    verified=identifier.verified,
+                    source_record_id=identifier.source_record_id,
+                )
             cf.source_records.append({
                 "source_id": r.source_id,
                 "source_type": r.source_type,
@@ -97,5 +147,6 @@ def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
                 cf.readiness.append(r.readiness | {"source_id": r.source_id})
             if r.trend:
                 cf.trend.append(r.trend | {"source_id": r.source_id})
+        cf.hazard_assessment = _hazard_assessment(cf)
         canonical.append(cf)
     return sorted(canonical, key=lambda x: x.preferred_name.lower())
