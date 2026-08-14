@@ -2,86 +2,52 @@
 
 This project is a **registry-building system**, not a manually curated static registry.
 
-It builds a local file-format registry by running a repeatable pipeline over configured sources such as an institutional policy spreadsheet, PRONOM registry data, PRONOM/DROID XML, LOC FDD XML, NARA Digital Preservation Framework data, and future adapters.
+It builds a local file-format preservation registry by running a repeatable pipeline over configured evidence sources such as NARA, PRONOM, LOC FDD, institutional policy spreadsheets, and future adapters.
 
-## Core principle
+The registry is the output of the process. The reusable workflow is the deliverable.
 
-The registry is an output of the process. The deliverable is the workflow that can be rerun when upstream sources change.
-
-Pipeline stages:
+## What the pipeline does
 
 ```text
-Source acquisition → extraction/parsing → normalization → matching/reconciliation → storage → assessment/change detection → optional exports/reporting
+Source acquisition
+  -> source snapshots
+  -> extraction/parsing
+  -> normalization
+  -> identifier reconciliation
+  -> canonical registry records
+  -> storage
+  -> assessment/change detection
+  -> optional exports/reports
 ```
 
-## Why this structure
+The system keeps these things separate:
 
-The pipeline follows the agreed preservation-risk model:
-
-- An institution's current spreadsheet is treated as an **institutional policy overlay**, not as the boundary of all known file formats.
-- QNL is the first configured institutional profile, not a hard-coded assumption in the core model.
-- External sources and institutional criteria are not added together as one risk score.
-- Hazard, trend, exposure, readiness, confidence, and provenance remain separate axes.
-- Change reports generate review work from change events rather than mixing tasks into state labels.
-- The queryable registry lives in one selected storage backend per run, with MongoDB implemented as the first production backend.
-- JSON, JSONL, CSV, SQLite, Markdown and other files are optional exports; they are not staging files and not a second source of truth.
-- Preservation methods are assigned through reusable method profiles by format family/domain, not by hand-writing a unique method for every file format.
+- external source evidence;
+- institutional policy and local decisions;
+- hazard/risk assessment;
+- trend evidence;
+- readiness/method coverage;
+- change events and review actions;
+- optional export files.
 
 ## Documentation map
 
-Start with [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md). It explains which document to read depending on whether you are running the registry, staging source files, configuring storage, or implementing a new adapter.
+Start with [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md). It tells each audience where to go.
 
 Key documents:
 
 | Need | Read |
 | --- | --- |
-| Run the project and understand the common workflow | `README.md` |
-| Navigate all documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
-| Understand the end-to-end design | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Understand source retrieval, cache, offline replay, local files, and fallback logic | [`docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md) |
-| Implement a new source/storage/export adapter | [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
-| Configure existing adapter types | [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md) |
-| Understand NARA-specific release modes and admin local files | [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md) and [`docs/NARA_LOCAL_FILES.md`](docs/NARA_LOCAL_FILES.md) |
-| Configure MongoDB, file storage, and exports | [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md) |
-| Understand institutional policy overlays such as QNL | [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) |
-| Understand preservation method profiles | [`docs/PRESERVATION_METHOD_PROFILES.md`](docs/PRESERVATION_METHOD_PROFILES.md) |
-| Review design decisions and open next steps | [`docs/DECISIONS.md`](docs/DECISIONS.md) and [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) |
-
-## Current implementation status
-
-This implementation includes:
-
-- source-adapter architecture;
-- `module:ClassName` plugin loading for external source adapters and storage backends, so third-party packages do not need core registry edits;
-- repeatable local runs from a JSON config file;
-- immutable source snapshots with SHA-256 hashes;
-- content-addressed snapshot cache under `work/snapshots/<source_id>/`;
-- offline replay from cached snapshots using `--offline`;
-- local/admin file acquisition for staged source files;
-- source extraction adapters for:
-  - standardized JSON source packages;
-  - institution policy XLSX files;
-  - PRONOM registry GitHub JSON data;
-  - PRONOM/DROID XML signature files;
-  - LOC FDD XML records;
-  - NARA Digital Preservation Framework data;
-- deprecated compatibility aliases for older/narrower adapter names such as `qnl_policy_xlsx` and `nara_preservation_csv`;
-- generic identifier namespaces through `Identifier(kind, value, ...)`, with configurable strength and authority verification rules;
-- compatibility mirrors for older typed identifier fields such as `puids`, `loc_ids`, and `nara_ids`;
-- conservative identifier-led reconciliation using configured strong identifier kinds;
-- institution policy overlays attached to canonical format records;
-- external hazard reconciliation against institutional estimators where available;
-- native external rating preservation with adapter-supplied scale and direction metadata;
-- baseline-vs-change detection across runs;
-- bulk change collapse into source-level events when a source/configuration shift touches a large fraction of the registry;
-- reusable preservation method profiles assigned after reconciliation;
-- `RegistryStore` persistence with `memory`, `file`/`json_file`, and `mongodb` backends;
-- a narrowed `RegistryStore` extension contract based on generic `upsert()` and `query()` methods, with concrete shared helper methods;
-- MongoDB collections for runs, source snapshots, source records, canonical formats, identifiers, institutional overlays, hazard assessments, readiness assessments, trend observations, and change records;
-- optional JSON, JSONL, CSV, SQLite and Markdown exports;
-- coverage reporting;
-- validation checks;
-- tests for source adapters, reconciliation, hazard reconciliation, storage persistence, MongoDB-safe serialization, change detection, cache/offline behavior, plugin loading, configurable identifier rules, and preservation method profiles.
+| Interpret generated registry outputs | [`docs/READING_THE_REGISTRY.md`](docs/READING_THE_REGISTRY.md) |
+| Understand architecture and adapter boundaries | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Understand source-by-source augmentation | [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md) |
+| Understand identifier matching and verified keys | [`docs/IDENTIFIER_RECONCILIATION.md`](docs/IDENTIFIER_RECONCILIATION.md) |
+| Configure existing adapters | [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md) |
+| Build a new adapter | [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
+| Configure storage and exports | [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md) |
+| Understand MongoDB collections and fields | [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md) |
+| Understand institutional overlays | [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) |
+| Review remaining roadmap | [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) |
 
 ## Installation
 
@@ -91,25 +57,13 @@ Requires Python 3.10 or later.
 cd qnl_format_registry_builder
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
-python -m pip install -e .
-```
-
-For tests:
-
-```bash
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,mongo]"
 pytest
 ```
 
-For MongoDB-backed runs:
+## Quickstart: run a real NARA registry build
 
-```bash
-python -m pip install -e ".[dev,mongo]"
-```
-
-## Running the sample pipeline
-
-The default sample config uses in-memory storage and file exports so a clean clone can run without infrastructure:
+The default config now enables the NARA Digital Preservation Framework source. It downloads pinned public NARA CSV files from GitHub and produces a real registry, not a two-record toy example.
 
 ```bash
 python -m registry_builder run \
@@ -118,23 +72,126 @@ python -m registry_builder run \
   --out output
 ```
 
-Default demonstration exports:
+On success, check the summary printed by the CLI and the report at:
 
 ```text
-output/registry.json
-output/registry.jsonl
-output/registry.csv
-output/registry.sqlite
-output/source_snapshots.json
 output/run_report.json
 output/coverage_report.md
+output/registry.csv
+output/registry.json
 ```
 
-These files are optional export products, not the registry storage layer.
+The exact count depends on the pinned NARA release and the current adapter behavior, but the run should produce hundreds of real NARA file-format records with hazard evidence.
+
+Read the outputs with:
+
+```text
+docs/READING_THE_REGISTRY.md
+```
+
+## What `--workdir` and `--out` mean
+
+```text
+--workdir work
+```
+
+Working/cache directory. Source snapshots are stored under `work/snapshots/<source_id>/` with hashes so acquisition is auditable and replayable.
+
+```text
+--out output
+```
+
+Export/report directory. When `exports.enabled` is true, the pipeline writes files such as `registry.csv`, `registry.json`, `run_report.json`, and `coverage_report.md` there.
+
+If the selected storage backend is MongoDB, MongoDB remains the registry store; `output/` is only the export/report folder.
+
+## Add an institutional workbook after the NARA quickstart
+
+The default NARA run shows that the pipeline works with real external evidence.
+
+To make it institutional, enable the institutional workbook source in `config/sources.example.json` or in a local copied config:
+
+```json
+{
+  "id": "qnl_policy_current",
+  "type": "institution_policy_xlsx",
+  "enabled": true,
+  "institution_id": "qnl",
+  "institution_name": "Qatar National Library",
+  "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"]
+}
+```
+
+Copy the workbook into `input/`, then rerun the pipeline. The workbook data is imported as `institution_policy_overlays` attached to canonical format records.
+
+For another institution, use the same adapter with that institution's own field mapping and terminology.
+
+## Run with local MongoDB
+
+Start MongoDB locally, then use a config with this storage block:
+
+```json
+{
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry"
+  },
+  "exports": {
+    "enabled": true
+  }
+}
+```
+
+Run:
+
+```bash
+python -m registry_builder run \
+  --config config/sources.example.json \
+  --workdir work \
+  --out output
+```
+
+MongoDB collections populated by the pipeline:
+
+```text
+runs
+source_snapshots
+source_records
+canonical_formats
+format_identifiers
+institution_policy_overlays
+hazard_assessments
+readiness_assessments
+trend_observations
+assessment_changes
+```
+
+See [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md) for fields, indexes, and verification queries.
+
+## Source-by-source augmentation
+
+The default behavior supports running sources one by one against the same store.
+
+Example:
+
+```text
+Run NARA
+  -> contributes external preservation hazard evidence
+
+Run PRONOM later
+  -> contributes verified PUID/format identity evidence
+  -> reuses latest successful NARA evidence
+  -> recomputes canonical records from active evidence contributions
+```
+
+Earlier source records remain in storage as provenance/history. The current canonical view uses the active contribution from each source.
+
+Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md) before changing this behavior.
 
 ## External plugin loading
 
-Built-in adapters and storage backends can still be referenced by short names:
+Built-in adapters and storage backends can be referenced by short names:
 
 ```json
 {
@@ -142,7 +199,7 @@ Built-in adapters and storage backends can still be referenced by short names:
 }
 ```
 
-External packages can be referenced directly by explicit `module:ClassName` plugin path:
+External packages can be referenced with an explicit `module:ClassName` plugin path:
 
 ```json
 {
@@ -163,9 +220,9 @@ External storage backends use the same pattern:
 }
 ```
 
-The `module:ClassName` path is a trusted-code boundary. Importing a plugin executes the plugin module's top-level Python code, so plugin paths should come only from trusted configuration and reviewed packages.
+Plugin paths are trusted-code configuration. Importing a plugin executes the plugin module's top-level Python code, so plugin paths should come only from reviewed packages and trusted configuration.
 
-The resolver validates plugin classes at load time. Source plugins must subclass `SourceAdapter`; storage plugins must subclass `RegistryStore`. Bad module paths, missing dependencies, missing class names, and wrong base classes fail early with specific messages.
+The resolver validates source plugins as `SourceAdapter` subclasses and storage plugins as `RegistryStore` subclasses.
 
 ## Identifier rules
 
@@ -182,302 +239,37 @@ New identifier namespaces are configured, not hardcoded:
 }
 ```
 
-A third-party adapter can emit:
+A third-party adapter can emit a DPC identifier claim without core model edits. Reconciliation will treat it according to the configured identifier rules.
 
-```python
-Identifier("dpc", "DPC-001", "dpc_bit_list", False, source_record_id)
-```
+Read [`docs/IDENTIFIER_RECONCILIATION.md`](docs/IDENTIFIER_RECONCILIATION.md) before changing matching behavior.
 
-Normalization verifies it because `dpc_bit_list` is listed in `verified_from`, and reconciliation can use it as a strong identity key because `strength` is `strong`.
+## Generated outputs are not committed
 
-## Source retrieval modes, cache, and fallback logic
+`output/` is ignored. It is a runtime/export directory.
 
-Source retrieval is deliberately separated into four concepts:
+Do not commit normal generated files such as:
 
 ```text
-online acquisition
-  fetch the upstream source now and snapshot it
-
-snapshot cache
-  keep content-addressed copies under work/snapshots/<source_id>/
-
-offline mode
-  replay already-cached snapshots without network access
-
-local/admin files
-  treat administrator-supplied files as this run's source material
+registry.json
+registry.jsonl
+registry.csv
+registry.sqlite
+raw_records.jsonl
+source_snapshots.json
+run_report.json
+coverage_report.md
 ```
 
-Online runs check the upstream source. If the content is unchanged, the existing cached snapshot is reused and the report marks it as unchanged.
+If a sample is needed for documentation, commit it deliberately under `docs/examples/` and state which config and command produced it.
 
-Offline mode is for audit replay or reproducibility checks:
+## Tests and contribution rules
+
+Before pushing or merging:
 
 ```bash
-python -m registry_builder run --config config/sources.example.json --workdir work --out output --offline
+cd qnl_format_registry_builder
+python -m pip install -e ".[dev,mongo]"
+pytest
 ```
 
-It does not fetch the network. If a requested source is not already cached, the run fails clearly.
-
-Local/admin files are different from offline replay. They are used when an operator manually downloads or internally stages source files and wants the pipeline to use those files as the current source input. The adapter still copies them into the content-addressed snapshot cache and records metadata showing `source_location: local_file` and `admin_supplied: true`.
-
-Each source can be marked as required or optional:
-
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "required": false
-}
-```
-
-A required source failure aborts the run. An optional source failure is recorded in `run_report.json`, and the pipeline continues with the remaining sources.
-
-## NARA release modes
-
-The NARA source adapter supports four release modes:
-
-```text
-explicit_uris
-  use the exact configured URIs
-
-pinned
-  construct the two dated NARA release CSV URLs from release_date
-
-latest
-  discover the newest matching action-plan and numbered-risk CSV pair through GitHub
-
-local_files
-  use administrator-supplied local CSV files
-```
-
-Use `pinned` for audit and repeatability:
-
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "type": "nara_digital_preservation_framework",
-  "enabled": true,
-  "required": false,
-  "retrieval_mode": "published_csv",
-  "release_mode": "pinned",
-  "release_date": "20260320",
-  "github_ref": "master"
-}
-```
-
-Use `latest` for quarterly refresh runs. Its fallback order is:
-
-```text
-1. online latest discovery
-2. cached .nara_release_index.json
-3. fallback_local_files / manual_fallback_files / fallback_files
-4. pinned fallback_release_date
-```
-
-If a fallback is used, the snapshot metadata records the fallback mode and original error.
-
-Use `local_files` when an admin has downloaded and staged the NARA CSVs:
-
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "type": "nara_digital_preservation_framework",
-  "enabled": true,
-  "required": false,
-  "retrieval_mode": "published_csv",
-  "release_mode": "local_files",
-  "local_files": [
-    {
-      "path": "input/nara/NARA_PreservationActionPlan_FileFormats_20260320.csv",
-      "kind": "preservation_action_plan",
-      "release_date": "20260320"
-    },
-    {
-      "path": "input/nara/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv",
-      "kind": "risk_matrix_numbered",
-      "release_date": "20260320"
-    }
-  ]
-}
-```
-
-For scheduled `latest` jobs, set `GITHUB_TOKEN` to avoid unauthenticated GitHub API limits:
-
-```bash
-GITHUB_TOKEN=<token>
-```
-
-## Running with MongoDB
-
-Use one active storage backend per run. For MongoDB:
-
-```json
-{
-  "storage": {
-    "type": "mongodb",
-    "uri": "mongodb://localhost:27017",
-    "database": "format_registry"
-  },
-  "exports": {
-    "enabled": false
-  }
-}
-```
-
-With `exports.enabled: false`, the run persists the registry directly to MongoDB and does not write registry JSON/CSV/SQLite/Markdown exports.
-
-MongoDB collections populated by the pipeline:
-
-```text
-runs
-source_snapshots
-source_records
-canonical_formats
-format_identifiers
-institution_policy_overlays
-hazard_assessments
-readiness_assessments
-trend_observations
-assessment_changes
-```
-
-The pipeline writes directly from in-memory pipeline objects into `RegistryStore`. It does **not** build JSON files first and then import them into MongoDB.
-
-A starter MongoDB storage block is available at:
-
-```text
-config/storage.mongodb.example.json
-```
-
-## Running with file storage
-
-File storage is a real storage backend, not an export. It persists the same logical collections as MongoDB, but as JSON documents under collection directories.
-
-```json
-{
-  "storage": {
-    "type": "file",
-    "path": "output/file_registry_store"
-  },
-  "exports": {
-    "enabled": false
-  }
-}
-```
-
-Use this when you want to test the storage contract without MongoDB, or when you want a simple portable registry store for review.
-
-## Running against an institutional policy workbook
-
-The preferred spreadsheet adapter is:
-
-```text
-institution_policy_xlsx
-```
-
-QNL uses this same generic adapter with QNL metadata and QNL column mappings supplied in configuration.
-
-1. Copy the workbook into `input/`, for example:
-
-```text
-input/QNL File Format Policy and Action Plan_27_November_2025.xlsx
-```
-
-2. Edit `config/sources.example.json` and set this source to `enabled: true`:
-
-```json
-{
-  "id": "qnl_policy_current",
-  "type": "institution_policy_xlsx",
-  "enabled": true,
-  "institution_id": "qnl",
-  "institution_name": "Qatar National Library"
-}
-```
-
-3. Enable NARA if you want external-vs-institutional reconciliation:
-
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "type": "nara_digital_preservation_framework",
-  "enabled": true,
-  "release_mode": "pinned",
-  "release_date": "20260320"
-}
-```
-
-4. Run the pipeline:
-
-```bash
-python -m registry_builder run --config config/sources.example.json --workdir work --out output
-```
-
-The workbook content will be imported as `institution_policy_overlays` attached to canonical format records.
-
-The older adapter name remains available as a compatibility alias:
-
-```text
-qnl_policy_xlsx
-```
-
-New configurations should use `institution_policy_xlsx`.
-
-## External source adapters
-
-The preferred NARA adapter is source-level:
-
-```text
-nara_digital_preservation_framework
-```
-
-Its current retrieval mode is `published_csv`, using NARA's public Digital Preservation Framework CSV files. The deprecated `nara_preservation_csv` adapter name remains available only as a compatibility alias.
-
-The preferred PRONOM adapter is:
-
-```text
-pronom_registry
-```
-
-Its current retrieval mode is `github_json`, using PRONOM's public GitHub JSON dataset. The existing `pronom_droid_xml` adapter remains available for DROID signature XML.
-
-## Source adapter pattern
-
-Each source adapter implements two methods:
-
-```python
-acquire() -> list[SourceSnapshot]
-extract(snapshots) -> list[RawFormatRecord]
-```
-
-Source adapters understand source acquisition and parsing. They do not persist directly to MongoDB. Persistence belongs to `RegistryStore`; exports belong to exporter adapters.
-
-## Storage adapter pattern
-
-Storage adapters persist the live/queryable registry and assessment history.
-
-Implemented backends:
-
-```text
-memory
-file / json_file
-mongodb
-```
-
-Future backends can be added without changing source adapters or assessment logic by implementing the generic `RegistryStore` core in `registry_builder/storage/base.py`.
-
-## Export direction
-
-File outputs are optional exports from the current run.
-
-Examples:
-
-```text
-JSON
-JSONL
-CSV
-SQLite
-Markdown reports
-API bundles
-```
-
-Exports must not update the registry and must not be required for MongoDB population.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). GitHub Actions also runs `pytest` on pushes to `main` and pull requests.
