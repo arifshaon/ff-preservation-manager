@@ -1,4 +1,4 @@
-# QNL File Format Registry Builder Architecture
+# File Format Registry Builder Architecture
 
 ## Purpose
 
@@ -6,11 +6,11 @@ This project does **not** manually curate a static file-format registry.
 
 It implements a repeatable, configurable process that builds and updates a local file-format registry from authoritative and institution-specific sources. The registry is a generated, queryable product of the workflow, not the primary manual deliverable.
 
-The design supports the core QNL requirement:
+The design supports a general institutional requirement:
 
-> Given a file format at any time, the system should be able to report its current QNL-aligned hazard/risk position, supporting evidence, trend signals where available, QNL readiness, exposure, and recommended follow-up actions.
+> Given a file format at any time, the system should report its current hazard/risk position, supporting evidence, trend signals where available, local institutional readiness, local exposure, and recommended follow-up actions.
 
-The implementation must remain maintainable as sources, storage technologies, export formats, and assessment rules evolve.
+QNL is the first institutional profile, but the core architecture must also support other libraries, archives, repositories, and memory institutions.
 
 ---
 
@@ -18,7 +18,7 @@ The implementation must remain maintainable as sources, storage technologies, ex
 
 ### 1. The registry is built, not hand-maintained
 
-The system should be rerunnable when upstream sources change, for example when PRONOM, LOC, NARA, DPC, or QNL policy data changes.
+The system should be rerunnable when upstream sources change, for example when PRONOM, LOC, NARA, DPC, or institutional policy data changes.
 
 Each run should:
 
@@ -30,21 +30,23 @@ Each run should:
 6. calculate or refresh assessment outputs;
 7. generate optional exports and reports.
 
-### 2. QNL policy is an overlay, not the boundary of the registry
+### 2. Institutional policy is an overlay, not the boundary of the registry
 
-The QNL spreadsheet represents QNL's current institutional policy position for known formats. It is not the universe of all formats.
+A local spreadsheet represents one institution's current policy position for known formats. It is not the universe of all formats.
 
 The canonical registry may include:
 
-- formats from QNL policy;
+- formats from an institutional policy workbook;
 - formats from PRONOM/DROID signatures;
 - formats from LOC FDD records;
 - formats from NARA Digital Preservation Framework data;
 - formats from DPC or other preservation sources;
-- formats discovered later in QNL collections;
+- formats discovered later in local collections;
 - manually supplied source packages.
 
-QNL-specific fields are stored as an overlay attached to canonical format records.
+Institution-specific fields are stored as `institution_policy_overlays` attached to canonical format records.
+
+See [`INSTITUTIONAL_OVERLAYS.md`](INSTITUTIONAL_OVERLAYS.md) for details.
 
 ### 3. Keep risk dimensions separate
 
@@ -54,22 +56,22 @@ The model keeps these axes separate:
 
 - **Hazard**: intrinsic preservation hazard of the format.
 - **Trend**: current observable direction of risk indicators, where evidence exists.
-- **Exposure**: QNL holdings count, growth, and collection significance.
-- **Readiness**: QNL's ability to identify, validate, render, migrate, or otherwise manage the format.
+- **Exposure**: institutional holdings count, growth, and collection significance.
+- **Readiness**: the institution's ability to identify, validate, render, migrate, or otherwise manage the format.
 - **Confidence**: completeness and reliability of evidence.
 - **Assessment changes**: event records that generate recommended work items.
 
-This avoids common errors such as treating uncertainty as risk, using QNL holdings as intrinsic format risk, or allowing a tested conversion pathway to make the format itself appear safer.
+This avoids common errors such as treating uncertainty as risk, using holdings as intrinsic format risk, or allowing a tested conversion pathway to make the format itself appear safer.
 
 ### 4. Reconcile estimators; do not add them
 
-External authoritative assessments and QNL criteria estimate the same underlying hazard. They should be reconciled, not summed.
+External authoritative assessments and local institutional criteria estimate the same underlying hazard. They should be reconciled, not summed.
 
 Example:
 
 ```text
 External hazard estimator: High
-QNL criteria estimator: Moderate
+Institutional estimator: Moderate
 Result: divergence detected; review required
 ```
 
@@ -92,10 +94,10 @@ Not Assessed
 Example event-driven recommended actions:
 
 ```text
-Retest LibreOffice-to-PDF/A pathway
-Update QNL action-plan note
+Retest conversion pathway
+Update institutional action-plan note
 Create and test preservation pathway
-Review external-vs-QNL hazard divergence
+Review external-vs-institutional hazard divergence
 ```
 
 Recommended actions belong in assessment/change records, not in the stable state enum.
@@ -134,14 +136,22 @@ Source adapters acquire and parse upstream sources.
 
 Examples:
 
-- QNL policy XLSX
-- standardized JSON source packages
-- PRONOM/DROID XML signatures
-- LOC FDD XML records
-- future NARA Linked Open Data adapter
-- future DPC Bit List adapter
+- institution policy XLSX files;
+- standardized JSON source packages;
+- PRONOM/DROID XML signatures;
+- LOC FDD XML records;
+- future NARA Linked Open Data adapter;
+- future DPC Bit List adapter.
 
 Source adapters should not write directly to the registry. They only produce source snapshots and raw extracted records.
+
+The preferred policy spreadsheet adapter is:
+
+```text
+institution_policy_xlsx
+```
+
+The old `qnl_policy_xlsx` adapter name remains as a deprecated compatibility alias.
 
 ### 2. Storage adapters
 
@@ -190,48 +200,16 @@ source_snapshots
 source_records
 canonical_formats
 format_identifiers
-qnl_policy_overlays
+institution_policy_overlays
 hazard_assessments
 readiness_assessments
 trend_observations
 assessment_changes
 ```
 
-### `runs`
-
-One document per pipeline execution.
-
-Stores:
-
-- run identifier;
-- start and finish time;
-- source configuration hash;
-- pipeline version;
-- status;
-- counts and warnings.
-
-### `source_snapshots`
-
-Stores metadata about acquired sources.
-
-For large upstream files, store file path, URI, hash, and retrieval metadata rather than duplicating the entire payload unnecessarily.
-
-### `source_records`
-
-Stores source-specific extracted records.
-
-Each record should include both:
-
-- `raw`: source-specific extraction payload;
-- `normalized`: internal normalized representation.
-
-This avoids maintaining separate raw and normalized staging collections unless later scale requires it.
-
 ### `canonical_formats`
 
 Stores stable canonical format identity.
-
-This collection should contain stable summary fields and a current query summary, not all historical evidence.
 
 Example summary fields:
 
@@ -241,7 +219,7 @@ Example summary fields:
   "preferred_name": "Tagged Image File Format",
   "category": "Still Image",
   "current_summary": {
-    "has_qnl_policy": true,
+    "has_institution_policy": true,
     "hazard_band": "Low",
     "readiness_state": "Covered",
     "trend_direction": "Insufficient Evidence"
@@ -249,51 +227,22 @@ Example summary fields:
 }
 ```
 
-### `format_identifiers`
+### `institution_policy_overlays`
 
-Stores identifiers separately so a format can have multiple extensions, MIME types, PUIDs, LOC IDs, NARA IDs, and other identifiers.
+Stores an institution's local policy position imported from a spreadsheet or future local policy source.
 
-### `qnl_policy_overlays`
+This is where local format IDs, local risk terms, preservation action, proposed plan, preferred tools, and conversion process belong.
 
-Stores QNL's policy position imported from the spreadsheet or future QNL policy sources.
+QNL-specific values belong here only as data:
 
-This is where QNL format IDs, existing QNL risk terms, preservation action, proposed plan, preferred tools, and conversion process belong.
-
-### `hazard_assessments`
-
-Stores intrinsic hazard assessments.
-
-Do not mix hazard with exposure, readiness, or work priority.
-
-### `readiness_assessments`
-
-Stores QNL readiness/coverage information.
-
-Examples:
-
-- pathway exists;
-- pathway tested;
-- tool/version;
-- last verification date;
-- tool health.
-
-### `trend_observations`
-
-Stores trend evidence, where connectors exist.
-
-Minimum trend indicators:
-
-- specification vitality;
-- implementation vitality;
-- authority warnings.
-
-Until trend connectors exist, trend should truthfully report `Insufficient Evidence`.
-
-### `assessment_changes`
-
-Stores change events and recommended actions.
-
-This is where work items belong.
+```json
+{
+  "institution_id": "qnl",
+  "institution_name": "Qatar National Library",
+  "institution_format_id": "QNL_095_Chemical_Markup_Language_(CML)",
+  "local_risk_level": "Moderate Risk"
+}
+```
 
 ---
 
@@ -328,7 +277,8 @@ registry_builder/
   adapters/
     base.py
     standard_json.py
-    qnl_policy_xlsx.py
+    institution_policy_xlsx.py
+    qnl_policy_xlsx.py        # deprecated compatibility alias
     pronom_droid_xml.py
     loc_fdd_xml.py
 
@@ -376,14 +326,21 @@ A single pipeline config may contain:
   "storage": {
     "type": "mongodb",
     "uri": "mongodb://localhost:27017",
-    "database": "qnl_format_registry"
+    "database": "format_registry"
   },
   "sources": [
     {
       "id": "qnl_policy_current",
-      "type": "qnl_policy_xlsx",
+      "type": "institution_policy_xlsx",
       "enabled": true,
-      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"]
+      "institution_id": "qnl",
+      "institution_name": "Qatar National Library",
+      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
+      "field_map": {
+        "institution_format_id": ["QNL Format ID"],
+        "name": ["Digital file"],
+        "extensions": ["File Extension(s)"]
+      }
     }
   ],
   "exports": [
@@ -411,14 +368,14 @@ class RegistryStore:
     def save_source_record(self, record): ...
     def upsert_canonical_format(self, record): ...
     def upsert_identifier(self, record): ...
-    def save_qnl_policy_overlay(self, record): ...
+    def save_institution_policy_overlay(self, record): ...
     def save_hazard_assessment(self, record): ...
     def save_readiness_assessment(self, record): ...
     def save_trend_observation(self, record): ...
     def save_assessment_change(self, record): ...
     def get_current_registry_view(self): ...
     def find_by_identifier(self, identifier_type, value): ...
-    def list_qnl_policy_formats(self): ...
+    def list_institution_policy_formats(self, institution_id=None): ...
     def list_changes_since(self, since): ...
 ```
 
@@ -448,10 +405,8 @@ class RegistryExporter:
 
 ## Immediate next implementation tasks
 
-1. Add `storage/base.py`, `storage/memory.py`, and `storage/mongo.py`.
-2. Add `exporters/base.py` and move JSON/CSV/SQLite/Markdown output into export adapters.
-3. Refactor `pipeline.py` so it writes through `RegistryStore`.
-4. Update config to include `storage` and `exports` sections.
-5. Keep the existing output files as demo exports, not registry authority.
-6. Add tests for the in-memory store and exporter registry.
-7. Add a MongoDB integration test that can be skipped when MongoDB is unavailable.
+1. Finish refactoring `pipeline.py` so it writes through `RegistryStore` rather than file writers directly.
+2. Implement the MongoDB storage adapter.
+3. Move JSON/CSV/SQLite/Markdown output into export adapters.
+4. Add the NARA adapter while preserving NARA's native numeric rating alongside normalized bands.
+5. Add tests for the MongoDB adapter and configurable export registry.
