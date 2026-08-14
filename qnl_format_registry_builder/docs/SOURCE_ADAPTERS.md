@@ -99,7 +99,40 @@ Current implemented retrieval mode:
 published_csv
 ```
 
-The adapter currently retrieves and parses NARA's published Digital Preservation Framework CSV files from the public GitHub/raw dataset. It preserves NARA native numeric ratings and also emits normalized Low/Moderate/High values for current hazard reconciliation.
+The adapter retrieves and parses NARA's published Digital Preservation Framework CSV files from the public GitHub/raw dataset. It preserves NARA native numeric ratings and also emits normalized Low/Moderate/High values for current hazard reconciliation.
+
+The adapter supports three release modes:
+
+```text
+explicit_uris  # use configured URIs exactly
+pinned         # resolve the action-plan and numbered-risk CSVs for release_date
+latest         # discover the highest dated CSV pair from NARA's GitHub contents listing
+```
+
+Pinned reproducible run:
+
+```json
+{
+  "type": "nara_digital_preservation_framework",
+  "release_mode": "pinned",
+  "release_date": "20260320",
+  "github_ref": "master"
+}
+```
+
+Quarterly refresh run:
+
+```json
+{
+  "type": "nara_digital_preservation_framework",
+  "release_mode": "latest",
+  "github_ref": "master"
+}
+```
+
+Online `latest` mode writes a `.nara_release_index.json` under the source snapshot directory so a later `--offline` run can replay the same resolved release from cache.
+
+Each NARA snapshot carries release metadata, including release mode, release date, file kind, GitHub path/ref, and GitHub blob SHA when available.
 
 The old adapter name remains available:
 
