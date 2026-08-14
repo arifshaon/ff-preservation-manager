@@ -74,14 +74,20 @@ class MemoryRegistryStore(RegistryStore):
         self.assessment_changes.append(deepcopy(record))
 
     def get_current_registry_view(self) -> list[dict[str, Any]]:
-        return [deepcopy(v) for v in self.canonical_formats.values()]
+        return [
+            deepcopy(v)
+            for v in self.canonical_formats.values()
+            if v.get("current", True) is not False
+        ]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
         for identifier in self.identifiers:
             if identifier.get("type") == identifier_type and identifier.get("value") == value:
                 format_id = identifier.get("format_id") or identifier.get("canonical_id")
                 if format_id in self.canonical_formats:
-                    return deepcopy(self.canonical_formats[format_id])
+                    record = self.canonical_formats[format_id]
+                    if record.get("current", True) is not False:
+                        return deepcopy(record)
         return None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
@@ -90,7 +96,11 @@ class MemoryRegistryStore(RegistryStore):
             if institution_id and overlay.get("institution_id") != institution_id:
                 continue
             ids.add(overlay.get("format_id") or overlay.get("canonical_id"))
-        return [deepcopy(v) for k, v in self.canonical_formats.items() if k in ids]
+        return [
+            deepcopy(v)
+            for k, v in self.canonical_formats.items()
+            if k in ids and v.get("current", True) is not False
+        ]
 
     def list_changes_since(self, since: str) -> list[dict[str, Any]]:
         return [deepcopy(x) for x in self.assessment_changes if str(x.get("created_at", "")) > since]
