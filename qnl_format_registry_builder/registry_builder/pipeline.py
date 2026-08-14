@@ -145,15 +145,21 @@ def _persist_registry_to_store(
     snapshots: list[SourceSnapshot],
     raw_records: list[RawFormatRecord],
     registry: list[CanonicalFormat],
-    previous_registry: list[dict[str, Any]],
-    changes: list[dict[str, Any]],
+    previous_registry: list[dict[str, Any]] | None = None,
+    changes: list[dict[str, Any]] | None = None,
 ) -> None:
     """Persist the build directly to the selected RegistryStore.
 
     This is not a JSON staging step. The pipeline persists the in-memory objects
     it has already produced. Export files, when enabled, are generated later and
     are optional review/interchange products.
+
+    `previous_registry` and `changes` default to empty lists so low-level storage
+    unit tests can exercise persistence without constructing a full change
+    detection context. Normal pipeline runs pass both values explicitly.
     """
+    previous_registry = previous_registry or []
+    changes = changes or []
     current_ids: set[str] = set()
     removed_at = utc_now_iso()
 
@@ -394,7 +400,6 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     missing_puid = [r for r in institutional if not r.get("identifiers", {}).get("puid")]
     missing_loc = [r for r in institutional if not r.get("identifiers", {}).get("loc")]
     with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
-    change_detection = report.get("change_detection") or {}
     lines = [
         "# Registry Build Report",
         "",
@@ -404,6 +409,8 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         "## Summary",
         "",
         f"- Storage backend: {report.get('storage', {}).get('type')}",
+        f"- Run kind: {report.get('change_detection', {}).get('run_kind')}",
+        f"- Change events detected: {report.get('change_detection', {}).get('total_changes', 0)}",
         f"- Raw source records extracted: {report['raw_records']}",
         f"- Canonical formats generated: {report['canonical_formats']}",
         f"- Canonical formats with institutional policy overlay: {len(institutional)}",
@@ -415,30 +422,9 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Average direct discriminating method profiles per format: {report.get('average_direct_discriminating_method_profiles_per_format', 0)}",
         f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
         "",
-        "## Change detection",
-        "",
-        f"- Run kind: {change_detection.get('run_kind', 'unknown')}",
-        f"- Previous canonical formats: {change_detection.get('previous_canonical_formats', 0)}",
-        f"- Current canonical formats: {change_detection.get('current_canonical_formats', 0)}",
-        f"- Total changes: {change_detection.get('total_changes', 0)}",
-    ]
-    if change_detection.get("baseline_note"):
-        lines.append(f"- Note: {change_detection['baseline_note']}")
-    if change_detection.get("change_counts"):
-        lines.append("\n### Change counts")
-        lines.extend(f"- {change_type}: {count}" for change_type, count in change_detection["change_counts"].items())
-    if change_detection.get("sample_changes"):
-        lines.append("\n### Change samples")
-        for change in change_detection["sample_changes"][:25]:
-            lines.append(
-                f"- {change.get('change_type')} — {change.get('canonical_id')}"
-                + (f" ({change.get('field')})" if change.get("field") else "")
-            )
-    lines.extend([
-        "",
         "## Method profile distribution",
         "",
-    ])
+    ]
     direct_distribution = report.get("direct_method_profile_distribution", {}) or {}
     if direct_distribution:
         lines.append("### Direct profiles")
@@ -449,6 +435,13 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     if effective_distribution:
         lines.append("\n### Effective profiles, excluding generic baseline")
         lines.extend(f"- {profile}: {count}" for profile, count in effective_distribution.items())
+    lines.extend(["", "## Change detection", ""])
+    change_counts = report.get("change_detection", {}).get("change_counts") or {}
+    if change_counts:
+        lines.extend(f"- {change_type}: {count}" for change_type, count in sorted(change_counts.items()))
+    else:
+        note = report.get("change_detection", {}).get("baseline_note")
+        lines.append(f"- {note}" if note else "- No change events detected.")
     lines.extend(["", "## Source runs", ""])
     for src in report.get("sources", []):
         if not src.get("enabled", True):
