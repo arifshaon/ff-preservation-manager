@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
 from zipfile import ZipFile
 import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes, split_multi
+from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.utils import split_multi
 
 _NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 _NON_SUBSTANTIVE_NAMES = {"", "?", "-", "--", "n/a", "na", "none", "unknown", "tbd", "todo"}
@@ -163,23 +162,7 @@ class InstitutionPolicyXlsxAdapter(SourceAdapter):
     type_name = "institution_policy_xlsx"
 
     def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
-        for uri in self.config.get("uris", []):
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            local_path = snapshot_dir / f"{digest}.xlsx"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-            ))
-        return snapshots
+        return [self.acquire_uri_snapshot(uri, suffix=".xlsx") for uri in self.config.get("uris", [])]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
@@ -227,6 +210,8 @@ class InstitutionPolicyXlsxAdapter(SourceAdapter):
                     "source_file": snap.uri,
                     "source_row": row_no,
                     "source_adapter": self.type_name,
+                    "snapshot_changed": snap.changed,
+                    "snapshot_from_cache": snap.from_cache,
                 }
 
                 records.append(RawFormatRecord(
