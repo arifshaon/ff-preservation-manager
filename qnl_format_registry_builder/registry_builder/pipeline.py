@@ -82,8 +82,6 @@ def _method_profile_metrics(registry) -> dict[str, Any]:
         "direct_method_profile_distribution": dict(sorted(direct_distribution.items())),
         "effective_method_profile_distribution": dict(sorted(effective_distribution.items())),
     }
-    # Backwards-compatible aliases. These now intentionally mean discriminating
-    # profiles only; `generic_preservation` is tracked separately above.
     metrics["average_direct_method_profiles_per_format"] = metrics[
         "average_direct_discriminating_method_profiles_per_format"
     ]
@@ -104,12 +102,6 @@ def _new_run_id() -> str:
 
 
 def _exports_enabled(config: dict[str, Any]) -> bool:
-    """Return whether file exports/reports should be written.
-
-    Storage is mandatory and selected through `storage.type`. File outputs are
-    optional exports. To preserve existing clean-clone behaviour, exports remain
-    enabled when the config does not mention `exports`.
-    """
     exports = config.get("exports")
     if exports is None:
         return True
@@ -138,6 +130,21 @@ def _source_record_dict(record: RawFormatRecord, run_id: str) -> dict[str, Any]:
     return data
 
 
+def _source_snapshot_status(snapshots: list[SourceSnapshot], *, offline: bool) -> dict[str, Any]:
+    changed = sum(1 for snapshot in snapshots if snapshot.changed is True)
+    unchanged = sum(1 for snapshot in snapshots if snapshot.changed is False and not snapshot.from_cache)
+    from_cache = sum(1 for snapshot in snapshots if snapshot.from_cache)
+    unknown = sum(1 for snapshot in snapshots if snapshot.changed is None)
+    return {
+        "offline": offline,
+        "source_changed": changed > 0,
+        "snapshots_changed": changed,
+        "snapshots_unchanged": unchanged,
+        "snapshots_from_cache": from_cache,
+        "snapshots_unknown": unknown,
+    }
+
+
 def _persist_registry_to_store(
     store: RegistryStore,
     *,
@@ -153,10 +160,6 @@ def _persist_registry_to_store(
     This is not a JSON staging step. The pipeline persists the in-memory objects
     it has already produced. Export files, when enabled, are generated later and
     are optional review/interchange products.
-
-    `previous_registry` and `changes` default to empty lists so low-level storage
-    unit tests can exercise persistence without constructing a full change
-    detection context. Normal pipeline runs pass both values explicitly.
     """
     previous_registry = previous_registry or []
     changes = changes or []
@@ -286,10 +289,11 @@ def _write_file_exports(
     ]
 
 
-def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path) -> dict[str, Any]:
+def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path, *, offline: bool = False) -> dict[str, Any]:
     started_at = utc_now_iso()
     run_id = _new_run_id()
     config = load_config(config_path)
+    offline = bool(offline or config.get("offline", False))
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
     storage_config = _storage_config(config)
@@ -301,6 +305,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "status": "running",
         "config_path": str(config_path),
         "storage": storage_config,
+        "offline": offline,
         "previous_canonical_formats": len(previous_registry_view),
     })
 
@@ -316,7 +321,10 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         adapter_cls = ADAPTERS.get(source_type)
         if adapter_cls is None:
             raise ValueError(f"No adapter registered for source type: {source_type}")
-        adapter = adapter_cls(source, workdir)
+        source_config = dict(source)
+        if offline:
+            source_config["offline"] = True
+        adapter = adapter_cls(source_config, workdir)
         snapshots = adapter.acquire()
         extracted = adapter.extract(snapshots)
         all_snapshots.extend(snapshots)
@@ -327,6 +335,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "enabled": True,
             "snapshots": len(snapshots),
             "records_extracted": len(extracted),
+            **_source_snapshot_status(snapshots, offline=offline),
         })
 
     registry = reconcile(raw_records)
@@ -360,6 +369,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "finished_at": utc_now_iso(),
         "status": "completed",
         "config_path": str(config_path),
+        "offline": offline,
         "storage": {
             "type": storage_config.get("type", "memory"),
             "path": storage_config.get("path") or storage_config.get("directory") or storage_config.get("root"),
@@ -367,6 +377,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "collection_prefix": storage_config.get("collection_prefix"),
         },
         "sources": source_summaries,
+        "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in source_summaries if s.get("enabled", True))),
         "raw_records": len(raw_records),
         "canonical_formats": len(registry),
         "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
@@ -387,9 +398,6 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     if _exports_enabled(config):
         report["outputs"] = _write_file_exports(outdir, registry, raw_records, all_snapshots, report)
 
-    # Upsert the final run record after persistence and optional exports. This
-    # keeps the run metadata in the selected storage backend even when exports
-    # are disabled and no local JSON report is written.
     store.create_run(report)
     return report
 
@@ -409,8 +417,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         "## Summary",
         "",
         f"- Storage backend: {report.get('storage', {}).get('type')}",
-        f"- Run kind: {report.get('change_detection', {}).get('run_kind')}",
-        f"- Change events detected: {report.get('change_detection', {}).get('total_changes', 0)}",
+        f"- Offline mode: {report.get('offline', False)}",
         f"- Raw source records extracted: {report['raw_records']}",
         f"- Canonical formats generated: {report['canonical_formats']}",
         f"- Canonical formats with institutional policy overlay: {len(institutional)}",
@@ -422,9 +429,39 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Average direct discriminating method profiles per format: {report.get('average_direct_discriminating_method_profiles_per_format', 0)}",
         f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
         "",
-        "## Method profile distribution",
+        "## Source runs",
         "",
     ]
+    for src in report.get("sources", []):
+        if not src.get("enabled", True):
+            lines.append(f"- {src.get('source_id')}: disabled")
+        else:
+            status = "changed" if src.get("source_changed") else "unchanged"
+            lines.append(
+                f"- {src.get('source_id')}: {src.get('records_extracted')} records from {src.get('snapshots')} snapshot(s); "
+                f"{status}; changed={src.get('snapshots_changed', 0)}, unchanged={src.get('snapshots_unchanged', 0)}, cached={src.get('snapshots_from_cache', 0)}"
+            )
+
+    lines.extend(["", "## Change detection", ""])
+    change_detection = report.get("change_detection") or {}
+    lines.append(f"- Run kind: {change_detection.get('run_kind')}")
+    if change_detection.get("baseline_note"):
+        lines.append(f"- {change_detection.get('baseline_note')}")
+    lines.append(f"- Total actionable changes: {change_detection.get('total_changes', 0)}")
+    if change_detection.get("change_counts"):
+        lines.append("- Change counts:")
+        lines.extend(f"  - {k}: {v}" for k, v in change_detection.get("change_counts", {}).items())
+    if change_detection.get("raw_change_counts"):
+        lines.append("- Raw change counts before bulk collapse:")
+        lines.extend(f"  - {k}: {v}" for k, v in change_detection.get("raw_change_counts", {}).items())
+    if change_detection.get("bulk_changes"):
+        lines.append("- Bulk-collapsed changes:")
+        for item in change_detection.get("bulk_changes", []):
+            lines.append(
+                f"  - {item.get('collapsed_change_type')}: {item.get('affected_count')} records collapsed into source_coverage_changed"
+            )
+
+    lines.extend(["", "## Method profile distribution", ""])
     direct_distribution = report.get("direct_method_profile_distribution", {}) or {}
     if direct_distribution:
         lines.append("### Direct profiles")
@@ -435,19 +472,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     if effective_distribution:
         lines.append("\n### Effective profiles, excluding generic baseline")
         lines.extend(f"- {profile}: {count}" for profile, count in effective_distribution.items())
-    lines.extend(["", "## Change detection", ""])
-    change_counts = report.get("change_detection", {}).get("change_counts") or {}
-    if change_counts:
-        lines.extend(f"- {change_type}: {count}" for change_type, count in sorted(change_counts.items()))
-    else:
-        note = report.get("change_detection", {}).get("baseline_note")
-        lines.append(f"- {note}" if note else "- No change events detected.")
-    lines.extend(["", "## Source runs", ""])
-    for src in report.get("sources", []):
-        if not src.get("enabled", True):
-            lines.append(f"- {src.get('source_id')}: disabled")
-        else:
-            lines.append(f"- {src.get('source_id')}: {src.get('records_extracted')} records from {src.get('snapshots')} snapshot(s)")
+
     lines.extend(["", "## Validation", ""])
     if report.get("validation_errors"):
         lines.append("### Errors")
