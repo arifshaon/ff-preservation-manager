@@ -1,8 +1,8 @@
 # Adapter implementation guide
 
-This guide explains how to add new adapters without reading the whole codebase.
+This guide explains how to add new adapters and storage backends without reading the whole codebase.
 
-The system has three adapter families:
+The system has three extension families:
 
 ```text
 SourceAdapter   -> acquires and parses external or institutional source material
@@ -29,6 +29,41 @@ source material
 
 The adapter should know how to retrieve and parse its source. It should not know about MongoDB, file storage, change detection, or exports.
 
+## Loading adapters without editing core
+
+Built-in adapters still have short names such as:
+
+```text
+standard_json
+institution_policy_xlsx
+nara_digital_preservation_framework
+pronom_registry
+```
+
+Third-party adapters can be loaded directly from config with a dotted path:
+
+```json
+{
+  "id": "dpc_bit_list",
+  "type": "mypkg.adapters.dpc:DpcBitListAdapter",
+  "enabled": true,
+  "required": false
+}
+```
+
+The resolver first checks the built-in registry. If the value is not a built-in short name, it imports the dotted path. This means external packages can ship adapters without changing `registry_builder/adapters/__init__.py`.
+
+The same pattern works for storage backends:
+
+```json
+{
+  "storage": {
+    "type": "mypkg.storage.sql:SqlRegistryStore",
+    "dsn": "postgresql://..."
+  }
+}
+```
+
 ## Source adapter contract
 
 All source adapters inherit from:
@@ -50,23 +85,7 @@ def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
 
 ### `acquire()`
 
-`acquire()` retrieves source material and records an immutable source snapshot.
-
-It should return one or more `SourceSnapshot` objects. A snapshot records:
-
-```text
-source_id
-source_type
-uri
-acquired_at
-sha256
-local_path
-content_type
-note
-changed
-from_cache
-metadata
-```
+`acquire()` retrieves source material and records immutable source snapshots.
 
 Use the base helper methods where possible:
 
@@ -100,7 +119,7 @@ This is important because offline replay must be able to rebuild the registry fr
 ```python
 from pathlib import Path
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.models import Identifier, RawFormatRecord, SourceSnapshot
 
 
 class ExampleSourceAdapter(SourceAdapter):
@@ -122,14 +141,13 @@ class ExampleSourceAdapter(SourceAdapter):
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records = []
         for snap in snapshots:
-            # parse snap.local_path here
             records.append(
                 RawFormatRecord(
                     source_id=self.source_id,
                     source_type=self.type_name,
                     source_record_id="source-record-id",
                     name="Example Format",
-                    extensions=["ex"],
+                    identifiers=[Identifier("example", "EX-001", self.type_name, False, "source-record-id")],
                     evidence=[{"source_file": snap.uri, "snapshot_sha256": snap.sha256}],
                     raw={"snapshot_sha256": snap.sha256},
                 )
@@ -137,18 +155,11 @@ class ExampleSourceAdapter(SourceAdapter):
         return records
 ```
 
-Register it in:
+You can either add this adapter to the built-in registry, or use the dotted path directly in config:
 
-```text
-registry_builder/adapters/__init__.py
-```
-
-```python
-from registry_builder.adapters.example_source import ExampleSourceAdapter
-
-ADAPTERS = {
-    ...
-    "example_source": ExampleSourceAdapter,
+```json
+{
+  "type": "mypkg.adapters.example:ExampleSourceAdapter"
 }
 ```
 
@@ -173,7 +184,7 @@ Common fields:
 | Field | Meaning |
 | --- | --- |
 | `id` | Unique configured source instance. Used in snapshots and evidence. |
-| `type` | Adapter type registered in `ADAPTERS`. |
+| `type` | Built-in adapter short name or dotted path. |
 | `enabled` | Whether the pipeline runs this source. |
 | `required` | Whether source failure aborts the whole run. Defaults to required when not set. |
 | `retrieval_mode` | Human-readable source retrieval mode. |
@@ -186,14 +197,6 @@ Common fields:
 Use `required:true` for sources that must be present for the run to be meaningful.
 
 Use `required:false` for enrichment sources or external authorities where outage should be reported but should not block a partial registry build.
-
-Examples:
-
-```text
-QNL institutional workbook       required:true in a QNL production run
-NARA external hazard source      required:false unless a review explicitly depends on it
-PRONOM authority enrichment      required:false for early runs, possibly true for identity-quality runs
-```
 
 When an optional source fails, the pipeline records the error in the run report and continues. Required source failures still abort.
 
@@ -220,15 +223,6 @@ A local-file run is not the same as offline replay. Local files are new source i
 
 If a source publishes dated releases, model the release explicitly.
 
-Recommended fields:
-
-```json
-{
-  "release_mode": "pinned",
-  "release_date": "20260320"
-}
-```
-
 Common release modes:
 
 | Mode | Use |
@@ -249,32 +243,61 @@ github_path / source_path where applicable
 github_blob_sha or equivalent source identifier where available
 ```
 
-## Identifier authority rule
+## Identifier authority rules
 
-Adapters should mark identifiers as verified only when the source owns that identifier namespace.
+New source-specific identifier namespaces no longer require model changes.
 
-Examples:
+Adapters should emit generic identifiers:
 
-```text
-PRONOM adapter emits verified PUIDs.
-NARA adapter emits verified NARA Format IDs.
-LOC adapter emits verified LOC FDD IDs.
-Institutional workbook copied PUIDs are useful claims but not verified authority identifiers.
+```python
+Identifier("dpc", "DPC-001", "dpc_bit_list", False, source_record_id)
 ```
 
-Do not mark a PUID copied from a NARA row or an institutional spreadsheet as a verified PRONOM identifier. PRONOM must confirm it.
+Then config declares whether that namespace is strong and which source types verify it:
+
+```json
+{
+  "identifier_kinds": {
+    "dpc": {
+      "strength": "strong",
+      "verified_from": ["dpc_bit_list"]
+    }
+  }
+}
+```
+
+Normalization marks the identifier verified when the record's `source_type` appears in `verified_from`. Reconciliation uses configured `strength: strong` namespaces as primary grouping keys.
+
+Compatibility fields such as `puids`, `loc_ids`, and `nara_ids` still work, but new adapters should prefer `identifiers` so the core model does not need one field per namespace.
+
+## Hazard scale metadata
+
+Adapters must emit normalized hazard values for reconciliation:
+
+```json
+{
+  "rating": 2.0,
+  "band": "Moderate"
+}
+```
+
+If the source has a native scale, carry it separately:
+
+```json
+{
+  "external_rating_native": 4.0,
+  "external_rating_native_scale": "dpc_bitlist_scale",
+  "external_rating_native_direction": "lower_is_safer"
+}
+```
+
+Reconciliation copies these native fields for audit/explanation but does not treat native ratings as normalized hazard scores. Source-specific threshold explanations should live in the adapter payload unless the core explicitly knows that source scale.
 
 ## RawFormatRecord fields
 
-Use only the fields supported by `RawFormatRecord`:
+Prefer generic `identifiers` for source-specific identifiers. Compatibility typed fields remain available for existing adapters:
 
 ```text
-source_id
-source_type
-source_record_id
-name
-category
-description
 extensions
 mime_types
 puids
@@ -282,16 +305,7 @@ loc_ids
 nara_ids
 wikidata_ids
 identifiers
-urls
-institution_policy
-hazard
-readiness
-trend
-evidence
-raw
 ```
-
-Prefer structured fields over burying data only in `raw`.
 
 Always keep the original source row or a useful source subset in `raw` for audit/debugging.
 
@@ -306,19 +320,6 @@ evidence=[{
 }]
 ```
 
-## Testing checklist
-
-Every new adapter should have tests for:
-
-1. Acquisition from online/local input, using small fixtures or monkeypatching.
-2. Extraction into expected `RawFormatRecord` fields.
-3. Identifier verification behavior.
-4. Snapshot metadata and SHA handling.
-5. Offline/cache behavior if supported.
-6. Failure behavior for missing required config.
-7. Registration in `ADAPTERS`.
-8. A pipeline-level smoke test if the adapter is expected to be used in production.
-
 ## Storage adapter contract
 
 Storage adapters implement:
@@ -327,17 +328,18 @@ Storage adapters implement:
 registry_builder.storage.base.RegistryStore
 ```
 
-They persist pipeline objects; they do not acquire source material.
+A new backend only needs the generic core:
 
-Implemented storage backends include:
-
-```text
-memory
-file / json_file
-mongodb
+```python
+def upsert(self, collection: str, key: str | None, doc: dict) -> str: ...
+def query(self, collection: str, filt: dict | None = None) -> list[dict]: ...
+def begin(self) -> None: ...   # optional
+def close(self) -> None: ...   # optional
 ```
 
-A storage adapter must support these logical collections:
+`RegistryStore` supplies concrete helper methods such as `save_snapshot`, `save_source_record`, `save_hazard_assessment`, and `list_changes_since`. Backends may override helpers for performance, indexes, or database-native query behavior, but they do not have to.
+
+Logical collections:
 
 ```text
 runs
@@ -352,19 +354,30 @@ trend_observations
 assessment_changes
 ```
 
+## Testing checklist
+
+Every new adapter should have tests for:
+
+1. Acquisition from online/local input, using small fixtures or monkeypatching.
+2. Extraction into expected `RawFormatRecord` fields.
+3. Identifier verification behavior.
+4. Snapshot metadata and SHA handling.
+5. Offline/cache behavior if supported.
+6. Failure behavior for missing required config.
+7. Dotted-path loading if it ships outside this repo.
+8. A pipeline-level smoke test if the adapter is expected to be used in production.
+
+Every new storage backend should have tests for:
+
+1. `upsert()` and `query()`.
+2. Current registry view filtering.
+3. Identifier lookup.
+4. Change event persistence.
+5. Dotted-path loading.
+
 ## Export adapter direction
 
 Exports are optional review/interchange products. They are not registry storage.
-
-Examples:
-
-```text
-registry.json
-registry.jsonl
-registry.csv
-registry.sqlite
-coverage_report.md
-```
 
 Do not build an adapter that writes an export and then imports it into MongoDB. The pipeline should persist directly through `RegistryStore`, then optionally export.
 
