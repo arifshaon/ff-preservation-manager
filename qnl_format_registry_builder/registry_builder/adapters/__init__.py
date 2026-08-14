@@ -9,21 +9,24 @@ from registry_builder.adapters.institution_policy_xlsx import InstitutionPolicyX
 from registry_builder.adapters.qnl_policy_xlsx import QnlPolicyXlsxAdapter
 from registry_builder.adapters.nara_digital_preservation_framework import NaraDigitalPreservationFrameworkAdapter
 from registry_builder.adapters.nara_preservation_csv import NaraPreservationCsvAdapter
-from registry_builder.plugins import resolve_plugin
+from registry_builder.plugins import build_registry, resolve_plugin
 
-ADAPTERS: dict[str, type[SourceAdapter]] = {
-    StandardJsonAdapter.type_name: StandardJsonAdapter,
-    PronomRegistryAdapter.type_name: PronomRegistryAdapter,
-    PronomDroidXmlAdapter.type_name: PronomDroidXmlAdapter,
-    LocFddXmlAdapter.type_name: LocFddXmlAdapter,
-    InstitutionPolicyXlsxAdapter.type_name: InstitutionPolicyXlsxAdapter,
-    NaraDigitalPreservationFrameworkAdapter.type_name: NaraDigitalPreservationFrameworkAdapter,
-    # Deprecated compatibility aliases. Prefer source-level adapter names.
-    NaraPreservationCsvAdapter.type_name: NaraPreservationCsvAdapter,
-    # Deprecated compatibility alias. Prefer institution_policy_xlsx.
-    QnlPolicyXlsxAdapter.type_name: QnlPolicyXlsxAdapter,
-}
+ADAPTERS: dict[str, type[SourceAdapter]] = build_registry(
+    [
+        StandardJsonAdapter,
+        PronomRegistryAdapter,
+        PronomDroidXmlAdapter,
+        LocFddXmlAdapter,
+        InstitutionPolicyXlsxAdapter,
+        NaraDigitalPreservationFrameworkAdapter,
+        # Deprecated compatibility aliases. Prefer source-level adapter names.
+        NaraPreservationCsvAdapter,
+        # Deprecated compatibility alias. Prefer institution_policy_xlsx.
+        QnlPolicyXlsxAdapter,
+    ],
+    plugin_kind="source adapter",
+)
 
 
 def resolve_adapter(source_type: str) -> type[SourceAdapter]:
-    return resolve_plugin(source_type, ADAPTERS, plugin_kind="source adapter")
+    return resolve_plugin(source_type, ADAPTERS, plugin_kind="source adapter", expected_base=SourceAdapter)
