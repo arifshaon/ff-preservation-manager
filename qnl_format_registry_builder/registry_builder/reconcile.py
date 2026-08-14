@@ -29,6 +29,18 @@ def _institution_policy(record: RawFormatRecord) -> dict:
     return record.institution_policy or record.qnl or {}
 
 
+def _weak_match_key(record: RawFormatRecord) -> tuple[str, str] | None:
+    """Return a conservative weak match key.
+
+    Weak keys never create a canonical identity on their own when a verified
+    strong identifier is present. They are used only to bridge an institutional
+    row to one uniquely matching external authority group.
+    """
+    if record.name and record.extensions:
+        return ("name_ext", f"{record.name.lower()}|{','.join(record.extensions)}")
+    return None
+
+
 def strongest_key(record: RawFormatRecord) -> tuple[str, str]:
     """Return the strongest safe matching key for a raw record.
 
@@ -41,8 +53,9 @@ def strongest_key(record: RawFormatRecord) -> tuple[str, str]:
         verified = _verified_identifiers(record, kind)
         if verified:
             return (kind, verified[0].value)
-    if record.extensions and record.name:
-        return ("name_ext", f"{record.name.lower()}|{','.join(record.extensions)}")
+    weak = _weak_match_key(record)
+    if weak:
+        return weak
     if record.name:
         return ("name", record.name.lower())
     return ("source_record", f"{record.source_id}:{record.source_record_id}")
@@ -73,7 +86,7 @@ def _risk_to_score(value: str | None) -> float | None:
 
 
 def _hazard_score_from_dict(data: dict) -> float | None:
-    for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating"):
+    for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating", "normalized_rating"):
         value = data.get(key)
         if isinstance(value, (int, float)):
             return float(value)
@@ -110,6 +123,46 @@ def _hazard_assessment(cf: CanonicalFormat) -> dict:
     return result
 
 
+def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]]) -> dict[tuple[str, str], tuple[str, str]]:
+    """Return weak-key aliases that are safe enough for institutional/external bridging.
+
+    A weak key may alias to a verified strong group only when:
+
+    - at least two groups share the same name+extension key;
+    - the matching records come from more than one source;
+    - exactly one of the candidate groups has a verified strong identifier.
+
+    This lets an institutional row such as "Comma Separated Values + csv" attach
+    to the corresponding NARA NF record while avoiding ambiguous merges where
+    two authority records share the same weak key.
+    """
+    weak_index: dict[tuple[str, str], list[tuple[tuple[str, str], RawFormatRecord]]] = defaultdict(list)
+    for group_key, items in groups.items():
+        for record in items:
+            weak = _weak_match_key(record)
+            if weak:
+                weak_index[weak].append((group_key, record))
+
+    aliases: dict[tuple[str, str], tuple[str, str]] = {}
+    for refs in weak_index.values():
+        group_keys: list[tuple[str, str]] = []
+        sources: set[str] = set()
+        for group_key, record in refs:
+            sources.add(record.source_id)
+            if group_key not in group_keys:
+                group_keys.append(group_key)
+        if len(group_keys) < 2 or len(sources) < 2:
+            continue
+        strong_group_keys = [key for key in group_keys if key[0] in _STRONG_IDENTIFIER_KINDS]
+        if len(strong_group_keys) != 1:
+            continue
+        target = strong_group_keys[0]
+        for group_key in group_keys:
+            if group_key != target:
+                aliases[group_key] = target
+    return aliases
+
+
 def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
@@ -120,6 +173,9 @@ def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
         for identifier in _verified_identifiers(record):
             if identifier.kind in _STRONG_IDENTIFIER_KINDS:
                 alias_keys[(identifier.kind, identifier.value)] = key
+
+    for weak_key, target_key in _safe_weak_aliases(groups).items():
+        alias_keys.setdefault(weak_key, target_key)
 
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     for key, items in groups.items():
