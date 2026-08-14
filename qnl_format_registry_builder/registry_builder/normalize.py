@@ -7,7 +7,7 @@ from registry_builder.utils import normalize_extension, normalize_mime, normaliz
 _AUTHORITY_BY_IDENTIFIER = {
     "puid": {"pronom_droid_xml", "wikidata"},
     "loc": {"loc_fdd_xml"},
-    "nara": {"nara_lod", "nara_json", "nara"},
+    "nara": {"nara_lod", "nara_json", "nara", "nara_preservation_csv"},
     "wikidata": {"wikidata"},
 }
 
