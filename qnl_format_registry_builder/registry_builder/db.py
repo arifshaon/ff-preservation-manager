@@ -26,14 +26,16 @@ CREATE TABLE IF NOT EXISTS source_record (
   source_record_id TEXT,
   urls_json TEXT
 );
-CREATE TABLE IF NOT EXISTS qnl_policy_overlay (
+CREATE TABLE IF NOT EXISTS institution_policy_overlay (
   canonical_id TEXT NOT NULL,
-  qnl_format_id TEXT,
-  spreadsheet_risk_level TEXT,
-  preservation_action TEXT,
-  proposed_preservation_plan TEXT,
-  preferred_tools TEXT,
-  conversion_process TEXT,
+  institution_id TEXT,
+  institution_name TEXT,
+  institution_format_id TEXT,
+  local_risk_level TEXT,
+  local_preservation_action TEXT,
+  local_preservation_plan TEXT,
+  local_preferred_tools TEXT,
+  local_conversion_process TEXT,
   source_file TEXT,
   source_row INTEGER
 );
@@ -48,7 +50,7 @@ def write_sqlite(path: str | Path, registry: list[CanonicalFormat]) -> None:
         con.execute("DELETE FROM format_registry")
         con.execute("DELETE FROM format_identifier")
         con.execute("DELETE FROM source_record")
-        con.execute("DELETE FROM qnl_policy_overlay")
+        con.execute("DELETE FROM institution_policy_overlay")
         for fmt in registry:
             d = fmt.to_dict()
             con.execute(
@@ -63,19 +65,21 @@ def write_sqlite(path: str | Path, registry: list[CanonicalFormat]) -> None:
                     "INSERT INTO source_record VALUES (?, ?, ?, ?, ?)",
                     (fmt.canonical_id, sr.get("source_id"), sr.get("source_type"), sr.get("source_record_id"), json.dumps(sr.get("urls", {}))),
                 )
-            for qnl in fmt.qnl_policy_overlay:
+            for policy in fmt.institution_policy_overlays:
                 con.execute(
-                    "INSERT INTO qnl_policy_overlay VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO institution_policy_overlay VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         fmt.canonical_id,
-                        qnl.get("qnl_format_id"),
-                        qnl.get("spreadsheet_risk_level"),
-                        qnl.get("preservation_action"),
-                        qnl.get("proposed_preservation_plan"),
-                        qnl.get("preferred_tools"),
-                        qnl.get("conversion_process"),
-                        qnl.get("source_file"),
-                        qnl.get("source_row"),
+                        policy.get("institution_id"),
+                        policy.get("institution_name"),
+                        policy.get("institution_format_id"),
+                        policy.get("local_risk_level"),
+                        policy.get("local_preservation_action"),
+                        policy.get("local_preservation_plan"),
+                        policy.get("local_preferred_tools"),
+                        policy.get("local_conversion_process"),
+                        policy.get("source_file"),
+                        policy.get("source_row"),
                     ),
                 )
         con.commit()
