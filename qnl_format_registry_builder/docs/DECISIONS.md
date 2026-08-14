@@ -16,7 +16,26 @@ Consequences:
 - Add a `RegistryStore` interface.
 - Add a `RegistryExporter` interface.
 - Keep source acquisition, persistence, and export responsibilities separate.
-- Refactor existing direct file writes out of `pipeline.py` in the next implementation phase.
+- The pipeline should write through the selected storage backend and generate optional exports separately.
+
+## 2026-08-14: MongoDB as first real storage backend
+
+Decision: implement MongoDB as the first production `RegistryStore` backend.
+
+Rationale:
+
+- The registry needs a queryable, durable backend for canonical formats, identifiers, institutional overlays, hazard assessments, source records and run history.
+- JSON/CSV/SQLite/Markdown outputs are useful exports, but they should not be required staging files before MongoDB persistence.
+- A common storage interface keeps future MySQL, PostgreSQL, SQLite, or file-backed stores possible without changing source adapters or reconciliation logic.
+
+Consequences:
+
+- `storage.type: mongodb` now persists directly to MongoDB through `MongoRegistryStore`.
+- The pipeline creates exactly one active storage backend per run through `create_store()`.
+- The pipeline persists `SourceSnapshot`, `RawFormatRecord`, `CanonicalFormat`, identifier claims, institutional overlays, hazard assessments, readiness records and trend records through `RegistryStore`.
+- File exports are controlled by `exports.enabled`; database-only runs can set `exports.enabled: false`.
+- PyMongo is an optional dependency installed with `python -m pip install -e ".[mongo]"`.
+- `storage.type: memory` remains the default in the sample config so a clean clone can still run without infrastructure.
 
 ## 2026-08-14: Institutional policy overlays
 
