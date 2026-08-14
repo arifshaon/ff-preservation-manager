@@ -8,14 +8,13 @@ from registry_builder.storage.mongo import MongoRegistryStore
 
 STORAGE_BACKENDS: dict[str, type[RegistryStore]] = build_registry(
     [
-        MemoryRegistryStore,
-        FileRegistryStore,
-        MongoRegistryStore,
+        ("memory", MemoryRegistryStore),
+        ("file", FileRegistryStore),
+        ("json_file", FileRegistryStore),
+        ("mongodb", MongoRegistryStore),
     ],
     plugin_kind="storage backend",
 )
-# Backwards-compatible short name for file-backed JSON document storage.
-STORAGE_BACKENDS["json_file"] = FileRegistryStore
 
 
 def resolve_storage_backend(storage_type: str) -> type[RegistryStore]:
