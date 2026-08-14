@@ -94,25 +94,36 @@ def _get(row: dict[str, str], candidates: list[str]) -> str:
     return ""
 
 
+def _candidate_headers(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(x) for x in value]
+    raise TypeError(f"field_map values must be a string or list of strings, got {type(value).__name__}")
+
+
 def _resolve_field_map(config: dict[str, Any], raw_headers: list[str]) -> dict[str, str]:
     normalized_headers = {_norm_header(h): h for h in raw_headers if _norm_header(h)}
     field_map: dict[str, str] = {}
-    for field, header in config.get("field_map", {}).items():
-        norm = _norm_header(str(header))
-        if norm not in normalized_headers:
+    for field, header_spec in config.get("field_map", {}).items():
+        candidates = [_norm_header(h) for h in _candidate_headers(header_spec)]
+        match = next((candidate for candidate in candidates if candidate in normalized_headers), None)
+        if match is None:
             available = ", ".join(sorted(normalized_headers))
+            requested = ", ".join(repr(h) for h in _candidate_headers(header_spec))
             raise ValueError(
-                f"Configured QNL field_map column for '{field}' was not found: {header!r}. "
-                f"Available normalized headers: {available}"
+                f"Configured QNL field_map column for '{field}' was not found. "
+                f"Requested one of: {requested}. Available normalized headers: {available}"
             )
-        field_map[field] = norm
+        field_map[field] = match
     return field_map
 
 
-def _field(row: dict[str, str], field_map: dict[str, str], field: str, defaults: list[str]) -> str:
-    mapped = field_map.get(field)
-    if mapped:
-        return row.get(mapped, "").strip()
+def _field(row: dict[str, str], field_map: dict[str, str], field: str, defaults: list[str], aliases: tuple[str, ...] = ()) -> str:
+    for field_name in (field, *aliases):
+        mapped = field_map.get(field_name)
+        if mapped:
+            return row.get(mapped, "").strip()
     return _get(row, defaults)
 
 
@@ -160,8 +171,10 @@ class QnlPolicyXlsxAdapter(SourceAdapter):
                 row = {headers[i]: values[i] if i < len(values) else "" for i in range(len(headers)) if headers[i]}
                 name = _field(row, field_map, "name", ["digital_file", "file_format", "file_format_name", "format_name", "name"])
                 qnl_format_id = _field(row, field_map, "source_id", ["qnl_format_id", "qnl_id"])
-                extensions = split_multi(_field(row, field_map, "extensions", ["file_extension_s", "extension", "extensions"] ))
-                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type", "mime", "mimetype"] ))
+                extensions = split_multi(_field(row, field_map, "extensions", ["file_extension_s", "extension", "extensions"]))
+                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type", "mime", "mimetype"]))
+                category = _field(row, field_map, "category", ["category", "format_category", "category_plan", "plan"], aliases=("categories",))
+                description = _field(row, field_map, "description", ["description", "description_and_justification", "description_justification", "justification"])
                 pronom_url = _field(row, field_map, "pronom_url", ["pronom", "pronom_url", "puid"])
                 puids = re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url)
                 loc_url = _field(row, field_map, "loc_url", ["loc", "library_of_congress", "loc_url"])
@@ -173,8 +186,8 @@ class QnlPolicyXlsxAdapter(SourceAdapter):
                     source_type=self.type_name,
                     source_record_id=qnl_format_id or f"qnl-row-{row_no}",
                     name=name,
-                    category=_field(row, field_map, "category", ["category", "format_category", "plan"]),
-                    description=_field(row, field_map, "description", ["description", "description_and_justification", "justification"]),
+                    category=category,
+                    description=description,
                     extensions=extensions,
                     mime_types=mime_types,
                     puids=puids,
