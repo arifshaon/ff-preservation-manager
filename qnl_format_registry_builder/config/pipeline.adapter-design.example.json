@@ -1,0 +1,48 @@
+{
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry"
+  },
+  "sources": [
+    {
+      "id": "sample_standard_package",
+      "type": "standard_json",
+      "enabled": true,
+      "uris": ["examples/sample_source_package.json"]
+    },
+    {
+      "id": "qnl_policy_current",
+      "type": "qnl_policy_xlsx",
+      "enabled": false,
+      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"]
+    }
+  ],
+  "exports": [
+    {
+      "type": "json",
+      "enabled": true,
+      "path": "output/latest/registry.json"
+    },
+    {
+      "type": "jsonl",
+      "enabled": true,
+      "path": "output/latest/registry.jsonl"
+    },
+    {
+      "type": "csv",
+      "enabled": true,
+      "path": "output/latest/registry.csv"
+    },
+    {
+      "type": "sqlite",
+      "enabled": false,
+      "path": "output/latest/registry.sqlite"
+    },
+    {
+      "type": "markdown_report",
+      "enabled": true,
+      "path": "output/latest/coverage_report.md"
+    }
+  ]
+}
