@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
+from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.utils import read_uri
 
 DEFAULT_PRONOM_TREE_URL = "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1"
 DEFAULT_PRONOM_RAW_BASE = "https://raw.githubusercontent.com/nationalarchives/pronom/develop"
@@ -66,9 +66,18 @@ class PronomRegistryAdapter(SourceAdapter):
         tree_url = self.config.get("github_tree_url") or self.config.get("tree_url")
         if not tree_url:
             return []
+        if self.offline:
+            cached = self._cached_snapshot(uri=tree_url, suffix=".json", note="retrieval_mode=github_json_tree")
+            if not cached:
+                raise FileNotFoundError(
+                    f"Offline mode requested but no cached PRONOM tree snapshot exists for {tree_url}"
+                )
+            data = Path(cached.local_path).read_bytes()
+        else:
+            tree_snapshot = self.acquire_uri_snapshot(tree_url, suffix=".json", note="retrieval_mode=github_json_tree")
+            data = Path(tree_snapshot.local_path).read_bytes()
         raw_base_url = self.config.get("raw_base_url", DEFAULT_PRONOM_RAW_BASE)
         include_paths = tuple(self.config.get("include_paths") or DEFAULT_INCLUDE_PATHS)
-        data, _headers = read_uri(tree_url)
         tree = json.loads(data.decode("utf-8"))
         uris: list[str] = []
         for entry in tree.get("tree", []):
@@ -98,24 +107,10 @@ class PronomRegistryAdapter(SourceAdapter):
         return deduped
 
     def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
-        for uri in self._uris():
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            local_path = snapshot_dir / f"{digest}.json"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-                note="retrieval_mode=github_json",
-            ))
-        return snapshots
+        return [
+            self.acquire_uri_snapshot(uri, suffix=".json", note="retrieval_mode=github_json")
+            for uri in self._uris()
+        ]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
@@ -150,6 +145,8 @@ class PronomRegistryAdapter(SourceAdapter):
                     "retrieval_mode": "github_json",
                     "source_file": snap.uri,
                     "snapshot_sha256": snap.sha256,
+                    "snapshot_changed": snap.changed,
+                    "snapshot_from_cache": snap.from_cache,
                     "last_updated_date": record.get("lastUpdatedDate"),
                     "format_disclosure": record.get("formatDisclosure"),
                     "format_risk": record.get("formatRisk"),
