@@ -1,5 +1,10 @@
 {
   "pipeline_version": "0.1.0",
+  "method_profiles": {
+    "enabled": true,
+    "path": "method_profiles.example.json",
+    "notes": "Assign reusable preservation method profiles by format family/domain. This does not create bespoke methods per file format."
+  },
   "sources": [
     {
       "id": "qnl_policy_current",
