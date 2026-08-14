@@ -1,0 +1,14 @@
+{
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry",
+    "collection_prefix": "",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "Database-only run. Set true only when JSON/CSV/SQLite/Markdown exports are needed for review or sharing."
+  }
+}
