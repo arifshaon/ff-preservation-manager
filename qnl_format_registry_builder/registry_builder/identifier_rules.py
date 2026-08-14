@@ -61,5 +61,9 @@ def is_verified_identifier(kind: str, source_type: str, rules: dict[str, dict[st
     return source_type in set(rule.get("verified_from") or [])
 
 
+def strong_identifier_order(rules: dict[str, dict[str, Any]]) -> list[str]:
+    return [kind for kind, rule in rules.items() if str(rule.get("strength", "")).lower() == "strong"]
+
+
 def strong_identifier_kinds(rules: dict[str, dict[str, Any]]) -> set[str]:
-    return {kind for kind, rule in rules.items() if str(rule.get("strength", "")).lower() == "strong"}
+    return set(strong_identifier_order(rules))
