@@ -5,6 +5,19 @@ from typing import Any
 
 from registry_builder.storage.base import RegistryStore
 
+_COLLECTION_ATTRS = {
+    "runs": "runs",
+    "source_snapshots": "snapshots",
+    "source_records": "source_records",
+    "canonical_formats": "canonical_formats",
+    "format_identifiers": "identifiers",
+    "institution_policy_overlays": "institution_policy_overlays",
+    "hazard_assessments": "hazard_assessments",
+    "readiness_assessments": "readiness_assessments",
+    "trend_observations": "trend_observations",
+    "assessment_changes": "assessment_changes",
+}
+
 
 class MemoryRegistryStore(RegistryStore):
     """In-memory RegistryStore implementation for tests and local dry runs.
@@ -26,6 +39,43 @@ class MemoryRegistryStore(RegistryStore):
         self.readiness_assessments: list[dict[str, Any]] = []
         self.trend_observations: list[dict[str, Any]] = []
         self.assessment_changes: list[dict[str, Any]] = []
+
+    def upsert(self, collection: str, key: str | None, doc: dict[str, Any]) -> str:
+        stored = deepcopy(doc)
+        if collection in {"runs", "canonical_formats"}:
+            if collection == "runs":
+                key = key or stored.get("run_id") or stored.get("id")
+                stored["run_id"] = str(key)
+                self.runs[str(key)] = stored
+                return str(key)
+            key = key or stored.get("canonical_id") or stored.get("format_id")
+            stored["canonical_id"] = str(key)
+            self.canonical_formats[str(key)] = stored
+            return str(key)
+        attr = _COLLECTION_ATTRS.get(collection)
+        if attr is None:
+            raise ValueError(f"Unknown collection: {collection}")
+        target = getattr(self, attr)
+        if not isinstance(target, list):
+            raise ValueError(f"Collection is not list-backed: {collection}")
+        key = key or f"{collection}-{len(target) + 1}"
+        stored.setdefault("_storage_key", key)
+        for idx, existing in enumerate(target):
+            if existing.get("_storage_key") == key:
+                target[idx] = stored
+                return str(key)
+        target.append(stored)
+        return str(key)
+
+    def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        attr = _COLLECTION_ATTRS.get(collection)
+        if attr is None:
+            raise ValueError(f"Unknown collection: {collection}")
+        target = getattr(self, attr)
+        records = list(target.values()) if isinstance(target, dict) else list(target)
+        if filt:
+            records = [record for record in records if all(record.get(k) == v for k, v in filt.items())]
+        return [deepcopy(record) for record in records]
 
     def create_run(self, run: dict[str, Any]) -> str:
         run_id = str(run.get("run_id") or run.get("id") or f"run-{len(self.runs) + 1}")
