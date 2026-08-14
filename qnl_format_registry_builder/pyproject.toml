@@ -8,8 +8,10 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
-[tool.setuptools]
-packages = ["registry_builder"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["registry_builder*"]
+exclude = ["config*", "output*", "work*", "tests*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
