@@ -2,7 +2,7 @@
 
 This project is a **registry-building system**, not a manually curated static registry.
 
-It builds a local file-format registry by running a repeatable pipeline over configured source datasets such as the QNL policy spreadsheet, PRONOM/DROID XML, LOC FDD XML, NARA or other standardized source packages, and future adapters.
+It builds a local file-format registry by running a repeatable pipeline over configured source datasets such as an institutional policy spreadsheet, PRONOM/DROID XML, LOC FDD XML, NARA or other standardized source packages, and future adapters.
 
 ## Core principle
 
@@ -16,10 +16,11 @@ Source acquisition → extraction/parsing → normalization → matching/reconci
 
 ## Why this structure
 
-The pipeline follows the agreed QNL model:
+The pipeline follows the agreed preservation-risk model:
 
-- QNL's current spreadsheet is treated as a **QNL policy overlay**, not as the boundary of all known file formats.
-- External sources and QNL criteria are not added together as one risk score.
+- An institution's current spreadsheet is treated as an **institutional policy overlay**, not as the boundary of all known file formats.
+- QNL is the first configured institutional profile, not a hard-coded assumption in the core model.
+- External sources and institutional criteria are not added together as one risk score.
 - Hazard, trend, exposure, readiness, confidence, and provenance remain separate axes.
 - Future change reports should generate work items from change events rather than mixing tasks into state labels.
 - The queryable registry should live in a storage backend, initially MongoDB, accessed through a common storage interface.
@@ -39,6 +40,8 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and l
 - reconciliation rather than additive scoring;
 - proposed package structure and next implementation steps.
 
+See [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) for the institution-neutral model used to support QNL and future institutional policy spreadsheets.
+
 See [`docs/PRESERVATION_METHOD_PROFILES.md`](docs/PRESERVATION_METHOD_PROFILES.md) for the method-profile model used to generate scalable action-plan templates.
 
 ## Current implementation status
@@ -50,11 +53,13 @@ This starter implementation includes:
 - immutable source snapshots with SHA-256 hashes;
 - source extraction adapters for:
   - standardized JSON source packages;
-  - QNL policy XLSX files;
+  - institution policy XLSX files;
   - PRONOM/DROID XML signature files;
   - LOC FDD XML records;
+- deprecated compatibility alias for the older `qnl_policy_xlsx` adapter name;
 - normalization of extensions, MIME types, PUIDs, LOC IDs and related identifiers;
 - conservative identifier-led reconciliation;
+- institution policy overlays attached to canonical format records;
 - reusable preservation method profiles assigned after reconciliation;
 - JSON, JSONL, CSV and SQLite demonstration exports;
 - coverage reporting;
@@ -69,7 +74,7 @@ Requires Python 3.10 or later. The current runtime uses only the Python standard
 ```bash
 cd qnl_format_registry_builder
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 python -m pip install -e .
 ```
 
@@ -134,7 +139,15 @@ chemistry_scientific_data
 
 This avoids maintaining a bespoke preservation method for each individual format.
 
-## Running against the QNL policy workbook
+## Running against an institutional policy workbook
+
+The preferred spreadsheet adapter is:
+
+```text
+institution_policy_xlsx
+```
+
+QNL uses this same generic adapter with QNL metadata and QNL column mappings supplied in configuration.
 
 1. Copy the workbook into `input/`, for example:
 
@@ -147,9 +160,15 @@ input/QNL File Format Policy and Action Plan_27_November_2025.xlsx
 ```json
 {
   "id": "qnl_policy_current",
-  "type": "qnl_policy_xlsx",
+  "type": "institution_policy_xlsx",
   "enabled": true,
-  "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"]
+  "institution_id": "qnl",
+  "institution_name": "Qatar National Library",
+  "field_map": {
+    "institution_format_id": ["QNL Format ID"],
+    "name": ["Digital file"],
+    "extensions": ["File Extension(s)"]
+  }
 }
 ```
 
@@ -159,7 +178,15 @@ input/QNL File Format Policy and Action Plan_27_November_2025.xlsx
 python -m registry_builder run --config config/sources.example.json --workdir work --out output
 ```
 
-The QNL workbook content will be imported as `qnl_policy_overlay` attached to canonical format records.
+The workbook content will be imported as `institution_policy_overlays` attached to canonical format records.
+
+The older adapter name remains available as a compatibility alias:
+
+```text
+qnl_policy_xlsx
+```
+
+New configurations should use `institution_policy_xlsx`.
 
 ## Source adapter pattern
 
