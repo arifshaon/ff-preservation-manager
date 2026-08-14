@@ -1,5 +1,13 @@
 {
   "pipeline_version": "0.1.0",
+  "storage": {
+    "type": "memory",
+    "notes": "Default keeps the sample runnable without infrastructure. For the first real deployment, change type to mongodb and supply uri/database. The pipeline writes directly to the selected RegistryStore; exports are optional and are not staging files."
+  },
+  "exports": {
+    "enabled": true,
+    "notes": "File exports are optional review/interchange products. Set enabled:false for a database-only run."
+  },
   "method_profiles": {
     "enabled": true,
     "path": "method_profiles.example.json",
