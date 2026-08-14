@@ -52,6 +52,23 @@ def _risk_band(value: str | None) -> str | None:
     return None
 
 
+def _nara_band_from_native_rating(rating: float | None) -> str | None:
+    """Map NARA's native numeric rating to a hazard band.
+
+    NARA's native direction is inverted relative to intuitive hazard scoring:
+    higher means safer. The normalized band/rating below is used for current
+    Low/Moderate/High reconciliation; the native numeric value is retained for
+    trend/change detection and threshold-distance reporting.
+    """
+    if rating is None:
+        return None
+    if rating >= 23:
+        return "Low"
+    if rating <= -23:
+        return "High"
+    return "Moderate"
+
+
 def _risk_rating(value: str | None) -> float | None:
     band = _risk_band(value)
     if not band:
@@ -76,10 +93,13 @@ def _urls(row: dict[str, Any]) -> dict[str, str]:
 
 def _hazard(row: dict[str, Any], source_type: str) -> dict[str, Any]:
     risk_level = _get(row, "NARA Risk Level", "Risk Level")
-    band = _risk_band(risk_level)
-    rating = _risk_rating(risk_level)
     native_numeric = _float(_get(row, "Numeric Risk Rating", "TOTAL Numeric Risk Rating"))
     nara_total = _float(_get(row, "NARA TOTAL"))
+
+    native_band_from_rating = _nara_band_from_native_rating(native_numeric)
+    text_band = _risk_band(risk_level)
+    band = native_band_from_rating or text_band
+    rating = BAND_TO_SCORE[band] if band else _risk_rating(risk_level)
 
     hazard: dict[str, Any] = {}
     if band:
@@ -90,12 +110,19 @@ def _hazard(row: dict[str, Any], source_type: str) -> dict[str, Any]:
         hazard["normalized_rating"] = rating
     if risk_level:
         hazard["native_band"] = risk_level
+        hazard["external_native_band"] = risk_level
     if native_numeric is not None:
         hazard["native_rating"] = native_numeric
+        hazard["external_rating_native"] = native_numeric
+        hazard["external_native_rating"] = native_numeric
         hazard["nara_native_numeric_risk_rating"] = native_numeric
         hazard["native_scale"] = _NARA_NATIVE_SCALE
+        hazard["external_rating_native_scale"] = _NARA_NATIVE_SCALE
         hazard["native_direction"] = _NARA_NATIVE_DIRECTION
+        hazard["external_rating_native_direction"] = _NARA_NATIVE_DIRECTION
         hazard["native_direction_note"] = "NARA native numeric rating is retained separately; higher means safer."
+        if native_band_from_rating:
+            hazard["native_rating_band"] = native_band_from_rating
     if nara_total is not None:
         hazard["nara_total"] = nara_total
     if hazard:
