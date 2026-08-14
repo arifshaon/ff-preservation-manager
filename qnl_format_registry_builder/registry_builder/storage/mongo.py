@@ -76,6 +76,20 @@ class MongoRegistryStore(RegistryStore):
     def _insert(self, collection: str, record: dict[str, Any]) -> None:
         self._collection(collection).insert_one(_mongo_safe(record))
 
+    def upsert(self, collection: str, key: str | None, doc: dict[str, Any]) -> str:
+        key = str(key or _document_key(doc))
+        stored = deepcopy(doc)
+        stored.setdefault("_storage_key", key)
+        self._replace(collection, {"_storage_key": key}, stored)
+        return key
+
+    def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        cursor = self._collection(collection).find(_mongo_safe(filt or {}), {"_id": 0})
+        return [dict(item) for item in cursor]
+
+    def close(self) -> None:
+        self.client.close()
+
     def _ensure_indexes(self) -> None:
         A = self._ASCENDING
         indexes = {
