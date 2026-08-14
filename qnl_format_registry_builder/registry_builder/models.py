@@ -39,6 +39,7 @@ class SourceSnapshot:
     note: str | None = None
     changed: bool | None = None
     from_cache: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
