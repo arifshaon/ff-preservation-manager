@@ -6,10 +6,10 @@ A useful lesson from the QNL workbook run: fixing the format-name field and mapp
 
 That means the system needs two complementary matching layers:
 
-1. **Primary rules** for common, high-confidence cases, usually extension/source/evidence driven.
-2. **Fallback-only category rules** for long-term scalability when no primary rule matched.
+1. **Extension rules** for common, high-confidence cases.
+2. **Category fallback rules** for long-term scalability.
 
-Extension lists are useful but will always lag a growing registry. Categories and descriptions provide a fallback when a format is ordinary but not yet enumerated in a profile rule. They should not be additive broad classifiers.
+Extension lists are useful but will always lag a growing registry. Categories and descriptions provide a safer fallback when a format is ordinary but not yet enumerated in a profile rule.
 
 ## Institutional field-map requirements
 
@@ -34,7 +34,7 @@ Multiple candidate headers are allowed for a single field. Extraction fails loud
 
 ## Assignment-rule improvements
 
-The method profile config should include both explicit extensions and fallback-only categories.
+The method profile config should include both explicit extensions and category fallbacks.
 
 Examples of missing ordinary extensions that should be covered:
 
@@ -53,26 +53,11 @@ mol/cif/sdf/pdb          → chemistry_scientific_data
 fasta/fastq              → scientific_data
 ```
 
-Category rules should be marked with:
-
-```json
-{ "fallback_only": true }
-```
-
-This means:
-
-```text
-If a primary rule matches, keep the primary profile(s) only.
-If no primary rule matches, try fallback-only category rules.
-```
-
-This avoids precision failures such as assigning `office_document` to FASTA, CIF, or XSD simply because they sit inside a broad institutional category like `Textual and Word Processing`.
-
 Recommended fallback categories:
 
 ```text
 Structured Data                  → structured_data
-Textual and Word Processing      → structured_text
+Textual and Word Processing      → structured_text and/or office_document
 Scientific Data                  → scientific_data
 Geospatial / GIS                 → geospatial_data
 Raster Image / Still Image       → raster_image
@@ -80,23 +65,44 @@ Audio / Video / Audiovisual      → audiovisual
 Archive / Container / Compressed → archive_or_container
 ```
 
-The office-document fallback should be narrow. Avoid matching the phrase `word processing` by itself when the source category is broader than office documents.
+## Fallback-only category rules
 
-## Metrics to watch
+Category rules should normally be marked:
 
-The run report should track both coverage and assignment precision:
-
-```text
-formats_with_method_profiles
-average_direct_method_profiles_per_format
-average_effective_method_profiles_per_format
-max_direct_method_profiles_per_format
-max_effective_method_profiles_per_format
+```json
+{
+  "profile": "structured_data",
+  "fallback_only": true,
+  "match": {
+    "category_contains": ["structured data"]
+  }
+}
 ```
 
-The most useful precision metric is `average_direct_method_profiles_per_format`. If it rises unexpectedly, broad rules may be over-firing.
+This makes category rules a safety net. They apply only when no primary rule, such as an extension rule, has already matched the format.
 
-`average_effective_method_profiles_per_format` includes inherited profiles, so it will naturally be higher.
+Without this guard, broad categories can over-assign methods. For example, a category such as `Textual and Word Processing` may include FASTA, CIF, XSD, Markdown, Word documents, and plain text. It should not automatically add office-document guidance to every one of those records.
+
+## Interpreting profile-count metrics
+
+`generic_preservation` is intentionally a baseline inherited by nearly every assigned method. It is not a discriminating classifier.
+
+For that reason, run-report profile-count averages exclude `generic_preservation` and track it separately as:
+
+```text
+generic_preservation_count
+```
+
+The more useful precision metrics are:
+
+```text
+average_direct_discriminating_method_profiles_per_format
+average_effective_discriminating_method_profiles_per_format
+direct_method_profile_distribution
+effective_method_profile_distribution
+```
+
+`structured_text` is broad by design and may legitimately apply to many formats. It should be monitored through `effective_method_profile_distribution`; a rising count is not automatically a bug, but it is a useful signal to inspect if binary formats start inheriting text-specific guidance.
 
 ## Interpretation
 
@@ -106,8 +112,7 @@ Before adding highly specific method profiles, check:
 
 - whether source fields needed by existing matching rules are actually imported;
 - whether common extensions are missing from existing profiles;
-- whether fallback-only category rules are available;
-- whether broad category rules are inflating assignments;
+- whether category-based fallback rules are available;
 - whether the unmatched formats truly need new profiles or only better assignment rules.
 
 ## Next diagnostics
@@ -116,12 +121,12 @@ After running against the real workbook, inspect:
 
 - total canonical records;
 - records with assigned method profiles;
-- average direct profiles per format;
-- average effective profiles per format;
 - records with category populated;
 - records with description populated;
 - records with MIME type populated;
 - top unmatched categories/extensions;
-- formats that matched only by category fallback.
+- formats that matched only by category fallback;
+- average discriminating profiles per format;
+- direct and effective method-profile distribution.
 
 This will show whether to add more method profiles or improve source mapping further.
