@@ -11,6 +11,7 @@ def _record(canonical_id, *, band="Low", basis="external_only", native=None, rev
         "preferred_name": canonical_id,
         "category": "example",
         "identifiers": {"extension": [canonical_id.replace("fmt-", "")]},
+        "source_records": [{"source_id": "nara"}],
         "hazard_assessment": hazard,
     }
 
@@ -48,3 +49,16 @@ def test_detects_added_removed_hazard_native_and_divergence_changes():
     assert "divergence_opened" in change_types
     assert report["change_counts"]["record_added"] == 1
     assert report["change_counts"]["record_removed"] == 1
+
+
+def test_bulk_change_type_collapses_to_source_coverage_event():
+    previous = [_record(f"fmt-{i:03d}", native=30) for i in range(120)]
+    current = [_record(f"fmt-{i:03d}", native=-30) for i in range(120)]
+
+    report = detect_registry_changes(previous, current, run_id="run-3", created_at="2026-08-14T00:00:00+00:00")
+
+    assert report["raw_change_counts"]["external_rating_native_changed"] == 120
+    assert report["change_counts"] == {"source_coverage_changed": 1}
+    assert report["changes"][0]["change_type"] == "source_coverage_changed"
+    assert report["changes"][0]["collapsed_change_type"] == "external_rating_native_changed"
+    assert report["changes"][0]["affected_count"] == 120
