@@ -37,6 +37,8 @@ class SourceSnapshot:
     local_path: str
     content_type: str | None = None
     note: str | None = None
+    changed: bool | None = None
+    from_cache: bool = False
 
 
 @dataclass
