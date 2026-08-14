@@ -44,6 +44,7 @@ class SourceAdapter(ABC):
         suffix: str,
         note: str | None = None,
         content_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SourceSnapshot | None:
         index = self._load_snapshot_index()
         entry = index.get(uri)
@@ -52,6 +53,9 @@ class SourceAdapter(ABC):
         local_path = Path(entry.get("local_path", ""))
         if not local_path.exists():
             return None
+        cached_metadata = dict(entry.get("metadata") or {})
+        if metadata:
+            cached_metadata.update(metadata)
         return SourceSnapshot(
             source_id=self.source_id,
             source_type=self.type_name,
@@ -63,17 +67,26 @@ class SourceAdapter(ABC):
             note="; ".join(x for x in [note, "cache=hit", "offline=true" if self.offline else "reused=true"] if x),
             changed=False,
             from_cache=True,
+            metadata=cached_metadata,
         )
 
-    def acquire_uri_snapshot(self, uri: str, *, suffix: str, note: str | None = None) -> SourceSnapshot:
+    def acquire_uri_snapshot(
+        self,
+        uri: str,
+        *,
+        suffix: str,
+        note: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SourceSnapshot:
         """Acquire one URI as a content-addressed source snapshot.
 
         Online mode still checks the upstream source, but it no longer rewrites an
         unchanged cached snapshot. Offline mode uses the source snapshot index and
         fails loudly if the requested URI has not been cached before.
         """
+        metadata = dict(metadata or {})
         if self.offline:
-            cached = self._cached_snapshot(uri=uri, suffix=suffix, note=note)
+            cached = self._cached_snapshot(uri=uri, suffix=suffix, note=note, metadata=metadata)
             if cached:
                 return cached
             raise FileNotFoundError(
@@ -99,6 +112,7 @@ class SourceAdapter(ABC):
             "content_type": content_type,
             "acquired_at": acquired_at,
             "source_type": self.type_name,
+            "metadata": metadata,
         }
         self._write_snapshot_index(index)
         return SourceSnapshot(
@@ -112,10 +126,27 @@ class SourceAdapter(ABC):
             note="; ".join(x for x in [note, "changed=true" if changed else "changed=false"] if x),
             changed=changed,
             from_cache=False,
+            metadata=metadata,
         )
 
-    def acquire_uri_snapshots(self, uris: list[str], *, suffix: str, note: str | None = None) -> list[SourceSnapshot]:
-        return [self.acquire_uri_snapshot(uri, suffix=suffix, note=note) for uri in uris]
+    def acquire_uri_snapshots(
+        self,
+        uris: list[str],
+        *,
+        suffix: str,
+        note: str | None = None,
+        metadata_by_uri: dict[str, dict[str, Any]] | None = None,
+    ) -> list[SourceSnapshot]:
+        metadata_by_uri = metadata_by_uri or {}
+        return [
+            self.acquire_uri_snapshot(
+                uri,
+                suffix=suffix,
+                note=note,
+                metadata=metadata_by_uri.get(uri),
+            )
+            for uri in uris
+        ]
 
     @abstractmethod
     def acquire(self) -> list[SourceSnapshot]:
