@@ -102,19 +102,37 @@ def _candidate_headers(value: Any) -> list[str]:
 
 
 def _resolve_field_map(config: dict[str, Any], raw_headers: list[str]) -> dict[str, str]:
+    """Resolve configured logical fields to normalized workbook headers.
+
+    All missing configured fields are reported together. This matters for
+    first-run usability: a user should not have to fix one header, rerun, then
+    discover the next missing header.
+    """
     normalized_headers = {_norm_header(h): h for h in raw_headers if _norm_header(h)}
     field_map: dict[str, str] = {}
+    missing: list[tuple[str, list[str]]] = []
+
     for field, header_spec in config.get("field_map", {}).items():
-        candidates = [_norm_header(h) for h in _candidate_headers(header_spec)]
+        raw_candidates = _candidate_headers(header_spec)
+        candidates = [_norm_header(h) for h in raw_candidates]
         match = next((candidate for candidate in candidates if candidate in normalized_headers), None)
         if match is None:
-            available = ", ".join(sorted(normalized_headers))
-            requested = ", ".join(repr(h) for h in _candidate_headers(header_spec))
-            raise ValueError(
-                f"Configured institutional field_map column for '{field}' was not found. "
-                f"Requested one of: {requested}. Available normalized headers: {available}"
-            )
+            missing.append((field, raw_candidates))
+            continue
         field_map[field] = match
+
+    if missing:
+        available = ", ".join(sorted(normalized_headers))
+        missing_lines = [
+            f"- {field}: requested one of {', '.join(repr(h) for h in candidates)}"
+            for field, candidates in missing
+        ]
+        raise ValueError(
+            "Configured institutional field_map columns were not found:\n"
+            + "\n".join(missing_lines)
+            + f"\nAvailable normalized headers: {available}"
+        )
+
     return field_map
 
 
@@ -176,8 +194,8 @@ class InstitutionPolicyXlsxAdapter(SourceAdapter):
                 name = _field(row, field_map, "name", ["digital_file", "file_format", "file_format_name", "format_name", "name"])
                 institution_format_id = _field(row, field_map, "institution_format_id", ["institution_format_id", "format_id", "local_format_id"], aliases=("source_id",))
                 extensions = split_multi(_field(row, field_map, "extensions", ["file_extension_s", "extension", "extensions"]))
-                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type", "mime", "mimetype"]))
-                category = _field(row, field_map, "category", ["category", "format_category", "category_plan", "plan"], aliases=("categories",))
+                mime_types = split_multi(_field(row, field_map, "mime_types", ["mime_type_s", "mime_type", "mime", "mimetype"]))
+                category = _field(row, field_map, "category", ["category_plan_s", "category_plan", "category", "format_category", "plan"], aliases=("categories",))
                 description = _field(row, field_map, "description", ["description", "description_and_justification", "description_justification", "justification"])
                 pronom_url = _field(row, field_map, "pronom_url", ["pronom", "pronom_url", "puid"])
                 puids = re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url)
