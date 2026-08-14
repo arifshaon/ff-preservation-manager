@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from registry_builder.hazard import BAND_TO_SCORE, reconcile_hazard
-from registry_builder.identifier_rules import load_identifier_rules, strong_identifier_kinds
+from registry_builder.identifier_rules import load_identifier_rules, strong_identifier_kinds, strong_identifier_order
 from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, utc_now_iso
 from registry_builder.utils import slugify
 
@@ -43,7 +43,7 @@ def _weak_match_key(record: RawFormatRecord) -> tuple[str, str] | None:
     return None
 
 
-def strongest_key(record: RawFormatRecord, *, strong_kinds: set[str] | None = None) -> tuple[str, str]:
+def strongest_key(record: RawFormatRecord, *, strong_kinds: list[str] | set[str] | None = None) -> tuple[str, str]:
     """Return the strongest safe matching key for a raw record.
 
     Strong one-to-one identifiers may group records only when the identifier was
@@ -51,8 +51,8 @@ def strongest_key(record: RawFormatRecord, *, strong_kinds: set[str] | None = No
     extensions are not primary grouping keys because they can describe broad
     format classes or families. Strong identifier namespaces are configurable.
     """
-    strong_kinds = strong_kinds or strong_identifier_kinds(load_identifier_rules())
-    for kind in sorted(strong_kinds):
+    strong_order = list(strong_kinds) if strong_kinds is not None else strong_identifier_order(load_identifier_rules())
+    for kind in strong_order:
         verified = _verified_identifiers(record, kind)
         if verified:
             return (kind, verified[0].value)
@@ -261,12 +261,13 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
 
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
     rules = identifier_rules or load_identifier_rules()
+    strong_order = strong_identifier_order(rules)
     strong_kinds = strong_identifier_kinds(rules)
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
 
     for record in records:
-        key = strongest_key(record, strong_kinds=strong_kinds)
+        key = strongest_key(record, strong_kinds=strong_order)
         groups[key].append(record)
         for identifier in _verified_identifiers(record):
             if identifier.kind in strong_kinds:
