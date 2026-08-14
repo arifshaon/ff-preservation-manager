@@ -8,18 +8,29 @@
   "sources": [
     {
       "id": "qnl_policy_current",
-      "type": "qnl_policy_xlsx",
+      "type": "institution_policy_xlsx",
       "enabled": false,
+      "institution_id": "qnl",
+      "institution_name": "Qatar National Library",
+      "institution_format_id_prefix": "QNL",
       "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
       "field_map": {
+        "institution_format_id": ["QNL Format ID"],
         "name": ["Digital file"],
-        "source_id": ["QNL Format ID"],
         "extensions": ["File Extension(s)"],
         "mime_types": ["MIME", "MIME Type", "Mime Type"],
         "category": ["Category/Plan", "Category", "Format Category", "Plan"],
-        "description": ["Description and Justification", "Description/Justification", "Description", "Justification"]
+        "description": ["Description and Justification", "Description/Justification", "Description", "Justification"],
+        "risk_level": ["QNL Risk Level", "Risk Level", "Risk"],
+        "preservation_action": ["QNL Preservation Action", "Preservation Action", "Action"],
+        "proposed_preservation_plan": ["QNL Proposed Preservation Plan", "Proposed Preservation Plan", "Plan"],
+        "preferred_tools": ["Preferred Processing and Conversion Tool(s)", "Preferred Tools", "Tool(s)"],
+        "conversion_process": ["Conversion Process", "Command", "Process"],
+        "pronom_url": ["PRONOM", "PRONOM URL", "PUID"],
+        "loc_url": ["LOC", "Library of Congress", "LOC URL"],
+        "wikidata_url": ["Wikidata", "Wikidata URL"]
       },
-      "notes": "Enable this after copying the QNL workbook into input/. Imported as QNL policy overlay, not as the registry boundary. field_map values must match workbook headers and fail loudly if renamed. Multiple candidate headers may be supplied for one logical field."
+      "notes": "QNL is treated as one institutional profile. The core adapter is institution-neutral; field_map values must match workbook headers and fail loudly if renamed. Multiple candidate headers may be supplied for one logical field."
     },
     {
       "id": "example_curated_source",
