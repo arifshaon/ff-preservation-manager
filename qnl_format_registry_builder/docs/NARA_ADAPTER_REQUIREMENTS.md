@@ -77,26 +77,55 @@ The adapter emits both a normalized value for the current reconciler and native 
   "external_band": "Moderate",
   "rating": 2.0,
   "normalized_rating": 2.0,
-  "native_rating": -12,
-  "native_scale": "nara_file_format_risk_matrix",
-  "native_direction": "higher_is_safer",
+  "external_rating_native": -12,
+  "external_rating_native_scale": "nara_file_format_risk_matrix",
+  "external_rating_native_direction": "higher_is_safer",
+  "native_rating_band": "Moderate",
   "native_band": "Moderate Risk"
 }
 ```
 
 The normalized value supports current Low/Moderate/High reconciliation. The native value remains available for trend calculation, calibration, threshold analysis, and explaining edge cases such as nearly-High or barely-Moderate formats.
 
-## Direction matters
+The reconciled `hazard_assessment` also carries these native fields when available:
+
+```json
+{
+  "basis": "institution_override",
+  "external_rating": 2.0,
+  "institution_rating": 1.0,
+  "external_rating_native": 22.0,
+  "external_rating_native_direction": "higher_is_safer",
+  "external_native_gap_to_institution_band": 1.0
+}
+```
+
+`external_native_gap_to_institution_band` is a review aid only. It is the distance from the NARA native rating to the nearest threshold for the institution's band. It is not used as the normalized hazard score.
+
+## Direction and cutoffs
 
 NARA's native numeric direction is inverted relative to intuitive hazard scoring: higher means safer. The adapter records this explicitly:
 
 ```json
 {
-  "native_direction": "higher_is_safer"
+  "external_rating_native_direction": "higher_is_safer"
 }
 ```
 
 No downstream logic should assume that a larger native source rating always means higher hazard.
+
+Current native-to-band mapping:
+
+```python
+def nara_band(rating: float) -> str:
+    if rating >= 23:
+        return "Low"
+    if rating <= -23:
+        return "High"
+    return "Moderate"
+```
+
+The native value must not be read by `_hazard_score_from_dict()` as a direct hazard score, because that would reverse the meaning of the scale.
 
 ## Identifier authority
 
@@ -121,6 +150,7 @@ The adapter and reconciler now have regression tests for:
 - native numeric rating preserved;
 - native direction preserved;
 - normalized band/rating supplied separately;
+- native rating copied into reconciled hazard assessment;
 - NARA ID verified as a NARA identifier;
 - PUIDs from NARA PRONOM URL kept unverified;
 - NARA + institutional agreement produces `corroborated`;
