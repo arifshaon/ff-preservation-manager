@@ -1,10 +1,10 @@
 import pytest
 
-from registry_builder.adapters.qnl_policy_xlsx import _field, _get, _resolve_field_map
+from registry_builder.adapters.institution_policy_xlsx import _field, _get, _resolve_field_map
 
 
-def test_get_does_not_fuzzy_bind_format_to_qnl_format_id():
-    row = {"qnl_format_id": "QNL_099_Comma_Separated_Values", "digital_file": "Comma Separated Values"}
+def test_get_does_not_fuzzy_bind_format_to_institution_format_id():
+    row = {"institution_format_id": "QNL_099_Comma_Separated_Values", "digital_file": "Comma Separated Values"}
     assert _get(row, ["format"]) == ""
     assert _get(row, ["digital_file"]) == "Comma Separated Values"
 
