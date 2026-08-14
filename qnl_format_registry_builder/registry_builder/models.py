@@ -16,8 +16,8 @@ class Identifier:
     `verified` means the identifier came from the authority that owns that
     identifier namespace, for example a PUID from PRONOM/DROID XML, a LOC FDD ID
     from LOC FDD XML, or a NARA ID from a NARA source. Identifiers copied from a
-    hand-maintained spreadsheet remain useful evidence, but they are not strong
-    reconciliation keys until confirmed by an authoritative source.
+    hand-maintained institutional spreadsheet remain useful evidence, but they
+    are not strong reconciliation keys until confirmed by an authoritative source.
     """
 
     kind: str
@@ -55,6 +55,8 @@ class RawFormatRecord:
     wikidata_ids: list[str] = field(default_factory=list)
     identifiers: list[Identifier] = field(default_factory=list)
     urls: dict[str, str] = field(default_factory=dict)
+    institution_policy: dict[str, Any] = field(default_factory=dict)
+    # Backwards-compatible input alias. New adapters should use institution_policy.
     qnl: dict[str, Any] = field(default_factory=dict)
     hazard: dict[str, Any] = field(default_factory=dict)
     readiness: dict[str, Any] = field(default_factory=dict)
@@ -63,7 +65,10 @@ class RawFormatRecord:
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if data.get("qnl") and not data.get("institution_policy"):
+            data["institution_policy"] = data["qnl"]
+        return data
 
 
 @dataclass
@@ -75,7 +80,7 @@ class CanonicalFormat:
     identifiers: dict[str, list[str]] = field(default_factory=dict)
     identifier_claims: list[dict[str, Any]] = field(default_factory=list)
     source_records: list[dict[str, Any]] = field(default_factory=list)
-    qnl_policy_overlay: list[dict[str, Any]] = field(default_factory=list)
+    institution_policy_overlays: list[dict[str, Any]] = field(default_factory=list)
     external_hazard: list[dict[str, Any]] = field(default_factory=list)
     hazard_assessment: dict[str, Any] = field(default_factory=dict)
     readiness: list[dict[str, Any]] = field(default_factory=list)
