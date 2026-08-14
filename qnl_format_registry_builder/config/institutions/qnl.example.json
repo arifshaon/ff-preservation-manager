@@ -4,12 +4,17 @@
   "institution_format_id_prefix": "QNL",
   "local_risk_terms": ["Low Risk", "Moderate Risk", "High Risk"],
   "local_policy_fields": {
-    "institution_format_id": "QNL Format ID",
-    "format_name": "Digital file",
-    "extensions": "File Extension(s)",
-    "risk_level": "QNL Risk Level",
-    "preservation_action": "QNL Preservation Action",
-    "preservation_plan": "QNL Proposed Preservation Plan"
+    "institution_format_id": ["QNL Format ID"],
+    "format_name": ["Digital file"],
+    "extensions": ["File Extension(s)"],
+    "mime_types": ["MIME type(s)", "MIME", "MIME Type"],
+    "category": ["Category/Plan(s)", "Category/Plan", "Category"],
+    "description": ["Description and Justification", "Description/Justification", "Description"],
+    "risk_level": ["QNL Risk Level", "Risk Level", "Risk"],
+    "preservation_action": ["QNL Preservation Action", "Preservation Action"],
+    "preservation_plan": ["QNL Proposed Preservation Plan", "Proposed Preservation Plan"],
+    "preferred_tools": ["QNL Preferred Processing and Conversion Tool(s)", "Preferred Processing and Conversion Tool(s)"],
+    "conversion_process": ["Conversion Process", "Command", "Process"]
   },
   "notes": "This file is an example institutional profile. The core registry builder should not contain QNL-specific assumptions."
 }
