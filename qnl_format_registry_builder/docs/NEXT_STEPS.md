@@ -1,6 +1,62 @@
 # Next steps
 
-## 1. Run the MongoDB-backed QNL + NARA build
+## 1. Test baseline/change detection with file storage, then MongoDB
+
+Change detection is now implemented. The first run against an empty selected store is a `baseline` run. Later runs against the same store path/database compare the previous current registry view to the new build and persist typed events in `assessment_changes`.
+
+Test with file storage first:
+
+```json
+{
+  "storage": {
+    "type": "file",
+    "path": "output/change_test_store"
+  },
+  "exports": {
+    "enabled": true
+  }
+}
+```
+
+Run once with one NARA source version, then run again with another NARA source version or edited test source. The second run should produce change counts such as:
+
+```text
+record_added
+record_removed
+preferred_name_changed
+category_changed
+identifiers_changed
+hazard_band_changed
+hazard_basis_changed
+external_rating_native_changed
+divergence_opened
+divergence_resolved
+```
+
+Then repeat with MongoDB by changing only the storage block:
+
+```json
+{
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry_change_test"
+  },
+  "exports": {
+    "enabled": false
+  }
+}
+```
+
+Verify:
+
+```text
+assessment_changes
+canonical_formats current:false records for removals
+runs.change_detection
+```
+
+## 2. Run the MongoDB-backed QNL + NARA build
 
 Install the MongoDB dependency:
 
@@ -28,35 +84,10 @@ canonical_formats
 format_identifiers
 institution_policy_overlays
 hazard_assessments
+assessment_changes
 ```
 
 The key validation is that MongoDB, not JSON/CSV files, contains the registry state.
-
-## 2. Add baseline/change reports
-
-The NARA-enabled run has proved that the registry is no longer bounded by the institutional workbook and that all `reconcile_hazard()` branches can execute against real data. MongoDB now gives the place to compare runs.
-
-The next architectural gap is change detection:
-
-- Run 1 should be stored as a baseline.
-- Run 2 should compare against the prior baseline.
-- Source-snapshot hashes should show whether upstream evidence changed.
-- Canonical format diffs should show added/removed/changed formats.
-- Hazard diffs should show band changes, basis changes, divergence changes, and NARA native-rating movement within the same band.
-- Native NARA movement should be reported even when the normalized Low/Moderate/High band is unchanged.
-
-Minimum first report:
-
-```text
-added canonical formats
-removed canonical formats
-changed preferred names/categories/identifiers
-changed hazard bands
-changed hazard basis
-changed external_rating_native
-new/resolved divergence flags
-new recommended review actions
-```
 
 ## 3. Run a targeted PRONOM registry test
 
@@ -79,7 +110,7 @@ The pipeline now treats file outputs as optional exports and can run database-on
 
 Trend should remain `Insufficient Evidence` until connectors exist for specification vitality, implementation vitality, and authority warnings.
 
-The first usable trend input should be NARA native-rating movement between runs, because it can move within a band before the band itself changes.
+The first usable trend input is now NARA native-rating movement between runs, because it can move within a band before the band itself changes. The change detector already surfaces `external_rating_native_changed`.
 
 ## 6. Add more retrieval modes only when needed
 
