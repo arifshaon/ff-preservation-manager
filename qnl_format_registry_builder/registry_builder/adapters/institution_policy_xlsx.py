@@ -11,6 +11,7 @@ from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.utils import ensure_dir, read_uri, sha256_bytes, split_multi
 
 _NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+_NON_SUBSTANTIVE_NAMES = {"", "?", "-", "--", "n/a", "na", "none", "unknown", "tbd", "todo"}
 
 
 def _col_index(cell_ref: str) -> int:
@@ -71,6 +72,13 @@ def _read_sheet_rows(xlsx_path: str) -> list[list[str]]:
 
 def _norm_header(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
+def _is_substantive_name(name: str | None) -> bool:
+    text = re.sub(r"\s+", " ", str(name or "")).strip().lower()
+    if text in _NON_SUBSTANTIVE_NAMES:
+        return False
+    return bool(re.search(r"[a-z0-9]", text))
 
 
 def _find_header_row(rows: list[list[str]]) -> int:
@@ -202,6 +210,8 @@ class InstitutionPolicyXlsxAdapter(SourceAdapter):
                 loc_url = _field(row, field_map, "loc_url", ["loc", "library_of_congress", "loc_url"])
                 loc_ids = re.findall(r"\bfdd\d+\b", loc_url, flags=re.I)
                 if not name and not institution_format_id and not extensions:
+                    continue
+                if not _is_substantive_name(name):
                     continue
 
                 policy = {
