@@ -1,6 +1,6 @@
 import pytest
 
-from registry_builder.adapters.qnl_policy_xlsx import _field, _get, _resolve_field_map
+from registry_builder.adapters.institution_policy_xlsx import _field, _get, _is_substantive_name, _resolve_field_map
 
 
 def test_get_does_not_fuzzy_bind_format_to_institution_format_id():
@@ -59,3 +59,10 @@ def test_configured_field_map_reports_all_missing_columns():
     assert "mime_types" in message
     assert "category" in message
     assert "preferred_tools" in message
+
+
+def test_non_substantive_names_are_rejected_before_matching():
+    assert _is_substantive_name("Comma Separated Values") is True
+    assert _is_substantive_name("?") is False
+    assert _is_substantive_name("N/A") is False
+    assert _is_substantive_name("-") is False
