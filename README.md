@@ -1,6 +1,6 @@
 # File Format Preservation Manager
 
-File Format Preservation Manager is a repository for digital-preservation tooling around file-format knowledge, preservation risk, source evidence, and operational registry management.
+File Format Preservation Manager is a repository for tools and workflows that help institutions record, assess, monitor, and manage file-format preservation risks. The focus is not only on listing file formats, but on maintaining evidence, risk assessments, decisions, recommended actions, change history, and operational follow-up work in a repeatable way.
 
 The repository is intended to hold multiple related components. Each component should be self-contained, documented in its own directory, and usable on its own where possible. The root README explains how the components fit together and where to start.
 
@@ -8,7 +8,7 @@ The repository is intended to hold multiple related components. Each component s
 
 | Path | Status | Purpose |
 | --- | --- | --- |
-| [`qnl_format_registry_builder/`](qnl_format_registry_builder/) | Active implementation | Builds and updates a local preservation file-format registry from authoritative and institutional sources. |
+| [`qnl_format_registry_builder/`](qnl_format_registry_builder/) | Active implementation | Builds and updates a local preservation risk and action registry for file formats from authoritative and institutional sources. |
 | Future modules | Planned as needed | Additional preservation-management tools can be added as separate top-level components. |
 
 At the moment, `qnl_format_registry_builder` is the main implemented component.
@@ -27,7 +27,7 @@ It runs a repeatable pipeline over configured sources such as:
 - structured JSON source packages;
 - future third-party adapters loaded by dotted Python path.
 
-The output is a queryable local registry plus optional review/export files.
+The output is a queryable local registry for preservation risk management, action planning, source evidence, and change tracking, plus optional review/export files.
 
 ### What it does
 
@@ -38,6 +38,7 @@ Source acquisition
   -> identifier normalization
   -> conservative reconciliation
   -> hazard/readiness/trend assessment
+  -> action and method-profile assignment
   -> storage through a selected RegistryStore backend
   -> baseline/change detection
   -> optional exports and reports
