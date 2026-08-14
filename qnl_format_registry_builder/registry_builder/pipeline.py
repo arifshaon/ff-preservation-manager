@@ -82,6 +82,8 @@ def _method_profile_metrics(registry) -> dict[str, Any]:
         "direct_method_profile_distribution": dict(sorted(direct_distribution.items())),
         "effective_method_profile_distribution": dict(sorted(effective_distribution.items())),
     }
+    # Backwards-compatible aliases. These now intentionally mean discriminating
+    # profiles only; `generic_preservation` is tracked separately above.
     metrics["average_direct_method_profiles_per_format"] = metrics[
         "average_direct_discriminating_method_profiles_per_format"
     ]
@@ -118,6 +120,10 @@ def _storage_config(config: dict[str, Any]) -> dict[str, Any]:
     return dict(config.get("storage") or {"type": "memory"})
 
 
+def _source_required(source: dict[str, Any]) -> bool:
+    return bool(source.get("required", True))
+
+
 def _snapshot_dict(snapshot: SourceSnapshot, run_id: str) -> dict[str, Any]:
     data = snapshot.__dict__.copy()
     data["run_id"] = run_id
@@ -142,6 +148,17 @@ def _source_snapshot_status(snapshots: list[SourceSnapshot], *, offline: bool) -
         "snapshots_unchanged": unchanged,
         "snapshots_from_cache": from_cache,
         "snapshots_unknown": unknown,
+    }
+
+
+def _empty_source_status(*, offline: bool) -> dict[str, Any]:
+    return {
+        "offline": offline,
+        "source_changed": False,
+        "snapshots_changed": 0,
+        "snapshots_unchanged": 0,
+        "snapshots_from_cache": 0,
+        "snapshots_unknown": 0,
     }
 
 
@@ -314,29 +331,59 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     source_summaries: list[dict[str, Any]] = []
 
     for source in config.get("sources", []):
+        required = _source_required(source)
         if not source.get("enabled", True):
-            source_summaries.append({"source_id": source.get("id"), "enabled": False})
+            source_summaries.append({
+                "source_id": source.get("id"),
+                "enabled": False,
+                "required": required,
+                "status": "disabled",
+                "snapshots": 0,
+                "records_extracted": 0,
+                **_empty_source_status(offline=offline),
+            })
             continue
-        source_type = source["type"]
-        adapter_cls = ADAPTERS.get(source_type)
-        if adapter_cls is None:
-            raise ValueError(f"No adapter registered for source type: {source_type}")
-        source_config = dict(source)
-        if offline:
-            source_config["offline"] = True
-        adapter = adapter_cls(source_config, workdir)
-        snapshots = adapter.acquire()
-        extracted = adapter.extract(snapshots)
-        all_snapshots.extend(snapshots)
-        raw_records.extend(normalize_record(r) for r in extracted)
-        source_summaries.append({
-            "source_id": source["id"],
-            "source_type": source_type,
-            "enabled": True,
-            "snapshots": len(snapshots),
-            "records_extracted": len(extracted),
-            **_source_snapshot_status(snapshots, offline=offline),
-        })
+
+        try:
+            source_type = source["type"]
+            adapter_cls = ADAPTERS.get(source_type)
+            if adapter_cls is None:
+                raise ValueError(f"No adapter registered for source type: {source_type}")
+            source_config = dict(source)
+            if offline:
+                source_config["offline"] = True
+            adapter = adapter_cls(source_config, workdir)
+            snapshots = adapter.acquire()
+            extracted = adapter.extract(snapshots)
+            all_snapshots.extend(snapshots)
+            raw_records.extend(normalize_record(r) for r in extracted)
+            source_summaries.append({
+                "source_id": source["id"],
+                "source_type": source_type,
+                "enabled": True,
+                "required": required,
+                "status": "completed",
+                "snapshots": len(snapshots),
+                "records_extracted": len(extracted),
+                **_source_snapshot_status(snapshots, offline=offline),
+            })
+        except Exception as exc:
+            failed = {
+                "source_id": source.get("id"),
+                "source_type": source.get("type"),
+                "enabled": True,
+                "required": required,
+                "status": "failed",
+                "snapshots": 0,
+                "records_extracted": 0,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                **_empty_source_status(offline=offline),
+            }
+            source_summaries.append(failed)
+            if required:
+                raise
+            continue
 
     registry = reconcile(raw_records)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
@@ -363,6 +410,8 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         changes=change_detection.get("changes", []),
     )
 
+    enabled_sources = [s for s in source_summaries if s.get("enabled", True)]
+    completed_sources = [s for s in enabled_sources if s.get("status") == "completed"]
     report = {
         "run_id": run_id,
         "started_at": started_at,
@@ -377,7 +426,8 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "collection_prefix": storage_config.get("collection_prefix"),
         },
         "sources": source_summaries,
-        "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in source_summaries if s.get("enabled", True))),
+        "source_status_counts": dict(Counter(s.get("status", "unknown") for s in source_summaries)),
+        "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in completed_sources)),
         "raw_records": len(raw_records),
         "canonical_formats": len(registry),
         "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
@@ -435,6 +485,11 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     for src in report.get("sources", []):
         if not src.get("enabled", True):
             lines.append(f"- {src.get('source_id')}: disabled")
+        elif src.get("status") == "failed":
+            lines.append(
+                f"- {src.get('source_id')}: failed; required={src.get('required')}; "
+                f"{src.get('error_type')}: {src.get('error')}"
+            )
         else:
             status = "changed" if src.get("source_changed") else "unchanged"
             lines.append(
