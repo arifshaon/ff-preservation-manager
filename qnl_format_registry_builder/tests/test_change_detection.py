@@ -1,8 +1,21 @@
 from registry_builder.change_detection import detect_registry_changes
 
 
-def _record(canonical_id, *, band="Low", basis="external_only", native=None, review=False):
+def _record(
+    canonical_id,
+    *,
+    band="Low",
+    basis="external_only",
+    native=None,
+    review=False,
+    external_band=None,
+    institution_band=None,
+):
     hazard = {"band": band, "basis": basis, "review_required": review}
+    if external_band is not None:
+        hazard["external_band"] = external_band
+    if institution_band is not None:
+        hazard["institution_band"] = institution_band
     if native is not None:
         hazard["external_rating_native"] = native
         hazard["external_rating_native_direction"] = "higher_is_safer"
@@ -49,6 +62,37 @@ def test_detects_added_removed_hazard_native_and_divergence_changes():
     assert "divergence_opened" in change_types
     assert report["change_counts"]["record_added"] == 1
     assert report["change_counts"]["record_removed"] == 1
+
+
+def test_review_required_without_two_disagreeing_estimators_is_not_divergence():
+    previous = [
+        _record("fmt-a", band="Low", basis="external_only", review=False),
+    ]
+    current = [
+        _record("fmt-a", band="Unknown", basis="no_estimator_available", review=True),
+    ]
+
+    report = detect_registry_changes(previous, current, run_id="run-no-estimator", created_at="2026-08-14T00:00:00+00:00")
+    change_types = [change["change_type"] for change in report["changes"]]
+
+    assert "hazard_band_changed" in change_types
+    assert "hazard_basis_changed" in change_types
+    assert "divergence_opened" not in change_types
+    assert "divergence_resolved" not in change_types
+
+
+def test_two_present_estimators_with_different_bands_open_divergence():
+    previous = [
+        _record("fmt-a", band="Low", basis="corroborated", external_band="Low", institution_band="Low"),
+    ]
+    current = [
+        _record("fmt-a", band="High", basis="institution_override", external_band="Low", institution_band="High", review=True),
+    ]
+
+    report = detect_registry_changes(previous, current, run_id="run-divergent", created_at="2026-08-14T00:00:00+00:00")
+    change_types = [change["change_type"] for change in report["changes"]]
+
+    assert "divergence_opened" in change_types
 
 
 def test_bulk_change_type_collapses_to_source_coverage_event():
