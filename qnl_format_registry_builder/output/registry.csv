@@ -1,0 +1,3 @@
+canonical_id,preferred_name,category,extensions,mime_types,puids,loc_ids,nara_ids,has_qnl_policy,source_count
+puid-fmt-40,Microsoft Word Binary Document,Document,doc,application/msword,fmt/40,,,no,1
+puid-fmt-95,PDF/A-1,Document,pdf,application/pdf,fmt/95,fdd000125,,no,1

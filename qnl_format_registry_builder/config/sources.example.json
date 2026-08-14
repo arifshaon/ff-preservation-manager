@@ -1,0 +1,31 @@
+{
+  "pipeline_version": "0.1.0",
+  "sources": [
+    {
+      "id": "qnl_policy_current",
+      "type": "qnl_policy_xlsx",
+      "enabled": false,
+      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
+      "notes": "Enable this after copying the QNL workbook into input/. Imported as QNL policy overlay, not as the registry boundary."
+    },
+    {
+      "id": "example_curated_source",
+      "type": "standard_json",
+      "enabled": true,
+      "uris": ["examples/sample_source_package.json"]
+    },
+    {
+      "id": "pronom_droid_signature_file",
+      "type": "pronom_droid_xml",
+      "enabled": false,
+      "uris": ["https://www.nationalarchives.gov.uk/aboutapps/pronom/droid-signature-files.htm"]
+    },
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml",
+      "enabled": false,
+      "uris": [],
+      "directory": "input/loc_fdd_xml"
+    }
+  ]
+}

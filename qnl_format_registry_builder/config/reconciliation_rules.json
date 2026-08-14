@@ -1,0 +1,18 @@
+{
+  "version": "qnl-reconciliation-v0.1",
+  "principles": [
+    "The QNL spreadsheet is an institutional policy overlay, not the boundary of the registry.",
+    "Strong identifiers reconcile before names: PUID, LOC FDD ID, NARA ID, MIME type, then name and extension.",
+    "Authoritative external hazard and QNL criteria hazard are estimators of intrinsic hazard. They are reconciled, not added.",
+    "Readiness, exposure, trend, confidence, and provenance remain separate axes."
+  ],
+  "identifier_priority": ["puid", "loc", "nara", "mime", "name_ext", "name", "extension"],
+  "hazard_bands": ["Low", "Moderate", "High"],
+  "non_hazard_statuses": ["Not assessed", "Needs assessment"],
+  "coverage_states": ["Covered", "Partially Covered", "Uncovered", "Blocked", "Not Assessed"],
+  "trend_indicators": ["specification_vitality", "implementation_vitality", "authority_warnings"],
+  "critical_alert_rule": {
+    "description": "Critical is an operational alert, not a base hazard band.",
+    "logic": "High hazard plus any two of: high exposure, weak/no readiness, negative trend."
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "package_version": "qnl-source-package-v0.1",
+  "source_name": "Example curated source package",
+  "records": [
+    {
+      "name": "PDF/A-1",
+      "category": "Document",
+      "description": "ISO-standardized archival profile of PDF.",
+      "identifiers": {
+        "extension": ["pdf"],
+        "mime": ["application/pdf"],
+        "puid": ["fmt/95"],
+        "loc": ["fdd000125"],
+        "wikidata": ["Q27996254"]
+      },
+      "urls": {
+        "loc": "https://www.loc.gov/preservation/digital/formats/fdd/fdd000125.shtml",
+        "pronom": "https://www.nationalarchives.gov.uk/PRONOM/fmt/95"
+      },
+      "hazard": {
+        "external_band": "Low",
+        "external_rating": 1.0,
+        "basis": "example only"
+      },
+      "readiness": {
+        "coverage_state": "Covered",
+        "pathway": "Preserve PDF/A; validate conformance where possible"
+      },
+      "trend": {
+        "direction": "Insufficient Evidence",
+        "basis": "No trend connector configured in sample source"
+      }
+    },
+    {
+      "name": "Microsoft Word Binary Document",
+      "category": "Document",
+      "description": "Legacy binary Microsoft Word document format.",
+      "identifiers": {
+        "extension": ["doc"],
+        "mime": ["application/msword"],
+        "puid": ["fmt/40"]
+      },
+      "urls": {
+        "pronom": "https://www.nationalarchives.gov.uk/PRONOM/fmt/40"
+      },
+      "hazard": {
+        "external_band": "High",
+        "external_rating": 3.0,
+        "basis": "example only"
+      },
+      "readiness": {
+        "coverage_state": "Partially Covered",
+        "pathway": "Test local conversion to PDF/A and preserve original"
+      },
+      "trend": {
+        "direction": "Insufficient Evidence",
+        "basis": "No trend connector configured in sample source"
+      }
+    }
+  ]
+}
