@@ -1,10 +1,10 @@
 {
   "pipeline_version": "0.1.0",
   "incremental_source_updates": true,
-  "incremental_source_updates_notes": "Default production behavior. Each successful source run refreshes that source's evidence and reuses latest stored evidence from other sources before rebuilding canonical registry records. Set false only for isolated full-rebuild tests.",
+  "incremental_source_updates_notes": "Default production behavior. Each successful source run contributes fresh evidence from that source and reuses latest successful evidence contributions from other sources before rebuilding canonical registry records. Set false only for isolated full-rebuild tests.",
   "storage": {
     "type": "memory",
-    "notes": "Default keeps the sample runnable without infrastructure. For the first real deployment, change type to mongodb and supply uri/database. The pipeline writes directly to the selected RegistryStore; exports are optional and are not staging files. External storage backends may also be loaded with a dotted path such as mypkg.storage:MyRegistryStore."
+    "notes": "Default keeps the sample runnable without local database infrastructure. For the first real deployment, change type to mongodb and supply uri/database. The pipeline writes directly to the selected RegistryStore; exports are optional and are not staging files. External storage backends may also be loaded with an explicit module:ClassName plugin path such as mypkg.storage:MyRegistryStore."
   },
   "exports": {
     "enabled": true,
@@ -53,8 +53,8 @@
     {
       "id": "nara_digital_preservation_framework",
       "type": "nara_digital_preservation_framework",
-      "enabled": false,
-      "required": false,
+      "enabled": true,
+      "required": true,
       "retrieval_mode": "published_csv",
       "release_mode": "pinned",
       "release_date": "20260320",
@@ -73,7 +73,7 @@
           "release_date": "20260320"
         }
       ],
-      "notes": "External hazard source. Use release_mode:pinned for audit/reproducibility, latest for quarterly refresh, local_files for admin-downloaded CSVs, or explicit_uris for special tests. fallback_local_files may be populated to let latest use admin-downloaded files when GitHub discovery is unavailable. Marked required:false because an upstream NARA/GitHub outage should be recorded but should not destroy a QNL-only registry run."
+      "notes": "Default quickstart source. It downloads pinned public NARA Digital Preservation Framework CSVs from GitHub so the first run produces a real registry without local input files. Use release_mode:latest for refresh runs, local_files for admin-downloaded CSVs, or explicit_uris for special tests."
     },
     {
       "id": "pronom_registry",
@@ -89,9 +89,10 @@
     {
       "id": "example_curated_source",
       "type": "standard_json",
-      "enabled": true,
+      "enabled": false,
       "required": true,
-      "uris": ["examples/sample_source_package.json"]
+      "uris": ["examples/sample_source_package.json"],
+      "notes": "Small toy source kept for adapter tests and offline demonstrations. It is disabled in the default quickstart because NARA provides a better real-data first run."
     },
     {
       "id": "pronom_droid_signature_file",
