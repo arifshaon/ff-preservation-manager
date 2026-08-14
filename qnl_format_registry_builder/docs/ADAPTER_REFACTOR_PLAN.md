@@ -1,28 +1,70 @@
 # Adapter-Based Storage and Export Refactor Plan
 
-This note translates the architecture into implementation tasks.
+This note tracks the storage/export refactor status.
 
 ## Goal
 
-Move from direct file writing inside `pipeline.py` to a design where:
+Use one active storage backend per run and keep file outputs as optional exports:
 
 ```text
 Pipeline services → RegistryStore → queryable local registry
 Pipeline services → RegistryExporter adapters → optional outputs
 ```
 
-## Phase 1: Interfaces and documentation
+## Completed
 
-- Add `storage/base.py` with `RegistryStore`.
-- Add `storage/memory.py` for tests.
-- Add `storage/mongo.py` stub documenting the MongoDB collection plan.
-- Add `exporters/base.py` with `RegistryExporter`.
-- Add placeholder exporter adapters.
-- Add `docs/ARCHITECTURE.md`.
+### Phase 1: Interfaces and documentation
 
-## Phase 2: Move existing exports into adapters
+- Added `storage/base.py` with `RegistryStore`.
+- Added `storage/memory.py` for tests and clean sample runs.
+- Added exporter interface/placeholder modules.
+- Added architecture documentation.
 
-Move current direct writes from `pipeline.py` into:
+### Phase 2: Source-to-storage pipeline wiring
+
+The pipeline now:
+
+1. creates a store using config;
+2. creates a run record;
+3. acquires source snapshots;
+4. extracts and normalizes source records;
+5. reconciles into canonical format records;
+6. assigns method profiles;
+7. validates the registry;
+8. persists snapshots, source records, canonical records, identifiers, institutional overlays, hazard assessments, readiness assessments and trend observations through `RegistryStore`;
+9. updates the run record with summary counts;
+10. writes file exports only when `exports.enabled` is true.
+
+### Phase 3: MongoDB backend
+
+Implemented `MongoRegistryStore` with PyMongo.
+
+MongoDB collections:
+
+```text
+runs
+source_snapshots
+source_records
+canonical_formats
+format_identifiers
+institution_policy_overlays
+hazard_assessments
+readiness_assessments
+trend_observations
+assessment_changes
+```
+
+MongoDB is installed with:
+
+```bash
+python -m pip install -e ".[mongo]"
+```
+
+## Remaining work
+
+### 1. Move remaining file-export implementation into exporter adapters
+
+The pipeline now treats exports as optional and can run database-only. The implementation of file exports still lives in `pipeline.py`. Move it into:
 
 - `exporters/json_exporter.py`
 - `exporters/jsonl_exporter.py`
@@ -32,41 +74,16 @@ Move current direct writes from `pipeline.py` into:
 
 Rename or retire `registry_builder/db.py` once SQLite export has moved.
 
-## Phase 3: Refactor pipeline to use storage
+### 2. Add MongoDB integration tests
 
-The pipeline should:
-
-1. create a store using config;
-2. create a run record;
-3. save snapshots and source records through the store;
-4. reconcile into canonical format records;
-5. save canonical records and identifiers through the store;
-6. calculate assessments and change events;
-7. fetch `store.get_current_registry_view()`;
-8. run enabled exporters.
-
-## Phase 4: MongoDB backend
-
-Implement `MongoRegistryStore` with PyMongo.
-
-Initial collections:
+Add integration tests that run only when a MongoDB URI is supplied, for example through:
 
 ```text
-runs
-source_snapshots
-source_records
-canonical_formats
-format_identifiers
-qnl_policy_overlays
-hazard_assessments
-readiness_assessments
-trend_observations
-assessment_changes
+MONGODB_URI=mongodb://localhost:27017
 ```
 
-## Phase 5: Tests
+Unit tests should continue to use `MemoryRegistryStore`.
 
-- Unit-test the storage contract against `MemoryRegistryStore`.
-- Add exporter adapter tests.
-- Add skipped MongoDB integration tests that run only when MongoDB is available.
-- Add pipeline test using memory storage and file export adapters.
+### 3. Add baseline/change reporting
+
+MongoDB now stores run history. The next major feature is comparing two stored runs and generating assessment changes.
