@@ -1,0 +1,288 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from collections import Counter
+from typing import Any
+
+
+def _stable_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _change_id(run_id: str, change_type: str, canonical_id: str, field: str | None = None) -> str:
+    seed = "|".join([run_id, change_type, canonical_id, field or ""])
+    return "chg-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+
+
+def _by_id(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(record.get("canonical_id")): record for record in records if record.get("canonical_id")}
+
+
+def _hazard(record: dict[str, Any] | None) -> dict[str, Any]:
+    if not record:
+        return {}
+    return record.get("hazard_assessment") or {}
+
+
+def _divergent(record: dict[str, Any] | None) -> bool:
+    hazard = _hazard(record)
+    return bool(hazard.get("review_required")) or hazard.get("basis") == "institution_override"
+
+
+def _identifiers(record: dict[str, Any] | None) -> dict[str, list[str]]:
+    if not record:
+        return {}
+    identifiers = record.get("identifiers") or {}
+    return {str(k): sorted(str(x) for x in v) for k, v in sorted(identifiers.items())}
+
+
+def _summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not record:
+        return None
+    hazard = _hazard(record)
+    return {
+        "canonical_id": record.get("canonical_id"),
+        "preferred_name": record.get("preferred_name"),
+        "category": record.get("category"),
+        "identifiers": _identifiers(record),
+        "hazard_band": hazard.get("band"),
+        "hazard_basis": hazard.get("basis"),
+        "review_required": hazard.get("review_required"),
+        "external_rating_native": hazard.get("external_rating_native"),
+        "external_rating_native_direction": hazard.get("external_rating_native_direction"),
+    }
+
+
+def _action(change_type: str) -> str:
+    actions = {
+        "record_added": "Review the newly observed canonical format and decide whether an institutional policy overlay or readiness assessment is needed.",
+        "record_removed": "Confirm whether the upstream source intentionally removed the format or whether the source adapter/configuration changed.",
+        "preferred_name_changed": "Review the naming change and update local documentation or aliases if needed.",
+        "category_changed": "Review whether the category change affects method profiles, readiness, or policy grouping.",
+        "identifiers_changed": "Review identifier changes before using them for automated matching or policy decisions.",
+        "hazard_band_changed": "Review the preservation hazard assessment and consider whether institutional policy should be updated.",
+        "hazard_basis_changed": "Review the source mix behind the hazard basis and confirm whether the change is expected.",
+        "external_rating_native_changed": "Review the native external rating movement; it may indicate deterioration or improvement within the same band.",
+        "divergence_opened": "Review the new external-vs-institutional divergence and decide whether to keep the institutional override or revise policy.",
+        "divergence_resolved": "Confirm the resolved divergence and close any associated review action.",
+    }
+    return actions.get(change_type, "Review this registry change.")
+
+
+def _event(
+    *,
+    run_id: str,
+    created_at: str,
+    change_type: str,
+    canonical_id: str,
+    previous: Any = None,
+    current: Any = None,
+    field: str | None = None,
+    severity: str = "review",
+) -> dict[str, Any]:
+    event = {
+        "change_id": _change_id(run_id, change_type, canonical_id, field),
+        "run_id": run_id,
+        "created_at": created_at,
+        "change_type": change_type,
+        "canonical_id": canonical_id,
+        "severity": severity,
+        "recommended_actions": [_action(change_type)],
+    }
+    if field:
+        event["field"] = field
+    if previous is not None:
+        event["previous"] = previous
+    if current is not None:
+        event["current"] = current
+    return event
+
+
+def _field_change(
+    *,
+    run_id: str,
+    created_at: str,
+    canonical_id: str,
+    change_type: str,
+    field: str,
+    previous: Any,
+    current: Any,
+    severity: str = "review",
+) -> dict[str, Any] | None:
+    if previous == current:
+        return None
+    return _event(
+        run_id=run_id,
+        created_at=created_at,
+        change_type=change_type,
+        canonical_id=canonical_id,
+        field=field,
+        previous=previous,
+        current=current,
+        severity=severity,
+    )
+
+
+def detect_registry_changes(
+    previous_registry: list[dict[str, Any]],
+    current_registry: list[dict[str, Any]],
+    *,
+    run_id: str,
+    created_at: str,
+) -> dict[str, Any]:
+    """Compare two current registry views and return typed change events.
+
+    The first run against an empty store establishes a baseline and intentionally
+    does not generate one `record_added` event per format. Subsequent runs compare
+    deterministic canonical IDs and selected evidence fields.
+    """
+    previous_by_id = _by_id(previous_registry)
+    current_by_id = _by_id(current_registry)
+    if not previous_by_id:
+        return {
+            "run_kind": "baseline",
+            "previous_canonical_formats": 0,
+            "current_canonical_formats": len(current_by_id),
+            "changes": [],
+            "change_counts": {},
+            "baseline_note": "No previous current registry view was available; this run establishes the baseline.",
+        }
+
+    changes: list[dict[str, Any]] = []
+    previous_ids = set(previous_by_id)
+    current_ids = set(current_by_id)
+
+    for canonical_id in sorted(current_ids - previous_ids):
+        changes.append(_event(
+            run_id=run_id,
+            created_at=created_at,
+            change_type="record_added",
+            canonical_id=canonical_id,
+            current=_summary(current_by_id[canonical_id]),
+            severity="review",
+        ))
+
+    for canonical_id in sorted(previous_ids - current_ids):
+        changes.append(_event(
+            run_id=run_id,
+            created_at=created_at,
+            change_type="record_removed",
+            canonical_id=canonical_id,
+            previous=_summary(previous_by_id[canonical_id]),
+            severity="review",
+        ))
+
+    for canonical_id in sorted(previous_ids & current_ids):
+        previous = previous_by_id[canonical_id]
+        current = current_by_id[canonical_id]
+        previous_hazard = _hazard(previous)
+        current_hazard = _hazard(current)
+        candidates = [
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="preferred_name_changed",
+                field="preferred_name",
+                previous=previous.get("preferred_name"),
+                current=current.get("preferred_name"),
+                severity="info",
+            ),
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="category_changed",
+                field="category",
+                previous=previous.get("category"),
+                current=current.get("category"),
+                severity="review",
+            ),
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="identifiers_changed",
+                field="identifiers",
+                previous=_identifiers(previous),
+                current=_identifiers(current),
+                severity="review",
+            ),
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="hazard_band_changed",
+                field="hazard_assessment.band",
+                previous=previous_hazard.get("band"),
+                current=current_hazard.get("band"),
+                severity="review",
+            ),
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="hazard_basis_changed",
+                field="hazard_assessment.basis",
+                previous=previous_hazard.get("basis"),
+                current=current_hazard.get("basis"),
+                severity="review",
+            ),
+            _field_change(
+                run_id=run_id,
+                created_at=created_at,
+                canonical_id=canonical_id,
+                change_type="external_rating_native_changed",
+                field="hazard_assessment.external_rating_native",
+                previous=previous_hazard.get("external_rating_native"),
+                current=current_hazard.get("external_rating_native"),
+                severity="review",
+            ),
+        ]
+        changes.extend(change for change in candidates if change is not None)
+
+        previously_divergent = _divergent(previous)
+        currently_divergent = _divergent(current)
+        if not previously_divergent and currently_divergent:
+            changes.append(_event(
+                run_id=run_id,
+                created_at=created_at,
+                change_type="divergence_opened",
+                canonical_id=canonical_id,
+                previous=_summary(previous),
+                current=_summary(current),
+                severity="review",
+            ))
+        elif previously_divergent and not currently_divergent:
+            changes.append(_event(
+                run_id=run_id,
+                created_at=created_at,
+                change_type="divergence_resolved",
+                canonical_id=canonical_id,
+                previous=_summary(previous),
+                current=_summary(current),
+                severity="info",
+            ))
+
+    counts = Counter(change["change_type"] for change in changes)
+    return {
+        "run_kind": "change",
+        "previous_canonical_formats": len(previous_by_id),
+        "current_canonical_formats": len(current_by_id),
+        "changes": changes,
+        "change_counts": dict(sorted(counts.items())),
+    }
+
+
+def compact_change_summary(change_report: dict[str, Any], *, sample_limit: int = 25) -> dict[str, Any]:
+    changes = change_report.get("changes", []) or []
+    return {
+        "run_kind": change_report.get("run_kind"),
+        "previous_canonical_formats": change_report.get("previous_canonical_formats", 0),
+        "current_canonical_formats": change_report.get("current_canonical_formats", 0),
+        "total_changes": len(changes),
+        "change_counts": change_report.get("change_counts", {}),
+        "baseline_note": change_report.get("baseline_note"),
+        "sample_changes": changes[:sample_limit],
+    }
