@@ -21,6 +21,7 @@ class StandardJsonAdapter(SourceAdapter):
           "identifiers": {"puid": ["fmt/95"], "loc": ["fdd000125"]},
           "urls": {"loc": "https://..."},
           "hazard": {"external_band": "Low"},
+          "institution_policy": {},
           "evidence": []
         }
       ]
@@ -55,6 +56,12 @@ class StandardJsonAdapter(SourceAdapter):
             package = json.loads(Path(snap.local_path).read_text(encoding="utf-8"))
             for i, record in enumerate(package.get("records", []), start=1):
                 identifiers: dict[str, Any] = record.get("identifiers", {}) or {}
+                institution_policy = (
+                    record.get("institution_policy")
+                    or record.get("institution_policy_overlay")
+                    or record.get("qnl")
+                    or {}
+                )
                 rows.append(RawFormatRecord(
                     source_id=self.source_id,
                     source_type=self.type_name,
@@ -69,7 +76,7 @@ class StandardJsonAdapter(SourceAdapter):
                     nara_ids=list(identifiers.get("nara", []) or record.get("nara_ids", []) or []),
                     wikidata_ids=list(identifiers.get("wikidata", []) or record.get("wikidata_ids", []) or []),
                     urls=record.get("urls", {}) or {},
-                    qnl=record.get("qnl", {}) or {},
+                    institution_policy=institution_policy,
                     hazard=record.get("hazard", {}) or {},
                     readiness=record.get("readiness", {}) or {},
                     trend=record.get("trend", {}) or {},
