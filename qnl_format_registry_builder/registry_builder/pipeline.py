@@ -11,7 +11,7 @@ from registry_builder.change_detection import compact_change_summary, detect_reg
 from registry_builder.db import write_sqlite
 from registry_builder.identifier_rules import load_identifier_rules
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
-from registry_builder.models import CanonicalFormat, RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
 from registry_builder.storage import create_store
@@ -20,6 +20,7 @@ from registry_builder.utils import ensure_dir, write_csv, write_json, write_json
 from registry_builder.validate import summarize_validation_warnings, validate_registry, validation_warning_counts
 
 _NON_DISCRIMINATING_METHOD_PROFILES = {"generic_preservation"}
+_RAW_RECORD_FIELD_NAMES = set(RawFormatRecord.__dataclass_fields__)
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -117,6 +118,10 @@ def _exports_enabled(config: dict[str, Any]) -> bool:
     return bool(exports)
 
 
+def _incremental_source_updates_enabled(config: dict[str, Any]) -> bool:
+    return bool(config.get("incremental_source_updates", True))
+
+
 def _storage_config(config: dict[str, Any]) -> dict[str, Any]:
     return dict(config.get("storage") or {"type": "memory"})
 
@@ -135,6 +140,74 @@ def _source_record_dict(record: RawFormatRecord, run_id: str) -> dict[str, Any]:
     data = record.to_dict()
     data["run_id"] = run_id
     return data
+
+
+def _identifier_from_dict(value: Identifier | dict[str, Any]) -> Identifier:
+    if isinstance(value, Identifier):
+        return value
+    return Identifier(
+        kind=str(value.get("kind") or value.get("type") or ""),
+        value=str(value.get("value") or ""),
+        source=str(value.get("source") or ""),
+        verified=bool(value.get("verified", False)),
+        source_record_id=value.get("source_record_id"),
+    )
+
+
+def _raw_record_from_dict(data: dict[str, Any]) -> RawFormatRecord:
+    payload = {key: data[key] for key in _RAW_RECORD_FIELD_NAMES if key in data}
+    payload["identifiers"] = [_identifier_from_dict(item) for item in payload.get("identifiers", [])]
+    return RawFormatRecord(**payload)
+
+
+def _run_timestamp_index(store: RegistryStore) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for run in store.query("runs"):
+        run_id = str(run.get("run_id") or "")
+        if not run_id:
+            continue
+        index[run_id] = str(run.get("finished_at") or run.get("started_at") or run_id)
+    return index
+
+
+def _latest_stored_source_records(
+    store: RegistryStore,
+    *,
+    refreshed_source_ids: set[str],
+    identifier_rules: dict[str, dict[str, Any]],
+) -> list[RawFormatRecord]:
+    """Return latest stored source records for sources not refreshed this run.
+
+    Source-by-source registry population works by replacing only the evidence for
+    sources that completed in the current run, then rebuilding canonical formats
+    from current-run records plus latest stored records from all other sources.
+    A failed optional source is not considered refreshed, so its last successful
+    evidence remains active.
+    """
+    run_index = _run_timestamp_index(store)
+    latest: dict[tuple[str, str], tuple[tuple[str, str], dict[str, Any]]] = {}
+    for record in store.query("source_records"):
+        source_id = str(record.get("source_id") or "")
+        if not source_id or source_id in refreshed_source_ids:
+            continue
+        source_record_id = str(
+            record.get("source_record_id")
+            or record.get("_storage_key")
+            or record.get("_file_storage_key")
+            or ""
+        )
+        if not source_record_id:
+            continue
+        run_id = str(record.get("run_id") or "")
+        sort_key = (run_index.get(run_id, run_id), run_id)
+        key = (source_id, source_record_id)
+        if key not in latest or sort_key > latest[key][0]:
+            latest[key] = (sort_key, record)
+
+    restored: list[RawFormatRecord] = []
+    for _, record in latest.values():
+        restored.append(normalize_record(_raw_record_from_dict(record), identifier_rules=identifier_rules))
+    return restored
 
 
 def _source_snapshot_status(snapshots: list[SourceSnapshot], *, offline: bool) -> dict[str, Any]:
@@ -254,14 +327,14 @@ def _persist_registry_to_store(
 def _write_file_exports(
     outdir: Path,
     registry: list[CanonicalFormat],
-    raw_records: list[RawFormatRecord],
+    active_source_records: list[RawFormatRecord],
     snapshots: list[SourceSnapshot],
     report: dict[str, Any],
 ) -> list[str]:
     registry_dicts = [fmt.to_dict() for fmt in registry]
     write_jsonl(outdir / "registry.jsonl", registry_dicts)
     write_json(outdir / "registry.json", registry_dicts)
-    write_jsonl(outdir / "raw_records.jsonl", [r.to_dict() for r in raw_records])
+    write_jsonl(outdir / "raw_records.jsonl", [r.to_dict() for r in active_source_records])
     write_json(outdir / "source_snapshots.json", [s.__dict__ for s in snapshots])
 
     csv_rows = []
@@ -312,6 +385,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     run_id = _new_run_id()
     config = load_config(config_path)
     offline = bool(offline or config.get("offline", False))
+    incremental_source_updates = _incremental_source_updates_enabled(config)
     identifier_rules = load_identifier_rules(config.get("identifier_kinds"))
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
@@ -325,6 +399,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "config_path": str(config_path),
         "storage": storage_config,
         "offline": offline,
+        "incremental_source_updates": incremental_source_updates,
         "previous_canonical_formats": len(previous_registry_view),
     })
 
@@ -385,7 +460,23 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
                 raise
             continue
 
-    registry = reconcile(raw_records, identifier_rules=identifier_rules)
+    completed_source_ids = {
+        str(s.get("source_id"))
+        for s in source_summaries
+        if s.get("enabled", True) and s.get("status") == "completed" and s.get("source_id")
+    }
+    prior_source_records = (
+        _latest_stored_source_records(
+            store,
+            refreshed_source_ids=completed_source_ids,
+            identifier_rules=identifier_rules,
+        )
+        if incremental_source_updates
+        else []
+    )
+    active_source_records = prior_source_records + raw_records
+
+    registry = reconcile(active_source_records, identifier_rules=identifier_rules)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     errors, warnings = validate_registry(registry)
     warning_summary = summarize_validation_warnings(warnings)
@@ -419,6 +510,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "status": "completed",
         "config_path": str(config_path),
         "offline": offline,
+        "incremental_source_updates": incremental_source_updates,
         "storage": {
             "type": storage_config.get("type", "memory"),
             "path": storage_config.get("path") or storage_config.get("directory") or storage_config.get("root"),
@@ -429,7 +521,11 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "identifier_kinds": identifier_rules,
         "source_status_counts": dict(Counter(s.get("status", "unknown") for s in source_summaries)),
         "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in completed_sources)),
-        "raw_records": len(raw_records),
+        "raw_records": len(active_source_records),
+        "raw_records_extracted": len(raw_records),
+        "prior_source_records_reused": len(prior_source_records),
+        "active_source_records": len(active_source_records),
+        "refreshed_source_ids": sorted(completed_source_ids),
         "canonical_formats": len(registry),
         "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
         "method_profiles_enabled": bool(config.get("method_profiles", {}).get("enabled", False)),
@@ -447,7 +543,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     }
 
     if _exports_enabled(config):
-        report["outputs"] = _write_file_exports(outdir, registry, raw_records, all_snapshots, report)
+        report["outputs"] = _write_file_exports(outdir, registry, active_source_records, all_snapshots, report)
 
     store.create_run(report)
     return report
@@ -469,7 +565,10 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         "",
         f"- Storage backend: {report.get('storage', {}).get('type')}",
         f"- Offline mode: {report.get('offline', False)}",
-        f"- Raw source records extracted: {report['raw_records']}",
+        f"- Incremental source updates: {report.get('incremental_source_updates', True)}",
+        f"- Raw source records extracted this run: {report.get('raw_records_extracted', report.get('raw_records', 0))}",
+        f"- Prior source records reused: {report.get('prior_source_records_reused', 0)}",
+        f"- Active source records used for reconciliation: {report.get('active_source_records', report.get('raw_records', 0))}",
         f"- Canonical formats generated: {report['canonical_formats']}",
         f"- Canonical formats with institutional policy overlay: {len(institutional)}",
         f"- Canonical formats without institutional policy overlay: {len(no_institutional)}",
