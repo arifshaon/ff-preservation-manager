@@ -82,13 +82,13 @@ class MongoRegistryStore(RegistryStore):
             "runs": [[("run_id", A)]],
             "source_snapshots": [[("run_id", A), ("source_id", A), ("sha256", A)]],
             "source_records": [[("run_id", A), ("source_id", A), ("source_record_id", A)]],
-            "canonical_formats": [[("canonical_id", A)], [("preferred_name", A)]],
+            "canonical_formats": [[("canonical_id", A)], [("preferred_name", A)], [("current", A)]],
             "format_identifiers": [[("type", A), ("value", A)], [("format_id", A), ("type", A), ("value", A)]],
             "institution_policy_overlays": [[("run_id", A), ("format_id", A)], [("institution_id", A), ("institution_format_id", A)]],
             "hazard_assessments": [[("run_id", A), ("format_id", A)], [("basis", A), ("band", A)]],
             "readiness_assessments": [[("run_id", A), ("format_id", A)]],
             "trend_observations": [[("run_id", A), ("format_id", A)]],
-            "assessment_changes": [[("created_at", A)], [("format_id", A)]],
+            "assessment_changes": [[("created_at", A)], [("format_id", A)], [("change_type", A)]],
         }
         for collection, collection_indexes in indexes.items():
             coll = self._collection(collection)
@@ -180,7 +180,9 @@ class MongoRegistryStore(RegistryStore):
         self._replace("assessment_changes", {"change_id": stored["change_id"]}, stored)
 
     def get_current_registry_view(self) -> list[dict[str, Any]]:
-        cursor = self._collection("canonical_formats").find({}, {"_id": 0}).sort("preferred_name", self._ASCENDING)
+        cursor = self._collection("canonical_formats").find(
+            {"current": {"$ne": False}}, {"_id": 0}
+        ).sort("preferred_name", self._ASCENDING)
         return [dict(item) for item in cursor]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
@@ -190,7 +192,9 @@ class MongoRegistryStore(RegistryStore):
         if not identifier:
             return None
         format_id = identifier.get("format_id") or identifier.get("canonical_id")
-        result = self._collection("canonical_formats").find_one({"canonical_id": format_id}, {"_id": 0})
+        result = self._collection("canonical_formats").find_one(
+            {"canonical_id": format_id, "current": {"$ne": False}}, {"_id": 0}
+        )
         return dict(result) if result else None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
@@ -198,7 +202,9 @@ class MongoRegistryStore(RegistryStore):
         format_ids = [
             x for x in self._collection("institution_policy_overlays").distinct("format_id", query) if x
         ]
-        cursor = self._collection("canonical_formats").find({"canonical_id": {"$in": format_ids}}, {"_id": 0})
+        cursor = self._collection("canonical_formats").find(
+            {"canonical_id": {"$in": format_ids}, "current": {"$ne": False}}, {"_id": 0}
+        )
         return [dict(item) for item in cursor]
 
     def list_changes_since(self, since: str) -> list[dict[str, Any]]:
