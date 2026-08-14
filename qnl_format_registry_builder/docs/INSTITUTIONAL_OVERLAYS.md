@@ -125,7 +125,7 @@ Each mapping can be a single header or a list of acceptable headers:
 }
 ```
 
-If a declared field cannot be found, extraction fails loudly. This avoids silent binding errors such as mapping `format` to `qnl_format_id`.
+If a declared field cannot be found, extraction fails loudly. This avoids silent binding errors such as mapping `format` to `institution_format_id`.
 
 ## Output model
 
@@ -169,7 +169,7 @@ It should not add them together.
 When only an institutional policy spreadsheet is loaded, the expected basis is usually:
 
 ```text
-qnl_only or institutional_only, depending on current label naming
+institution_only
 ```
 
 When a NARA adapter is added, the system can produce:
@@ -177,11 +177,9 @@ When a NARA adapter is added, the system can produce:
 ```text
 external_only
 corroborated
-qnl_override / institutional_override
+institution_override
 divergence requiring review
 ```
-
-Future code should rename the remaining `qnl_only` basis label to `institution_only`; until then, the semantics are local-institution-only.
 
 ## Data quality
 
@@ -203,5 +201,7 @@ Preferred names going forward:
 | `proposed_preservation_plan` | `local_preservation_plan` |
 | `preferred_tools` | `local_preferred_tools` |
 | `conversion_process` | `local_conversion_process` |
+| `qnl_only` | `institution_only` |
+| `qnl_override` | `institution_override` |
 
 QNL-specific examples are still useful, but they belong in configuration and documentation, not in the core domain model.
