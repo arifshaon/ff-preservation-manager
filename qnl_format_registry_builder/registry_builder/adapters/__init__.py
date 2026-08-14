@@ -9,6 +9,7 @@ from registry_builder.adapters.institution_policy_xlsx import InstitutionPolicyX
 from registry_builder.adapters.qnl_policy_xlsx import QnlPolicyXlsxAdapter
 from registry_builder.adapters.nara_digital_preservation_framework import NaraDigitalPreservationFrameworkAdapter
 from registry_builder.adapters.nara_preservation_csv import NaraPreservationCsvAdapter
+from registry_builder.plugins import resolve_plugin
 
 ADAPTERS: dict[str, type[SourceAdapter]] = {
     StandardJsonAdapter.type_name: StandardJsonAdapter,
@@ -22,3 +23,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = {
     # Deprecated compatibility alias. Prefer institution_policy_xlsx.
     QnlPolicyXlsxAdapter.type_name: QnlPolicyXlsxAdapter,
 }
+
+
+def resolve_adapter(source_type: str) -> type[SourceAdapter]:
+    return resolve_plugin(source_type, ADAPTERS, plugin_kind="source adapter")
