@@ -59,6 +59,7 @@ class CanonicalFormat:
     external_hazard: list[dict[str, Any]] = field(default_factory=list)
     readiness: list[dict[str, Any]] = field(default_factory=list)
     trend: list[dict[str, Any]] = field(default_factory=list)
+    preservation_method: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
 
     def add_identifier(self, kind: str, value: str | None) -> None:
