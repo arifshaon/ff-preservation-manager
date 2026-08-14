@@ -61,3 +61,32 @@ def test_build_preservation_method_deduplicates_inherited_steps():
     method = build_preservation_method(["child"], config)
 
     assert method["steps"] == ["Preserve original", "Validate structure"]
+
+
+def test_category_contains_can_assign_profile_without_extension_rule():
+    config = {
+        "version": "test-method-profiles-v2",
+        "profiles": {
+            "generic_preservation": {"steps": ["Preserve original"]},
+            "structured_text": {"inherits": ["generic_preservation"]},
+            "structured_data": {"inherits": ["structured_text"], "validation": ["Validate parseability"]},
+        },
+        "assignment_rules": [
+            {"profile": "structured_data", "match": {"category_contains": ["structured data"]}}
+        ],
+    }
+    fmt = CanonicalFormat(
+        canonical_id="fmt-local-json-like-format",
+        preferred_name="Local data package",
+        category="Structured Data",
+        identifiers={"extension": ["unknown"]},
+    )
+
+    assign_method_profiles([fmt], config)
+
+    assert fmt.preservation_method["assigned_profile_ids"] == [
+        "generic_preservation",
+        "structured_text",
+        "structured_data",
+    ]
+    assert "Validate parseability" in fmt.preservation_method["validation"]
