@@ -37,3 +37,22 @@ Consequences:
 - Store local policy terms as `local_risk_level`, `local_preservation_action`, `local_preservation_plan`, `local_preferred_tools`, and `local_conversion_process`.
 - Keep `qnl_policy_xlsx` only as a deprecated compatibility alias.
 - Add `config/institutions/qnl.example.json` as the first institutional profile example.
+
+## 2026-08-14: NARA CSV adapter and conservative external matching
+
+Decision: add `nara_preservation_csv` as the first real external hazard-source adapter.
+
+Rationale:
+
+- Institutional policy workbooks alone produce `institution_only` hazard assessments.
+- NARA provides an external preservation-risk baseline that can activate `external_only`, `corroborated`, `institution_override`, and divergence outputs.
+- NARA's native numeric rating is useful for later trend/calibration work and must not be lost when mapping to Low/Moderate/High.
+- Institutional rows often do not carry NARA Format IDs, so they need a safe way to connect to NARA records.
+
+Consequences:
+
+- Parse both NARA preservation action plan CSV and NARA numbered risk matrix CSV.
+- Treat NARA Format IDs as verified NARA identifiers.
+- Keep PUIDs found in NARA PRONOM URLs as unverified PUID claims unless PRONOM/DROID confirms them.
+- Store NARA native numeric risk rating and `native_direction: higher_is_safer` alongside normalized hazard rating.
+- Allow `name + extension` weak matching only when it uniquely bridges a non-authority/institutional group to exactly one verified authority group.
