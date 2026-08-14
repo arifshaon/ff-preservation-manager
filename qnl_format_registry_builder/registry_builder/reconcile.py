@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from typing import Iterable
+from typing import Any, Iterable
 
 from registry_builder.hazard import BAND_TO_SCORE, reconcile_hazard
 from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, utc_now_iso
 from registry_builder.utils import slugify
 
 _STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
+_NARA_NATIVE_DIRECTION = "higher_is_safer"
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -85,16 +86,25 @@ def _risk_to_score(value: str | None) -> float | None:
     return None
 
 
-def _hazard_score_from_dict(data: dict) -> float | None:
-    for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating", "normalized_rating"):
-        value = data.get(key)
-        if isinstance(value, (int, float)):
+def _float_value(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
             return float(value)
-        if isinstance(value, str):
-            try:
-                return float(value)
-            except ValueError:
-                pass
+        except ValueError:
+            return None
+    return None
+
+
+def _hazard_score_from_dict(data: dict) -> float | None:
+    # Deliberately do not read native NARA numeric fields here. NARA's native
+    # direction is higher-is-safer, so it must not be treated as a direct hazard
+    # score. Use only normalized values or text bands for reconciliation.
+    for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating", "normalized_rating"):
+        parsed = _float_value(data.get(key))
+        if parsed is not None:
+            return parsed
     for key in ("band", "risk_level", "hazard_band", "external_band", "external_risk_level"):
         score = _risk_to_score(data.get(key))
         if score is not None:
@@ -114,10 +124,79 @@ def _local_risk_score(policy: dict) -> float | None:
     return None
 
 
+def _first_hazard_with_score(hazards: list[dict]) -> dict | None:
+    return next((hazard for hazard in hazards if _hazard_score_from_dict(hazard) is not None), None)
+
+
+def _first_policy_with_score(policies: list[dict]) -> dict | None:
+    return next((policy for policy in policies if _local_risk_score(policy) is not None), None)
+
+
+def _native_rating(data: dict | None) -> float | None:
+    if not data:
+        return None
+    for key in ("external_rating_native", "external_native_rating", "native_rating", "nara_native_numeric_risk_rating"):
+        parsed = _float_value(data.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _native_gap_to_institution_band(native_rating: float | None, institution_score: float | None) -> float | None:
+    """Return distance from NARA native rating to the institution's band.
+
+    NARA native direction is higher-is-safer. The value here is not used to
+    decide hazard basis. It helps review: a one-band disagreement can be barely
+    across a threshold or far into another band.
+    """
+    if native_rating is None or institution_score is None:
+        return None
+    if institution_score == BAND_TO_SCORE["Low"]:
+        return round(max(0.0, 23.0 - native_rating), 3)
+    if institution_score == BAND_TO_SCORE["High"]:
+        return round(max(0.0, native_rating - (-23.0)), 3)
+    if institution_score == BAND_TO_SCORE["Moderate"]:
+        if native_rating >= 23.0:
+            return round(native_rating - 23.0, 3)
+        if native_rating <= -23.0:
+            return round(-23.0 - native_rating, 3)
+        return 0.0
+    return None
+
+
+def _copy_external_native_fields(result: dict, external_hazard: dict | None, institution_score: float | None) -> None:
+    native = _native_rating(external_hazard)
+    if native is None:
+        return
+    result["external_rating_native"] = native
+    result["external_native_rating"] = native
+    result["external_rating_native_direction"] = (
+        external_hazard.get("external_rating_native_direction")
+        or external_hazard.get("native_direction")
+        or _NARA_NATIVE_DIRECTION
+    )
+    if external_hazard.get("external_rating_native_scale") or external_hazard.get("native_scale"):
+        result["external_rating_native_scale"] = external_hazard.get("external_rating_native_scale") or external_hazard.get("native_scale")
+    if external_hazard.get("external_native_band") or external_hazard.get("native_band"):
+        result["external_native_band"] = external_hazard.get("external_native_band") or external_hazard.get("native_band")
+    if external_hazard.get("native_rating_band"):
+        result["external_native_rating_band"] = external_hazard.get("native_rating_band")
+    native_gap = _native_gap_to_institution_band(native, institution_score)
+    if native_gap is not None:
+        result["external_native_gap_to_institution_band"] = native_gap
+        result["external_native_gap_note"] = (
+            "Distance from NARA native rating to the nearest threshold for the institution's band; "
+            "not used as the normalized reconciliation score."
+        )
+
+
 def _hazard_assessment(cf: CanonicalFormat) -> dict:
-    external_score = _first_score([_hazard_score_from_dict(x) for x in cf.external_hazard])
-    institution_score = _first_score([_local_risk_score(x) for x in cf.institution_policy_overlays])
+    external_hazard = _first_hazard_with_score(cf.external_hazard)
+    institution_policy = _first_policy_with_score(cf.institution_policy_overlays)
+    external_score = _hazard_score_from_dict(external_hazard or {})
+    institution_score = _local_risk_score(institution_policy or {})
     result = reconcile_hazard(external_score, institution_score)
+    _copy_external_native_fields(result, external_hazard, institution_score)
     result["computed_at"] = utc_now_iso()
     result["basis_notes"] = "Hazard is reconciled from external and institutional estimators; scores are not added."
     return result
