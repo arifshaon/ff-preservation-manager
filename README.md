@@ -1,6 +1,6 @@
-# FF Preservation Manager
+# File Format Preservation Manager
 
-FF Preservation Manager is a repository for digital-preservation tooling around file-format knowledge, preservation risk, source evidence, and operational registry management.
+File Format Preservation Manager is a repository for digital-preservation tooling around file-format knowledge, preservation risk, source evidence, and operational registry management.
 
 The repository is intended to hold multiple related components. Each component should be self-contained, documented in its own directory, and usable on its own where possible. The root README explains how the components fit together and where to start.
 
