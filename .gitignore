@@ -15,8 +15,7 @@ venv/
 # Local pipeline runtime data
 qnl_format_registry_builder/work/
 qnl_format_registry_builder/input/
-qnl_format_registry_builder/output/latest/
-qnl_format_registry_builder/output/runs/
+qnl_format_registry_builder/output/
 
 # Local databases and logs
 *.sqlite
