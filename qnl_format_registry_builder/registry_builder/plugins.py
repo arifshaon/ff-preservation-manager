@@ -27,9 +27,6 @@ def resolve_dotted_path(spec: str) -> Any:
     try:
         module = importlib.import_module(module_name)
     except ModuleNotFoundError as exc:
-        # If the module being imported, or one of its parent packages, is absent,
-        # the plugin path is wrong. If some other module is absent, the plugin
-        # exists but one of its dependencies is missing.
         missing = exc.name or ""
         if missing == module_name or module_name.startswith(f"{missing}."):
             raise ValueError(f"Plugin module {module_name!r} not found for {spec!r}.") from exc
@@ -76,16 +73,25 @@ def resolve_plugin(
     return resolved
 
 
-def build_registry(classes: list[type], *, plugin_kind: str = "plugin") -> dict[str, type]:
-    """Build a short-name registry and fail on duplicate ``type_name`` values."""
+def build_registry(classes: list[type | tuple[str, type]], *, plugin_kind: str = "plugin") -> dict[str, type]:
+    """Build a short-name registry and fail on duplicate names.
+
+    Entries can be classes with a ``type_name`` attribute or explicit
+    ``(short_name, class)`` pairs. Explicit pairs are useful for storage backends
+    where the stable config name is not necessarily a class attribute.
+    """
     registry: dict[str, type] = {}
-    for cls in classes:
-        type_name = getattr(cls, "type_name", None)
+    for item in classes:
+        if isinstance(item, tuple):
+            type_name, cls = item
+        else:
+            cls = item
+            type_name = getattr(cls, "type_name", None)
         if not type_name:
-            raise ValueError(f"{plugin_kind} class {cls!r} must define type_name")
+            raise ValueError(f"{plugin_kind} class {cls!r} must define type_name or be registered as (name, class)")
         if type_name in registry:
             raise ValueError(
                 f"Duplicate {plugin_kind} type_name {type_name!r}: {registry[type_name].__name__} and {cls.__name__}"
             )
-        registry[type_name] = cls
+        registry[str(type_name)] = cls
     return registry
