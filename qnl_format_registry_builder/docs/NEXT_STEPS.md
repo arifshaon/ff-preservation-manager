@@ -1,20 +1,34 @@
 # Next steps
 
-## 1. Move export logic into exporters
+## 1. Run the NARA-enabled pipeline against the real workbook
+
+Enable both sources in `config/sources.example.json`:
+
+```text
+qnl_policy_current
+nara_digital_preservation_framework
+```
+
+Then inspect:
+
+- `hazard_assessment.basis` counts;
+- `corroborated` records;
+- `institution_override` records;
+- `external_only` records;
+- divergence/review-required records;
+- unmatched institutional rows with no NARA bridge.
+
+## 2. Move export logic into exporters
 
 The current pipeline writes JSON, JSONL, CSV, SQLite, and Markdown directly. Move that logic into exporter adapters so exports are enabled through configuration.
 
-## 2. Refactor pipeline to use RegistryStore
+## 3. Refactor pipeline to use RegistryStore
 
-The pipeline should write snapshots, source records, canonical formats, identifiers, QNL overlays, assessments, and changes through `RegistryStore`.
+The pipeline should write snapshots, source records, canonical formats, identifiers, institutional overlays, assessments, and changes through `RegistryStore`.
 
-## 3. Implement MongoRegistryStore
+## 4. Implement MongoRegistryStore
 
 Use PyMongo to implement the collections described in `ARCHITECTURE.md`.
-
-## 4. Add NARA source adapter
-
-NARA should be the first serious external hazard estimator to reconcile against QNL criteria and policy overlays.
 
 ## 5. Add baseline/change reports
 
