@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
+from registry_builder.models import RawFormatRecord, SourceSnapshot
 
 
 class StandardJsonAdapter(SourceAdapter):
@@ -32,22 +31,9 @@ class StandardJsonAdapter(SourceAdapter):
 
     def acquire(self) -> list[SourceSnapshot]:
         snapshots: list[SourceSnapshot] = []
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
         for uri in self.config.get("uris", []):
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
             suffix = Path(uri.split("?")[0]).suffix or ".json"
-            local_path = snapshot_dir / f"{digest}{suffix}"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-            ))
+            snapshots.append(self.acquire_uri_snapshot(uri, suffix=suffix))
         return snapshots
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
