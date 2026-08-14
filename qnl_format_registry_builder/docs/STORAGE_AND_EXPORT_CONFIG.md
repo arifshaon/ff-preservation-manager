@@ -30,6 +30,7 @@ Institution overlays  -> institution_policy_overlays
 Hazard assessments    -> hazard_assessments
 Readiness assessments -> readiness_assessments
 Trend observations    -> trend_observations
+Change events         -> assessment_changes
 Run report            -> runs
 ```
 
@@ -67,7 +68,7 @@ output/file_registry_store/
   assessment_changes/
 ```
 
-This gives a simple way to test persistence and inspect stored documents before switching the same run to MongoDB.
+This gives a simple way to test persistence, inspect stored documents, and verify change detection before switching the same run to MongoDB.
 
 ## MongoDB storage
 
@@ -112,6 +113,43 @@ trend_observations
 assessment_changes
 ```
 
+## Change detection
+
+Change detection uses the selected storage backend. Before building the new run, the pipeline reads:
+
+```text
+store.get_current_registry_view()
+```
+
+The first run against an empty store is a `baseline` run. It establishes the first current registry view and does not emit one `record_added` event for every format.
+
+Later runs compare the previous current view with the newly built registry and persist typed change events to `assessment_changes`, including:
+
+```text
+record_added
+record_removed
+preferred_name_changed
+category_changed
+identifiers_changed
+hazard_band_changed
+hazard_basis_changed
+external_rating_native_changed
+divergence_opened
+divergence_resolved
+```
+
+When a previously current canonical format disappears from a later run, the record is retained for history but marked:
+
+```json
+{
+  "current": false,
+  "last_removed_run_id": "...",
+  "removed_at": "..."
+}
+```
+
+Current registry queries return only records where `current` is not false, so removed formats do not keep generating repeated removal events on every later run.
+
 ## Toggle test
 
 To test the storage abstraction, keep the sources unchanged and toggle only the `storage` block.
@@ -145,7 +183,7 @@ MongoDB-backed run:
 }
 ```
 
-The canonical record counts should match across storage backends for the same enabled sources and method-profile config.
+The canonical record counts and change counts should match across storage backends for the same enabled sources and method-profile config.
 
 ## Review/export run
 
