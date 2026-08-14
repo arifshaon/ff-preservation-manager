@@ -170,26 +170,64 @@ def _run_timestamp_index(store: RegistryStore) -> dict[str, str]:
     return index
 
 
+def _latest_completed_source_run_index(store: RegistryStore) -> dict[str, str]:
+    """Return source_id -> latest completed run_id.
+
+    This prevents old records from being resurrected after a source refresh that
+    deliberately removed them. The active evidence for a source is the set of
+    source records from that source's latest completed run, not the latest record
+    seen for each individual source_record_id.
+    """
+    run_index = _run_timestamp_index(store)
+    latest: dict[str, tuple[tuple[str, str], str]] = {}
+    for run in store.query("runs"):
+        run_id = str(run.get("run_id") or "")
+        if not run_id:
+            continue
+        sort_key = (run_index.get(run_id, run_id), run_id)
+        for source in run.get("sources") or []:
+            if source.get("status") != "completed":
+                continue
+            source_id = str(source.get("source_id") or "")
+            if not source_id:
+                continue
+            if source_id not in latest or sort_key > latest[source_id][0]:
+                latest[source_id] = (sort_key, run_id)
+    return {source_id: run_id for source_id, (_, run_id) in latest.items()}
+
+
 def _latest_stored_source_records(
     store: RegistryStore,
     *,
     refreshed_source_ids: set[str],
     identifier_rules: dict[str, dict[str, Any]],
 ) -> list[RawFormatRecord]:
-    """Return latest stored source records for sources not refreshed this run.
+    """Return active stored source records for sources not refreshed this run.
 
     Source-by-source registry population works by replacing only the evidence for
     sources that completed in the current run, then rebuilding canonical formats
-    from current-run records plus latest stored records from all other sources.
+    from current-run records plus active stored records from all other sources.
     A failed optional source is not considered refreshed, so its last successful
     evidence remains active.
     """
     run_index = _run_timestamp_index(store)
-    latest: dict[tuple[str, str], tuple[tuple[str, str], dict[str, Any]]] = {}
+    latest_source_runs = _latest_completed_source_run_index(store)
+    legacy_latest: dict[tuple[str, str], tuple[tuple[str, str], dict[str, Any]]] = {}
+    selected: list[dict[str, Any]] = []
+
     for record in store.query("source_records"):
         source_id = str(record.get("source_id") or "")
         if not source_id or source_id in refreshed_source_ids:
             continue
+        run_id = str(record.get("run_id") or "")
+        expected_run_id = latest_source_runs.get(source_id)
+        if expected_run_id:
+            if run_id == expected_run_id:
+                selected.append(record)
+            continue
+
+        # Backwards-compatible fallback for stores populated before run reports
+        # carried source summaries. Use the latest version per source_record_id.
         source_record_id = str(
             record.get("source_record_id")
             or record.get("_storage_key")
@@ -198,16 +236,16 @@ def _latest_stored_source_records(
         )
         if not source_record_id:
             continue
-        run_id = str(record.get("run_id") or "")
         sort_key = (run_index.get(run_id, run_id), run_id)
         key = (source_id, source_record_id)
-        if key not in latest or sort_key > latest[key][0]:
-            latest[key] = (sort_key, record)
+        if key not in legacy_latest or sort_key > legacy_latest[key][0]:
+            legacy_latest[key] = (sort_key, record)
 
-    restored: list[RawFormatRecord] = []
-    for _, record in latest.values():
-        restored.append(normalize_record(_raw_record_from_dict(record), identifier_rules=identifier_rules))
-    return restored
+    selected.extend(record for _, record in legacy_latest.values())
+    return [
+        normalize_record(_raw_record_from_dict(record), identifier_rules=identifier_rules)
+        for record in selected
+    ]
 
 
 def _source_snapshot_status(snapshots: list[SourceSnapshot], *, offline: bool) -> dict[str, Any]:
