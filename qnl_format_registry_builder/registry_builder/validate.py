@@ -1,10 +1,41 @@
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from registry_builder.models import CanonicalFormat
 
 
 _STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
+
+
+def _warning_type(warning: str) -> str:
+    if warning.startswith("weak identifier "):
+        return "weak_identifier_overlap"
+    if warning.startswith("institutional policy identifier "):
+        return "institution_policy_duplicate"
+    return "other"
+
+
+def summarize_validation_warnings(warnings: list[str], sample_limit: int = 5) -> dict[str, dict]:
+    """Group verbose validation warnings into reportable classes.
+
+    Full warnings remain available in run_report.json, but large authority-source
+    runs can produce hundreds of expected weak-identifier overlaps. The summary
+    keeps actionable warning classes visible.
+    """
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for warning in warnings:
+        grouped[_warning_type(warning)].append(warning)
+    return {
+        warning_type: {
+            "count": len(items),
+            "samples": items[:sample_limit],
+        }
+        for warning_type, items in sorted(grouped.items())
+    }
+
+
+def validation_warning_counts(warnings: list[str]) -> dict[str, int]:
+    return dict(sorted(Counter(_warning_type(warning) for warning in warnings).items()))
 
 
 def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[str]]:
