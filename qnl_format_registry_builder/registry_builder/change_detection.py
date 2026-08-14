@@ -160,7 +160,6 @@ def _collapse_bulk_changes(
     if not bulk_types:
         return changes, []
 
-    kept: list[dict[str, Any]] = []
     bulk_events: list[dict[str, Any]] = []
     for change_type in sorted(bulk_types):
         affected = [change for change in changes if change["change_type"] == change_type]
@@ -168,7 +167,9 @@ def _collapse_bulk_changes(
         source_counter: Counter[str] = Counter()
         for change in affected:
             for side in ("previous", "current"):
-                summary = change.get(side) or {}
+                summary = change.get(side)
+                if not isinstance(summary, dict):
+                    continue
                 for source_id in summary.get("source_ids", []) or []:
                     source_counter[source_id] += 1
         bulk_events.append({
