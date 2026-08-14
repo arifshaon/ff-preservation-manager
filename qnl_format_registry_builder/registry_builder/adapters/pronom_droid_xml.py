@@ -4,8 +4,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
-from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
+from registry_builder.models import RawFormatRecord, SourceSnapshot
 
 
 def _local_name(tag: str) -> str:
@@ -22,23 +21,7 @@ class PronomDroidXmlAdapter(SourceAdapter):
     type_name = "pronom_droid_xml"
 
     def acquire(self) -> list[SourceSnapshot]:
-        snapshot_dir = ensure_dir(self.workdir / "snapshots" / self.source_id)
-        snapshots: list[SourceSnapshot] = []
-        for uri in self.config.get("uris", []):
-            data, headers = read_uri(uri)
-            digest = sha256_bytes(data)
-            local_path = snapshot_dir / f"{digest}.xml"
-            local_path.write_bytes(data)
-            snapshots.append(SourceSnapshot(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                uri=uri,
-                acquired_at=utc_now_iso(),
-                sha256=digest,
-                local_path=str(local_path),
-                content_type=headers.get("content-type"),
-            ))
-        return snapshots
+        return [self.acquire_uri_snapshot(uri, suffix=".xml") for uri in self.config.get("uris", [])]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
