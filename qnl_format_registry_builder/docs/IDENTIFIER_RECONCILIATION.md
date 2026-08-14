@@ -22,29 +22,32 @@ If a configured column is absent, the adapter must fail loudly rather than guess
 
 ## 2. Identifier claims carry provenance
 
-Identifiers are now stored as source-specific claims:
+Identifiers are stored as source-specific claims:
 
 ```python
-Identifier(kind="puid", value="fmt/44", source="qnl_policy_xlsx", verified=False)
+Identifier(kind="puid", value="fmt/44", source="institution_policy_xlsx", verified=False)
+Identifier(kind="puid", value="fmt/44", source="pronom_registry", verified=True)
 Identifier(kind="puid", value="fmt/44", source="pronom_droid_xml", verified=True)
+Identifier(kind="nara", value="NF00143", source="nara_digital_preservation_framework", verified=True)
 ```
 
-A PUID copied into a spreadsheet is evidence, but not an authoritative identifier. A PUID from PRONOM/DROID XML is authoritative for reconciliation.
+A PUID copied into a spreadsheet is evidence, but not an authoritative identifier. A PUID from PRONOM source data is authoritative for reconciliation.
 
 ## 3. Strong identifiers vs weak identifiers
 
 Strong grouping identifiers:
 
-- verified PUID
-- verified LOC FDD ID
-- verified NARA ID
+- verified PUID from PRONOM source data, such as `pronom_registry` or `pronom_droid_xml`;
+- verified LOC FDD ID from LOC FDD data;
+- verified NARA ID from NARA Digital Preservation Framework data.
 
 Weak identifiers:
 
-- MIME type
-- extension
-- unverified PUID copied from a spreadsheet
-- unverified LOC/NARA IDs copied from a non-authoritative source
+- MIME type;
+- extension;
+- unverified PUID copied from a spreadsheet;
+- PUIDs copied from another authority's URL, such as a PRONOM URL inside NARA data;
+- unverified LOC/NARA IDs copied from a non-authoritative source.
 
 Weak identifiers may be stored, displayed, and used as supporting evidence, but they must not be primary grouping keys.
 
@@ -54,12 +57,24 @@ MIME types can describe broad classes rather than one exact format. For example,
 
 ## 5. Hazard is reconciled after grouping
 
-The hazard reconciler is called after records are grouped into canonical formats. It reconciles external and QNL estimators without adding them together:
+The hazard reconciler is called after records are grouped into canonical formats. It reconciles external and institutional estimators without adding them together:
 
 ```text
-external hazard estimator + QNL hazard estimator -> reconciled hazard assessment
+external hazard estimator + institutional hazard estimator -> reconciled hazard assessment
 ```
 
-The output records whether the basis is `external_only`, `qnl_only`, `corroborated`, or `qnl_override`, and it flags divergence for review.
+The output records whether the basis is `external_only`, `institution_only`, `corroborated`, or `institution_override`, and it flags divergence for review.
 
 This should run only after safe grouping, because hazard reconciliation over incorrectly merged formats produces confident nonsense.
+
+## 6. Conservative weak bridging
+
+Verified authority identifiers still dominate reconciliation. However, institutional rows often lack NARA or PRONOM identifiers. To support real external-vs-institutional reconciliation, the reconciler permits a narrow bridge:
+
+```text
+name + extension
+```
+
+This bridge can alias a weak institutional/non-authority group to a verified authority group only when it uniquely connects records across different sources and exactly one candidate group has a verified strong identifier.
+
+If two authority groups share the same weak key, the bridge does not merge them.
