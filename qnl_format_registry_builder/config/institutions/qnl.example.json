@@ -1,0 +1,15 @@
+{
+  "institution_id": "qnl",
+  "institution_name": "Qatar National Library",
+  "institution_format_id_prefix": "QNL",
+  "local_risk_terms": ["Low Risk", "Moderate Risk", "High Risk"],
+  "local_policy_fields": {
+    "institution_format_id": "QNL Format ID",
+    "format_name": "Digital file",
+    "extensions": "File Extension(s)",
+    "risk_level": "QNL Risk Level",
+    "preservation_action": "QNL Preservation Action",
+    "preservation_plan": "QNL Proposed Preservation Plan"
+  },
+  "notes": "This file is an example institutional profile. The core registry builder should not contain QNL-specific assumptions."
+}
