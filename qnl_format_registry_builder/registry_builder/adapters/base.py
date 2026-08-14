@@ -70,6 +70,86 @@ class SourceAdapter(ABC):
             metadata=cached_metadata,
         )
 
+    def _store_snapshot_bytes(
+        self,
+        *,
+        index_key: str,
+        uri: str,
+        data: bytes,
+        suffix: str,
+        note: str | None,
+        content_type: str | None,
+        metadata: dict[str, Any],
+    ) -> SourceSnapshot:
+        digest = sha256_bytes(data)
+        index = self._load_snapshot_index()
+        previous = index.get(index_key)
+        changed = previous is None or previous.get("sha256") != digest
+        suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        local_path = self.snapshot_dir() / f"{digest}{suffix}"
+        if not local_path.exists() or sha256_bytes(local_path.read_bytes()) != digest:
+            local_path.write_bytes(data)
+
+        acquired_at = utc_now_iso()
+        index[index_key] = {
+            "uri": uri,
+            "sha256": digest,
+            "local_path": str(local_path),
+            "content_type": content_type,
+            "acquired_at": acquired_at,
+            "source_type": self.type_name,
+            "metadata": metadata,
+        }
+        self._write_snapshot_index(index)
+        return SourceSnapshot(
+            source_id=self.source_id,
+            source_type=self.type_name,
+            uri=uri,
+            acquired_at=acquired_at,
+            sha256=digest,
+            local_path=str(local_path),
+            content_type=content_type,
+            note="; ".join(x for x in [note, "changed=true" if changed else "changed=false"] if x),
+            changed=changed,
+            from_cache=False,
+            metadata=metadata,
+        )
+
+    def acquire_file_snapshot(
+        self,
+        file_path: str | Path,
+        *,
+        suffix: str | None = None,
+        note: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SourceSnapshot:
+        """Acquire an administrator-supplied local source file.
+
+        This is distinct from offline cache replay. Offline mode reads previously
+        cached snapshots without touching the original source. Local-file mode
+        treats the supplied file itself as the source material, snapshots it into
+        the content-addressed cache, and reports whether that local file changed
+        since the previous run.
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Local source file not found for {self.source_id}: {path}")
+        data = path.read_bytes()
+        metadata = dict(metadata or {})
+        metadata.setdefault("source_location", "local_file")
+        metadata.setdefault("local_source_path", str(path))
+        suffix = suffix or path.suffix or ".dat"
+        index_key = f"file://{path.resolve()}"
+        return self._store_snapshot_bytes(
+            index_key=index_key,
+            uri=str(path),
+            data=data,
+            suffix=suffix,
+            note="; ".join(x for x in [note, "source_location=local_file"] if x),
+            content_type=None,
+            metadata=metadata,
+        )
+
     def acquire_uri_snapshot(
         self,
         uri: str,
@@ -94,38 +174,13 @@ class SourceAdapter(ABC):
             )
 
         data, headers = read_uri(uri)
-        digest = sha256_bytes(data)
-        index = self._load_snapshot_index()
-        previous = index.get(uri)
-        changed = previous is None or previous.get("sha256") != digest
-        suffix = suffix if suffix.startswith(".") else f".{suffix}"
-        local_path = self.snapshot_dir() / f"{digest}{suffix}"
-        if not local_path.exists() or sha256_bytes(local_path.read_bytes()) != digest:
-            local_path.write_bytes(data)
-
-        acquired_at = utc_now_iso()
-        content_type = headers.get("content-type")
-        index[uri] = {
-            "uri": uri,
-            "sha256": digest,
-            "local_path": str(local_path),
-            "content_type": content_type,
-            "acquired_at": acquired_at,
-            "source_type": self.type_name,
-            "metadata": metadata,
-        }
-        self._write_snapshot_index(index)
-        return SourceSnapshot(
-            source_id=self.source_id,
-            source_type=self.type_name,
+        return self._store_snapshot_bytes(
+            index_key=uri,
             uri=uri,
-            acquired_at=acquired_at,
-            sha256=digest,
-            local_path=str(local_path),
-            content_type=content_type,
-            note="; ".join(x for x in [note, "changed=true" if changed else "changed=false"] if x),
-            changed=changed,
-            from_cache=False,
+            data=data,
+            suffix=suffix,
+            note=note,
+            content_type=headers.get("content-type"),
             metadata=metadata,
         )
 
