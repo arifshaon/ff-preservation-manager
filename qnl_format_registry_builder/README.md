@@ -27,21 +27,25 @@ The pipeline follows the agreed preservation-risk model:
 - JSON, JSONL, CSV, SQLite, Markdown and other files are optional exports; they are not staging files and not a second source of truth.
 - Preservation methods are assigned through reusable method profiles by format family/domain, not by hand-writing a unique method for every file format.
 
-## Architecture documentation
+## Documentation map
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed design and logic covering source adapters, storage adapters, export adapters, MongoDB-first queryable registry design, hazard/readiness/trend/exposure separation, and reconciliation rather than additive scoring.
+Start with [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md). It explains which document to read depending on whether you are running the registry, staging source files, configuring storage, or implementing a new adapter.
 
-See [`docs/SOURCE_ADAPTERS.md`](docs/SOURCE_ADAPTERS.md) for the source-first adapter model. Source adapters retrieve and parse source material, emit `RawFormatRecord` objects, and leave persistence to the storage layer.
+Key documents:
 
-See [`docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md) for source acquisition modes, snapshot cache behavior, offline replay, local/admin file input, optional-source failure handling, and NARA latest fallback order.
-
-See [`docs/NARA_LOCAL_FILES.md`](docs/NARA_LOCAL_FILES.md) for the admin-downloaded NARA CSV workflow.
-
-See [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md) for MongoDB, file storage, and export configuration.
-
-See [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) for the institution-neutral model used to support QNL and future institutional policy spreadsheets.
-
-See [`docs/PRESERVATION_METHOD_PROFILES.md`](docs/PRESERVATION_METHOD_PROFILES.md) for the method-profile model used to generate scalable action-plan templates.
+| Need | Read |
+| --- | --- |
+| Run the project and understand the common workflow | `README.md` |
+| Navigate all documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
+| Understand the end-to-end design | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Understand source retrieval, cache, offline replay, local files, and fallback logic | [`docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md) |
+| Implement a new source/storage/export adapter | [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
+| Configure existing adapter types | [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md) |
+| Understand NARA-specific release modes and admin local files | [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md) and [`docs/NARA_LOCAL_FILES.md`](docs/NARA_LOCAL_FILES.md) |
+| Configure MongoDB, file storage, and exports | [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md) |
+| Understand institutional policy overlays such as QNL | [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) |
+| Understand preservation method profiles | [`docs/PRESERVATION_METHOD_PROFILES.md`](docs/PRESERVATION_METHOD_PROFILES.md) |
+| Review design decisions and open next steps | [`docs/DECISIONS.md`](docs/DECISIONS.md) and [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) |
 
 ## Current implementation status
 
@@ -370,34 +374,35 @@ qnl_policy_xlsx
 
 New configurations should use `institution_policy_xlsx`.
 
-## External source adapters
+## Implementing or configuring adapters
 
-The preferred NARA adapter is source-level:
+For implementation logic, read these in order:
 
-```text
-nara_digital_preservation_framework
-```
+1. [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md)
+2. [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md)
+3. [`docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`](docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md)
 
-Its current retrieval mode is `published_csv`, using NARA's public Digital Preservation Framework CSV files. The deprecated `nara_preservation_csv` adapter name remains available only as a compatibility alias.
-
-The preferred PRONOM adapter is:
-
-```text
-pronom_registry
-```
-
-Its current retrieval mode is `github_json`, using PRONOM's public GitHub JSON dataset. The existing `pronom_droid_xml` adapter remains available for DROID signature XML.
-
-## Source adapter pattern
-
-Each source adapter implements two methods:
+The source adapter contract is:
 
 ```python
 acquire() -> list[SourceSnapshot]
 extract(snapshots) -> list[RawFormatRecord]
 ```
 
-Source adapters understand source acquisition and parsing. They do not persist directly to MongoDB. Persistence belongs to `RegistryStore`; exports belong to exporter adapters.
+Source adapters acquire and parse source material. They do not persist directly to MongoDB or write exports. Persistence belongs to `RegistryStore`; optional files belong to exporters.
+
+The implemented source adapter types are documented in `docs/ADAPTER_REFERENCE.md`:
+
+```text
+standard_json
+institution_policy_xlsx
+nara_digital_preservation_framework
+nara_preservation_csv      # deprecated alias
+pronom_registry
+pronom_droid_xml
+loc_fdd_xml
+qnl_policy_xlsx            # deprecated alias
+```
 
 ## Storage adapter pattern
 
