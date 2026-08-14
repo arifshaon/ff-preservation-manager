@@ -69,7 +69,7 @@ def _risk_to_score(value: str | None) -> float | None:
 
 
 def _hazard_score_from_dict(data: dict) -> float | None:
-    for key in ("rating", "score", "hazard_rating", "risk_score"):
+    for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating"):
         value = data.get(key)
         if isinstance(value, (int, float)):
             return float(value)
@@ -78,7 +78,7 @@ def _hazard_score_from_dict(data: dict) -> float | None:
                 return float(value)
             except ValueError:
                 pass
-    for key in ("band", "risk_level", "hazard_band"):
+    for key in ("band", "risk_level", "hazard_band", "external_band", "external_risk_level"):
         score = _risk_to_score(data.get(key))
         if score is not None:
             return score
