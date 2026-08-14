@@ -6,6 +6,7 @@ from typing import Any
 
 from registry_builder.adapters import ADAPTERS
 from registry_builder.db import write_sqlite
+from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
 from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
@@ -15,6 +16,24 @@ from registry_builder.validate import validate_registry
 
 def load_config(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def resolve_config_path(config_path: str | Path, candidate: str | Path) -> Path:
+    candidate_path = Path(candidate)
+    if candidate_path.is_absolute():
+        return candidate_path
+    return Path(config_path).parent / candidate_path
+
+
+def maybe_assign_method_profiles(registry, config: dict[str, Any], config_path: str | Path):
+    method_config = config.get("method_profiles") or {}
+    if not method_config.get("enabled", False):
+        return registry, None
+    path = method_config.get("path")
+    if not path:
+        raise ValueError("method_profiles.enabled is true but no method_profiles.path was supplied")
+    profile_config = load_method_profile_config(resolve_config_path(config_path, path))
+    return assign_method_profiles(registry, profile_config), profile_config.get("version")
 
 
 def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path) -> dict[str, Any]:
@@ -49,6 +68,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         })
 
     registry = reconcile(raw_records)
+    registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     errors, warnings = validate_registry(registry)
 
     registry_dicts = [fmt.to_dict() for fmt in registry]
@@ -61,6 +81,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     for fmt in registry:
         d = fmt.to_dict()
         ids = d.get("identifiers", {})
+        method = d.get("preservation_method", {}) or {}
         csv_rows.append({
             "canonical_id": d["canonical_id"],
             "preferred_name": d["preferred_name"],
@@ -71,10 +92,11 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "loc_ids": ";".join(ids.get("loc", [])),
             "nara_ids": ";".join(ids.get("nara", [])),
             "has_qnl_policy": "yes" if d.get("qnl_policy_overlay") else "no",
+            "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
             "source_count": len(d.get("source_records", [])),
         })
     write_csv(outdir / "registry.csv", csv_rows, [
-        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_qnl_policy", "source_count"
+        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_qnl_policy", "method_profiles", "source_count"
     ])
 
     write_sqlite(outdir / "registry.sqlite", registry)
@@ -87,6 +109,9 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "raw_records": len(raw_records),
         "canonical_formats": len(registry),
         "qnl_policy_formats": sum(1 for x in registry if x.qnl_policy_overlay),
+        "method_profiles_enabled": bool(config.get("method_profiles", {}).get("enabled", False)),
+        "method_profile_version": method_profile_version,
+        "formats_with_method_profiles": sum(1 for x in registry if x.preservation_method.get("assigned_profile_ids")),
         "validation_errors": errors,
         "validation_warnings": warnings,
         "outputs": ["registry.json", "registry.jsonl", "registry.csv", "registry.sqlite", "source_snapshots.json", "coverage_report.md"],
@@ -101,6 +126,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     no_qnl = [r for r in registry if not r.get("qnl_policy_overlay")]
     missing_puid = [r for r in qnl if not r.get("identifiers", {}).get("puid")]
     missing_loc = [r for r in qnl if not r.get("identifiers", {}).get("loc")]
+    with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
     lines = [
         "# Registry Build Report",
         "",
@@ -114,6 +140,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Canonical formats without QNL policy overlay: {len(no_qnl)}",
         f"- QNL policy formats missing PUID: {len(missing_puid)}",
         f"- QNL policy formats missing LOC identifier: {len(missing_loc)}",
+        f"- Canonical formats with preservation method profiles: {len(with_methods)}",
         "",
         "## Source runs",
         "",
