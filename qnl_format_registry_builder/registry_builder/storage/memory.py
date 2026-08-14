@@ -21,7 +21,7 @@ class MemoryRegistryStore(RegistryStore):
         self.source_records: list[dict[str, Any]] = []
         self.canonical_formats: dict[str, dict[str, Any]] = {}
         self.identifiers: list[dict[str, Any]] = []
-        self.qnl_policy_overlays: list[dict[str, Any]] = []
+        self.institution_policy_overlays: list[dict[str, Any]] = []
         self.hazard_assessments: list[dict[str, Any]] = []
         self.readiness_assessments: list[dict[str, Any]] = []
         self.trend_observations: list[dict[str, Any]] = []
@@ -58,8 +58,8 @@ class MemoryRegistryStore(RegistryStore):
                 return
         self.identifiers.append(deepcopy(record))
 
-    def save_qnl_policy_overlay(self, record: dict[str, Any]) -> None:
-        self.qnl_policy_overlays.append(deepcopy(record))
+    def save_institution_policy_overlay(self, record: dict[str, Any]) -> None:
+        self.institution_policy_overlays.append(deepcopy(record))
 
     def save_hazard_assessment(self, record: dict[str, Any]) -> None:
         self.hazard_assessments.append(deepcopy(record))
@@ -84,8 +84,12 @@ class MemoryRegistryStore(RegistryStore):
                     return deepcopy(self.canonical_formats[format_id])
         return None
 
-    def list_qnl_policy_formats(self) -> list[dict[str, Any]]:
-        ids = {x.get("format_id") or x.get("canonical_id") for x in self.qnl_policy_overlays}
+    def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
+        ids = set()
+        for overlay in self.institution_policy_overlays:
+            if institution_id and overlay.get("institution_id") != institution_id:
+                continue
+            ids.add(overlay.get("format_id") or overlay.get("canonical_id"))
         return [deepcopy(v) for k, v in self.canonical_formats.items() if k in ids]
 
     def list_changes_since(self, since: str) -> list[dict[str, Any]]:
