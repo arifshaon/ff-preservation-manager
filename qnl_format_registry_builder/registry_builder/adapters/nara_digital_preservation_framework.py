@@ -1,21 +1,27 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from pathlib import Path
 from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
 from registry_builder.hazard import BAND_TO_SCORE
-from registry_builder.models import RawFormatRecord, SourceSnapshot
-from registry_builder.utils import split_multi
+from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.utils import read_uri, split_multi
 
 _NARA_NATIVE_SCALE = "nara_file_format_risk_matrix"
 _NARA_NATIVE_DIRECTION = "higher_is_safer"
+_NARA_REPO_RAW_BASE = "https://raw.githubusercontent.com/usnationalarchives/digital-preservation"
+_NARA_REPO_API_BASE = "https://api.github.com/repos/usnationalarchives/digital-preservation/contents"
+_NARA_ACTION_DIR = "Digital_Preservation_Plan_Spreadsheet"
+_NARA_RISK_DIR = "Digital_Preservation_Risk_Matrix"
+_DEFAULT_NARA_RELEASE_DATE = "20260320"
 
 DEFAULT_NARA_URIS = [
-    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv",
-    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv",
+    f"{_NARA_REPO_RAW_BASE}/master/{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{_DEFAULT_NARA_RELEASE_DATE}.csv",
+    f"{_NARA_REPO_RAW_BASE}/master/{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{_DEFAULT_NARA_RELEASE_DATE}_Numbered.csv",
 ]
 
 
@@ -131,30 +137,197 @@ def _hazard(row: dict[str, Any], source_type: str) -> dict[str, Any]:
     return hazard
 
 
+def _normalize_release_date(value: Any) -> str:
+    text = re.sub(r"\D+", "", str(value or ""))
+    if len(text) != 8:
+        raise ValueError(f"NARA release_date must contain YYYYMMDD, got: {value!r}")
+    return text
+
+
+def _release_date_from_text(value: str) -> str | None:
+    match = re.search(r"(20\d{6})", value)
+    return match.group(1) if match else None
+
+
 class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     """Acquire and parse NARA Digital Preservation Framework data.
 
-    This is a source-level adapter. Its current implemented retrieval mode is
-    NARA's published CSV files from the public GitHub/raw dataset. Future modes
-    such as API, linked-data, or HTML extraction should be added inside this
-    source adapter rather than exposed as separate source concepts.
+    This is a source-level adapter. It supports three release modes:
+
+    - explicit_uris: use configured URIs exactly;
+    - pinned: resolve the two dated NARA CSV filenames for a configured release;
+    - latest: discover the latest dated CSV pair from NARA's GitHub contents API.
     """
 
     type_name = "nara_digital_preservation_framework"
     default_uris = DEFAULT_NARA_URIS
 
-    def _uris(self) -> list[str]:
-        return list(self.config.get("uris") or self.default_uris)
+    def _github_ref(self) -> str:
+        return str(self.config.get("github_ref") or self.config.get("ref") or "master")
+
+    def _release_mode(self) -> str:
+        mode = str(self.config.get("release_mode") or "").strip().lower()
+        if not mode:
+            return "explicit_uris" if self.config.get("uris") else "pinned"
+        aliases = {"explicit": "explicit_uris", "uris": "explicit_uris", "date": "pinned"}
+        return aliases.get(mode, mode)
+
+    def _release_index_path(self) -> Path:
+        return self.snapshot_dir() / ".nara_release_index.json"
+
+    def _load_release_index(self) -> dict[str, Any]:
+        path = self._release_index_path()
+        if not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _write_release_index(self, index: dict[str, Any]) -> None:
+        path = self._release_index_path()
+        path.write_text(json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _raw_uri_for_path(self, path: str) -> str:
+        return f"{_NARA_REPO_RAW_BASE}/{self._github_ref()}/{path}"
+
+    def _pinned_sources(self, release_date: str, *, release_mode: str) -> list[dict[str, Any]]:
+        action_path = f"{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{release_date}.csv"
+        risk_path = f"{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{release_date}_Numbered.csv"
+        return [
+            {
+                "uri": self._raw_uri_for_path(action_path),
+                "kind": "preservation_action_plan",
+                "release_mode": release_mode,
+                "release_date": release_date,
+                "github_ref": self._github_ref(),
+                "github_path": action_path,
+            },
+            {
+                "uri": self._raw_uri_for_path(risk_path),
+                "kind": "risk_matrix_numbered",
+                "release_mode": release_mode,
+                "release_date": release_date,
+                "github_ref": self._github_ref(),
+                "github_path": risk_path,
+            },
+        ]
+
+    def _explicit_sources(self) -> list[dict[str, Any]]:
+        uris = list(self.config.get("uris") or [])
+        if not uris:
+            raise ValueError("NARA release_mode explicit_uris requires uris")
+        inferred_dates = sorted({date for uri in uris if (date := _release_date_from_text(uri))})
+        release_date = inferred_dates[0] if len(inferred_dates) == 1 else None
+        return [
+            {
+                "uri": uri,
+                "kind": "explicit_uri",
+                "release_mode": "explicit_uris",
+                "release_date": release_date,
+                "github_ref": self._github_ref(),
+                "github_path": None,
+            }
+            for uri in uris
+        ]
+
+    def _fetch_github_directory(self, directory: str) -> list[dict[str, Any]]:
+        uri = f"{_NARA_REPO_API_BASE}/{directory}?ref={self._github_ref()}"
+        data, _headers = read_uri(uri)
+        payload = json.loads(data.decode("utf-8"))
+        if not isinstance(payload, list):
+            raise ValueError(f"Unexpected NARA GitHub directory response for {directory}: {payload!r}")
+        return payload
+
+    def _latest_sources_online(self) -> list[dict[str, Any]]:
+        action_items = self._fetch_github_directory(_NARA_ACTION_DIR)
+        risk_items = self._fetch_github_directory(_NARA_RISK_DIR)
+        action_by_date: dict[str, dict[str, Any]] = {}
+        risk_by_date: dict[str, dict[str, Any]] = {}
+        for item in action_items:
+            name = str(item.get("name") or "")
+            match = re.fullmatch(r"NARA_PreservationActionPlan_FileFormats_(20\d{6})\.csv", name)
+            if match:
+                action_by_date[match.group(1)] = item
+        for item in risk_items:
+            name = str(item.get("name") or "")
+            match = re.fullmatch(r"NARA_File_Format_Risk_Matrix_(20\d{6})_Numbered\.csv", name)
+            if match:
+                risk_by_date[match.group(1)] = item
+        common_dates = sorted(set(action_by_date) & set(risk_by_date))
+        if not common_dates:
+            raise ValueError("Could not resolve latest NARA release: no matching action-plan and numbered-risk CSV release dates found")
+        release_date = common_dates[-1]
+        sources: list[dict[str, Any]] = []
+        for kind, item in (
+            ("preservation_action_plan", action_by_date[release_date]),
+            ("risk_matrix_numbered", risk_by_date[release_date]),
+        ):
+            path = item.get("path")
+            uri = item.get("download_url") or self._raw_uri_for_path(path)
+            sources.append({
+                "uri": uri,
+                "kind": kind,
+                "release_mode": "latest",
+                "release_date": release_date,
+                "github_ref": self._github_ref(),
+                "github_path": path,
+                "github_blob_sha": item.get("sha"),
+                "github_html_url": item.get("html_url"),
+            })
+        index = self._load_release_index()
+        index["latest"] = {
+            "resolved_at": utc_now_iso(),
+            "github_ref": self._github_ref(),
+            "release_date": release_date,
+            "sources": sources,
+        }
+        self._write_release_index(index)
+        return sources
+
+    def _latest_sources_offline(self) -> list[dict[str, Any]]:
+        latest = self._load_release_index().get("latest") or {}
+        sources = latest.get("sources") or []
+        if not sources:
+            raise FileNotFoundError(
+                "Offline NARA release_mode latest requires a cached .nara_release_index.json created by a previous online latest run"
+            )
+        return [dict(source) | {"release_mode": "latest"} for source in sources]
+
+    def _resolved_sources(self) -> list[dict[str, Any]]:
+        mode = self._release_mode()
+        if mode == "explicit_uris":
+            return self._explicit_sources()
+        if mode == "pinned":
+            release_date = _normalize_release_date(self.config.get("release_date") or _DEFAULT_NARA_RELEASE_DATE)
+            return self._pinned_sources(release_date, release_mode="pinned")
+        if mode == "latest":
+            return self._latest_sources_offline() if self.offline else self._latest_sources_online()
+        raise ValueError("NARA release_mode must be one of: explicit_uris, pinned, latest")
 
     def acquire(self) -> list[SourceSnapshot]:
-        return [
-            self.acquire_uri_snapshot(uri, suffix=Path(uri.split("?")[0]).suffix or ".csv", note="retrieval_mode=published_csv")
-            for uri in self._uris()
-        ]
+        snapshots: list[SourceSnapshot] = []
+        for source in self._resolved_sources():
+            uri = source["uri"]
+            note = "; ".join(
+                x for x in [
+                    "retrieval_mode=published_csv",
+                    f"nara_release_mode={source.get('release_mode')}",
+                    f"nara_release_date={source.get('release_date')}" if source.get("release_date") else None,
+                    f"nara_file_kind={source.get('kind')}",
+                ] if x
+            )
+            snapshots.append(
+                self.acquire_uri_snapshot(
+                    uri,
+                    suffix=Path(uri.split("?")[0]).suffix or ".csv",
+                    note=note,
+                    metadata={k: v for k, v in source.items() if k != "uri"},
+                )
+            )
+        return snapshots
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
         for snap in snapshots:
+            metadata = snap.metadata or {}
             with Path(snap.local_path).open("r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 for row_no, row in enumerate(reader, start=2):
@@ -178,6 +351,12 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         "source_row": row_no,
                         "snapshot_changed": snap.changed,
                         "snapshot_from_cache": snap.from_cache,
+                        "nara_release_mode": metadata.get("release_mode"),
+                        "nara_release_date": metadata.get("release_date"),
+                        "nara_file_kind": metadata.get("kind"),
+                        "github_ref": metadata.get("github_ref"),
+                        "github_path": metadata.get("github_path"),
+                        "github_blob_sha": metadata.get("github_blob_sha"),
                         "nara_preservation_action": action,
                         "nara_preservation_plan": plan,
                         "nara_preferred_tools": tools,
@@ -199,6 +378,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         urls=_urls(row),
                         hazard=_hazard(row, self.type_name),
                         evidence=[x for x in evidence if any(v for v in x.values())],
-                        raw={"snapshot_sha256": snap.sha256, "row": row},
+                        raw={
+                            "snapshot_sha256": snap.sha256,
+                            "snapshot_metadata": metadata,
+                            "row": row,
+                        },
                     ))
         return records
