@@ -4,11 +4,15 @@ from collections import defaultdict
 from registry_builder.models import CanonicalFormat
 
 
+_STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
+
+
 def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
     ids = set()
     identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
+    verified_identifier_seen: dict[tuple[str, str], list[str]] = defaultdict(list)
     for fmt in registry:
         if fmt.canonical_id in ids:
             errors.append(f"duplicate canonical_id: {fmt.canonical_id}")
@@ -18,7 +22,13 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
         for kind, values in fmt.identifiers.items():
             for value in values:
                 identifier_seen[(kind, value)].append(fmt.canonical_id)
+        for claim in fmt.identifier_claims:
+            if claim.get("verified"):
+                verified_identifier_seen[(claim.get("kind"), claim.get("value"))].append(fmt.canonical_id)
+    for (kind, value), owners in verified_identifier_seen.items():
+        if len(set(owners)) > 1 and kind in _STRONG_IDENTIFIER_KINDS:
+            errors.append(f"verified identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
     for (kind, value), owners in identifier_seen.items():
-        if len(set(owners)) > 1 and kind in {"puid", "loc", "nara", "mime"}:
-            warnings.append(f"identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
+        if len(set(owners)) > 1 and kind not in _STRONG_IDENTIFIER_KINDS:
+            warnings.append(f"weak identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
     return errors, warnings
