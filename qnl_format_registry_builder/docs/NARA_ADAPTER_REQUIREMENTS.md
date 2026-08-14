@@ -24,16 +24,96 @@ Implemented retrieval mode:
 published_csv
 ```
 
-It parses NARA Digital Preservation Framework CSV exports, including:
+The adapter parses NARA Digital Preservation Framework CSV exports, including the preservation action plan and numbered risk matrix:
 
 ```text
-Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv
-Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv
+Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_<YYYYMMDD>.csv
+Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_<YYYYMMDD>_Numbered.csv
 ```
 
 The action-plan CSV contains format names, extensions, categories, NARA format IDs, risk levels, preservation actions, proposed preservation plans, and preferred tools. The numbered risk-matrix CSV contains the native numeric risk rating and related score fields.
 
 Future retrieval modes, such as an API, linked-data endpoint, or other structured NARA source, should be added inside `nara_digital_preservation_framework` rather than creating a new source concept for each file representation.
+
+## Release modes
+
+The NARA adapter supports three explicit release modes.
+
+### Pinned release
+
+Use this for reproducible/audit runs:
+
+```json
+{
+  "id": "nara_digital_preservation_framework",
+  "type": "nara_digital_preservation_framework",
+  "enabled": true,
+  "retrieval_mode": "published_csv",
+  "release_mode": "pinned",
+  "release_date": "20260320",
+  "github_ref": "master"
+}
+```
+
+The adapter resolves the two dated CSV paths for that release. No source URLs need to be duplicated in the config.
+
+### Latest release
+
+Use this for quarterly refresh runs:
+
+```json
+{
+  "id": "nara_digital_preservation_framework",
+  "type": "nara_digital_preservation_framework",
+  "enabled": true,
+  "retrieval_mode": "published_csv",
+  "release_mode": "latest",
+  "github_ref": "master"
+}
+```
+
+Online `latest` mode reads NARA's GitHub contents listings, finds the highest release date where both the action-plan CSV and numbered-risk CSV exist, then snapshots those files. The resolved release is cached in:
+
+```text
+work/snapshots/<source_id>/.nara_release_index.json
+```
+
+Offline `latest` mode reuses that cached release index and then reads the cached source snapshots. If no cached release index exists, it fails loudly.
+
+### Explicit URIs
+
+Use this only when testing special files or non-standard locations:
+
+```json
+{
+  "id": "nara_digital_preservation_framework",
+  "type": "nara_digital_preservation_framework",
+  "enabled": true,
+  "retrieval_mode": "published_csv",
+  "release_mode": "explicit_uris",
+  "uris": [
+    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv",
+    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
+  ]
+}
+```
+
+## Release metadata
+
+Each NARA source snapshot carries release metadata where available:
+
+```json
+{
+  "release_mode": "latest",
+  "release_date": "20260320",
+  "kind": "risk_matrix_numbered",
+  "github_ref": "master",
+  "github_path": "Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv",
+  "github_blob_sha": "..."
+}
+```
+
+The same metadata is also copied into NARA row evidence and raw record metadata. This lets change detection distinguish source-content movement from adapter/configuration movement.
 
 ## Why NARA matters
 
@@ -46,25 +126,6 @@ With NARA enabled, the following assessment paths become real operational output
 - `institution_override`
 - divergence detection
 - review-required signals
-
-## Recommended config
-
-Enable NARA as a separate source alongside the institutional workbook:
-
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "type": "nara_digital_preservation_framework",
-  "enabled": true,
-  "retrieval_mode": "published_csv",
-  "uris": [
-    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Plan_Spreadsheet/NARA_PreservationActionPlan_FileFormats_20260320.csv",
-    "https://raw.githubusercontent.com/usnationalarchives/digital-preservation/master/Digital_Preservation_Risk_Matrix/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv"
-  ]
-}
-```
-
-Using both CSVs is preferred. The preservation action plan gives the descriptive/action context; the numbered risk matrix gives the native numeric rating.
 
 ## Preserve NARA native rating
 
@@ -147,6 +208,7 @@ This bridge is used only when it uniquely connects one institutional/non-authori
 
 The adapter and reconciler now have regression tests for:
 
+- pinned/latest/explicit NARA release resolution;
 - native numeric rating preserved;
 - native direction preserved;
 - normalized band/rating supplied separately;
