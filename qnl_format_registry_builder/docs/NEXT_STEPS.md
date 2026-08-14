@@ -1,8 +1,40 @@
 # Next steps
 
-## 1. Add baseline/change reports
+## 1. Run the MongoDB-backed QNL + NARA build
 
-The NARA-enabled run has proved that the registry is no longer bounded by the institutional workbook and that all `reconcile_hazard()` branches can execute against real data.
+Install the MongoDB dependency:
+
+```bash
+python -m pip install -e ".[dev,mongo]"
+```
+
+Use `storage.type: mongodb` and enable the QNL and NARA sources. For a database-only run, set:
+
+```json
+{
+  "exports": {
+    "enabled": false
+  }
+}
+```
+
+Then verify MongoDB collection counts:
+
+```text
+runs
+source_snapshots
+source_records
+canonical_formats
+format_identifiers
+institution_policy_overlays
+hazard_assessments
+```
+
+The key validation is that MongoDB, not JSON/CSV files, contains the registry state.
+
+## 2. Add baseline/change reports
+
+The NARA-enabled run has proved that the registry is no longer bounded by the institutional workbook and that all `reconcile_hazard()` branches can execute against real data. MongoDB now gives the place to compare runs.
 
 The next architectural gap is change detection:
 
@@ -26,7 +58,7 @@ new/resolved divergence flags
 new recommended review actions
 ```
 
-## 2. Run a targeted PRONOM registry test
+## 3. Run a targeted PRONOM registry test
 
 For a small PRONOM source test, enable `pronom_registry` and use targeted PUIDs first:
 
@@ -39,25 +71,17 @@ For a small PRONOM source test, enable `pronom_registry` and use targeted PUIDs 
 
 Then move to the recursive GitHub tree mode once the targeted run is clean.
 
-## 3. Move export logic into exporters
+## 4. Move remaining export logic into exporter adapters
 
-The current pipeline writes JSON, JSONL, CSV, SQLite, and Markdown directly. Move that logic into exporter adapters so exports are enabled through configuration.
+The pipeline now treats file outputs as optional exports and can run database-only. The remaining cleanup is to move the implementation of JSON, JSONL, CSV, SQLite, and Markdown writing out of `pipeline.py` into exporter adapters.
 
-## 4. Refactor pipeline to use RegistryStore
-
-The pipeline should write snapshots, source records, canonical formats, identifiers, institutional overlays, assessments, and changes through `RegistryStore`.
-
-## 5. Implement MongoRegistryStore
-
-Use PyMongo to implement the collections described in `ARCHITECTURE.md`.
-
-## 6. Add trend evidence connectors
+## 5. Add trend evidence connectors
 
 Trend should remain `Insufficient Evidence` until connectors exist for specification vitality, implementation vitality, and authority warnings.
 
 The first usable trend input should be NARA native-rating movement between runs, because it can move within a band before the band itself changes.
 
-## 7. Add more retrieval modes only when needed
+## 6. Add more retrieval modes only when needed
 
 Possible future modes:
 
