@@ -74,6 +74,8 @@ This gives a simple way to test persistence, inspect stored documents, and verif
 
 MongoDB is the first production database backend.
 
+Detailed implementation notes, collection purposes, field names, indexes, and verification queries are documented in [`MONGODB_STORAGE_SCHEMA.md`](MONGODB_STORAGE_SCHEMA.md).
+
 Install the MongoDB dependency:
 
 ```bash
