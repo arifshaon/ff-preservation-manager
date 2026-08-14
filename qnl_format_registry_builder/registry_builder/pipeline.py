@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from registry_builder.adapters import ADAPTERS
+from registry_builder.change_detection import compact_change_summary, detect_registry_changes
 from registry_builder.db import write_sqlite
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
 from registry_builder.models import CanonicalFormat, RawFormatRecord, SourceSnapshot, utc_now_iso
@@ -144,6 +145,8 @@ def _persist_registry_to_store(
     snapshots: list[SourceSnapshot],
     raw_records: list[RawFormatRecord],
     registry: list[CanonicalFormat],
+    previous_registry: list[dict[str, Any]],
+    changes: list[dict[str, Any]],
 ) -> None:
     """Persist the build directly to the selected RegistryStore.
 
@@ -151,6 +154,9 @@ def _persist_registry_to_store(
     it has already produced. Export files, when enabled, are generated later and
     are optional review/interchange products.
     """
+    current_ids: set[str] = set()
+    removed_at = utc_now_iso()
+
     for snapshot in snapshots:
         store.save_snapshot(_snapshot_dict(snapshot, run_id))
 
@@ -160,7 +166,13 @@ def _persist_registry_to_store(
     for fmt in registry:
         fmt_dict = fmt.to_dict()
         canonical_id = fmt_dict["canonical_id"]
-        stored_format = fmt_dict | {"run_id": run_id, "format_id": canonical_id}
+        current_ids.add(canonical_id)
+        stored_format = fmt_dict | {
+            "run_id": run_id,
+            "format_id": canonical_id,
+            "current": True,
+            "last_seen_run_id": run_id,
+        }
         store.upsert_canonical_format(stored_format)
 
         for claim in fmt_dict.get("identifier_claims", []):
@@ -195,6 +207,21 @@ def _persist_registry_to_store(
             store.save_trend_observation(
                 trend | {"run_id": run_id, "format_id": canonical_id, "canonical_id": canonical_id, "sequence": sequence}
             )
+
+    for previous in previous_registry:
+        canonical_id = str(previous.get("canonical_id") or "")
+        if canonical_id and canonical_id not in current_ids:
+            removed = previous | {
+                "canonical_id": canonical_id,
+                "format_id": canonical_id,
+                "current": False,
+                "last_removed_run_id": run_id,
+                "removed_at": removed_at,
+            }
+            store.upsert_canonical_format(removed)
+
+    for change in changes:
+        store.save_assessment_change(change)
 
 
 def _write_file_exports(
@@ -261,12 +288,14 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     outdir = ensure_dir(outdir)
     storage_config = _storage_config(config)
     store = create_store(storage_config)
+    previous_registry_view = store.get_current_registry_view()
     store.create_run({
         "run_id": run_id,
         "started_at": started_at,
         "status": "running",
         "config_path": str(config_path),
         "storage": storage_config,
+        "previous_canonical_formats": len(previous_registry_view),
     })
 
     all_snapshots: list[SourceSnapshot] = []
@@ -300,6 +329,14 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     warning_summary = summarize_validation_warnings(warnings)
     warning_counts = validation_warning_counts(warnings)
     method_metrics = _method_profile_metrics(registry)
+    registry_dicts = [fmt.to_dict() for fmt in registry]
+    change_detection = detect_registry_changes(
+        previous_registry_view,
+        registry_dicts,
+        run_id=run_id,
+        created_at=utc_now_iso(),
+    )
+    change_summary = compact_change_summary(change_detection)
 
     _persist_registry_to_store(
         store,
@@ -307,6 +344,8 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         snapshots=all_snapshots,
         raw_records=raw_records,
         registry=registry,
+        previous_registry=previous_registry_view,
+        changes=change_detection.get("changes", []),
     )
 
     report = {
@@ -317,6 +356,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "config_path": str(config_path),
         "storage": {
             "type": storage_config.get("type", "memory"),
+            "path": storage_config.get("path") or storage_config.get("directory") or storage_config.get("root"),
             "database": storage_config.get("database") or storage_config.get("db"),
             "collection_prefix": storage_config.get("collection_prefix"),
         },
@@ -331,6 +371,9 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "validation_warnings": warnings,
         "validation_warning_counts": warning_counts,
         "validation_warning_summary": warning_summary,
+        "change_detection": change_summary,
+        "change_counts": change_summary.get("change_counts", {}),
+        "changes": change_summary.get("sample_changes", []),
         "exports_enabled": _exports_enabled(config),
         "outputs": [],
     }
@@ -351,6 +394,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     missing_puid = [r for r in institutional if not r.get("identifiers", {}).get("puid")]
     missing_loc = [r for r in institutional if not r.get("identifiers", {}).get("loc")]
     with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
+    change_detection = report.get("change_detection") or {}
     lines = [
         "# Registry Build Report",
         "",
@@ -371,9 +415,30 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Average direct discriminating method profiles per format: {report.get('average_direct_discriminating_method_profiles_per_format', 0)}",
         f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
         "",
+        "## Change detection",
+        "",
+        f"- Run kind: {change_detection.get('run_kind', 'unknown')}",
+        f"- Previous canonical formats: {change_detection.get('previous_canonical_formats', 0)}",
+        f"- Current canonical formats: {change_detection.get('current_canonical_formats', 0)}",
+        f"- Total changes: {change_detection.get('total_changes', 0)}",
+    ]
+    if change_detection.get("baseline_note"):
+        lines.append(f"- Note: {change_detection['baseline_note']}")
+    if change_detection.get("change_counts"):
+        lines.append("\n### Change counts")
+        lines.extend(f"- {change_type}: {count}" for change_type, count in change_detection["change_counts"].items())
+    if change_detection.get("sample_changes"):
+        lines.append("\n### Change samples")
+        for change in change_detection["sample_changes"][:25]:
+            lines.append(
+                f"- {change.get('change_type')} — {change.get('canonical_id')}"
+                + (f" ({change.get('field')})" if change.get("field") else "")
+            )
+    lines.extend([
+        "",
         "## Method profile distribution",
         "",
-    ]
+    ])
     direct_distribution = report.get("direct_method_profile_distribution", {}) or {}
     if direct_distribution:
         lines.append("### Direct profiles")
