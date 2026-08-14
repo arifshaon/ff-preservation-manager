@@ -27,11 +27,14 @@ def load_identifier_rules(configured: dict[str, Any] | None = None) -> dict[str,
       "dpc": {"strength": "strong", "verified_from": ["dpc_bit_list"]}
     }
 
-    Built-in rules remain available unless explicitly overwritten.
+    Built-in rules remain available unless explicitly overwritten. Non-dict
+    entries such as `notes` are ignored so config files can remain readable.
     """
     rules = deepcopy(DEFAULT_IDENTIFIER_KINDS)
     for kind, rule in (configured or {}).items():
         normalized_kind = str(kind).strip().lower()
+        if normalized_kind in {"notes", "_notes", "comment", "_comment"} or not isinstance(rule, dict):
+            continue
         merged = deepcopy(rules.get(normalized_kind, {}))
         merged.update(dict(rule or {}))
         merged.setdefault("strength", "weak")
