@@ -8,7 +8,7 @@ def test_nara_source_adapter_extracts_native_and_normalized_hazard(tmp_path):
     csv_path = tmp_path / "nara.csv"
     csv_path.write_text(
         "Format Name,File Extension(s),Category/Plan(s),NARA Format ID,MIME type(s),PRONOM URL,LOC URL,WikiData URL,NARA Risk Level,NARA Preservation Action,NARA Proposed Preservation Plan,Description and Justification,NARA Preferred Processing and Transformation Tool(s),Numeric Risk Rating,NARA TOTAL\n"
-        "Comma Separated Values,csv,Structured Data,NF00143,text/csv,https://www.nationalarchives.gov.uk/PRONOM/fmt/18,https://www.loc.gov/preservation/digital/formats/fdd/fdd000323.shtml,https://www.wikidata.org/wiki/Q935809,Low Risk,Retain,Retain,Delimited structured data,CSV validator,-12.00,-7.00\n",
+        "Comma Separated Values,csv,Structured Data,NF00143,text/csv,https://www.nationalarchives.gov.uk/PRONOM/fmt/18,https://www.loc.gov/preservation/digital/formats/fdd/fdd000323.shtml,https://www.wikidata.org/wiki/Q935809,Low Risk,Retain,Retain,Delimited structured data,CSV validator,24.00,-7.00\n",
         encoding="utf-8",
     )
     adapter = NaraDigitalPreservationFrameworkAdapter({"id": "nara_test", "uris": []}, tmp_path)
@@ -32,9 +32,37 @@ def test_nara_source_adapter_extracts_native_and_normalized_hazard(tmp_path):
     assert record.extensions == ["csv"]
     assert record.hazard["external_band"] == "Low"
     assert record.hazard["rating"] == 1.0
-    assert record.hazard["native_rating"] == -12.0
+    assert record.hazard["native_rating"] == 24.0
+    assert record.hazard["external_rating_native"] == 24.0
+    assert record.hazard["native_rating_band"] == "Low"
     assert record.hazard["native_direction"] == "higher_is_safer"
+    assert record.hazard["external_rating_native_direction"] == "higher_is_safer"
     assert record.hazard["nara_total"] == -7.0
+
+
+def test_nara_native_rating_drives_band_when_text_is_absent(tmp_path):
+    csv_path = tmp_path / "nara.csv"
+    csv_path.write_text(
+        "Format Name,File Extension(s),NARA Format ID,Numeric Risk Rating\n"
+        "Legacy Binary,bin,NF00999,-24.00\n",
+        encoding="utf-8",
+    )
+    adapter = NaraDigitalPreservationFrameworkAdapter({"id": "nara_test", "uris": []}, tmp_path)
+    snapshot = SourceSnapshot(
+        source_id="nara_test",
+        source_type="nara_digital_preservation_framework",
+        uri=str(csv_path),
+        acquired_at="2026-08-14T00:00:00+00:00",
+        sha256="abc123",
+        local_path=str(csv_path),
+    )
+
+    record = adapter.extract([snapshot])[0]
+
+    assert record.hazard["external_band"] == "High"
+    assert record.hazard["rating"] == 3.0
+    assert record.hazard["external_rating_native"] == -24.0
+    assert record.hazard["external_rating_native_direction"] == "higher_is_safer"
 
 
 def test_nara_id_is_verified_but_pronom_url_puid_is_not(tmp_path):
