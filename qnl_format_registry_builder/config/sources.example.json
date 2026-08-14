@@ -1,5 +1,7 @@
 {
   "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "incremental_source_updates_notes": "Default production behavior. Each successful source run refreshes that source's evidence and reuses latest stored evidence from other sources before rebuilding canonical registry records. Set false only for isolated full-rebuild tests.",
   "storage": {
     "type": "memory",
     "notes": "Default keeps the sample runnable without infrastructure. For the first real deployment, change type to mongodb and supply uri/database. The pipeline writes directly to the selected RegistryStore; exports are optional and are not staging files. External storage backends may also be loaded with a dotted path such as mypkg.storage:MyRegistryStore."
