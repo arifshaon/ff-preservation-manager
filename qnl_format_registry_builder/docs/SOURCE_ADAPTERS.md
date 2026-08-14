@@ -25,7 +25,47 @@ Institutional policy   -> RegistryStore.save_institution_policy_overlay()
 Hazard assessment      -> RegistryStore.save_hazard_assessment()
 ```
 
-The current prototype still writes exports directly in `pipeline.py`; the target architecture is for the pipeline to pass normalized records and canonical records through `RegistryStore`.
+## Snapshot cache and offline mode
+
+Source acquisition now uses a content-addressed snapshot cache under:
+
+```text
+work/snapshots/<source_id>/
+```
+
+Each source keeps a `.snapshot_index.json` mapping source URI to the latest cached SHA-256 and local snapshot path.
+
+Online mode still checks the upstream source, but it reports whether each snapshot changed:
+
+```text
+changed=true
+changed=false
+```
+
+Unchanged snapshots are not rewritten. This lets the run report show per-source change status, for example:
+
+```text
+source_changed
+snapshots_changed
+snapshots_unchanged
+snapshots_from_cache
+```
+
+Offline mode can be enabled from the CLI:
+
+```bash
+python -m registry_builder run --config config/sources.example.json --workdir work --out output --offline
+```
+
+or through config:
+
+```json
+{
+  "offline": true
+}
+```
+
+In offline mode, adapters read only from the cached snapshot index. If a requested URI is not already cached, the run fails loudly rather than silently fetching or substituting another source.
 
 ## Preferred adapter naming
 
