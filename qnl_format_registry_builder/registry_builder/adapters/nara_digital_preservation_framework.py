@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 
 from registry_builder.adapters.base import SourceAdapter
 from registry_builder.hazard import BAND_TO_SCORE
 from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.utils import read_uri, split_multi
+
+logger = logging.getLogger(__name__)
 
 _NARA_NATIVE_SCALE = "nara_file_format_risk_matrix"
 _NARA_NATIVE_DIRECTION = "higher_is_safer"
@@ -172,6 +176,9 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         aliases = {"explicit": "explicit_uris", "uris": "explicit_uris", "date": "pinned"}
         return aliases.get(mode, mode)
 
+    def _fallback_release_date(self) -> str:
+        return _normalize_release_date(self.config.get("fallback_release_date") or _DEFAULT_NARA_RELEASE_DATE)
+
     def _release_index_path(self) -> Path:
         return self.snapshot_dir() / ".nara_release_index.json"
 
@@ -188,10 +195,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     def _raw_uri_for_path(self, path: str) -> str:
         return f"{_NARA_REPO_RAW_BASE}/{self._github_ref()}/{path}"
 
-    def _pinned_sources(self, release_date: str, *, release_mode: str) -> list[dict[str, Any]]:
+    def _pinned_sources(self, release_date: str, *, release_mode: str, resolution_error: str | None = None) -> list[dict[str, Any]]:
         action_path = f"{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{release_date}.csv"
         risk_path = f"{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{release_date}_Numbered.csv"
-        return [
+        sources = [
             {
                 "uri": self._raw_uri_for_path(action_path),
                 "kind": "preservation_action_plan",
@@ -209,6 +216,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 "github_path": risk_path,
             },
         ]
+        if resolution_error:
+            for source in sources:
+                source["release_resolution_error"] = resolution_error
+        return sources
 
     def _explicit_sources(self) -> list[dict[str, Any]]:
         uris = list(self.config.get("uris") or [])
@@ -282,14 +293,36 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         self._write_release_index(index)
         return sources
 
-    def _latest_sources_offline(self) -> list[dict[str, Any]]:
+    def _latest_sources_offline(self, *, release_mode: str = "latest", resolution_error: str | None = None) -> list[dict[str, Any]]:
         latest = self._load_release_index().get("latest") or {}
         sources = latest.get("sources") or []
         if not sources:
             raise FileNotFoundError(
                 "Offline NARA release_mode latest requires a cached .nara_release_index.json created by a previous online latest run"
             )
-        return [dict(source) | {"release_mode": "latest"} for source in sources]
+        out = []
+        for source in sources:
+            item = dict(source) | {"release_mode": release_mode}
+            if resolution_error:
+                item["release_resolution_error"] = resolution_error
+            out.append(item)
+        return out
+
+    def _latest_sources_with_fallback(self) -> list[dict[str, Any]]:
+        try:
+            return self._latest_sources_online()
+        except (HTTPError, URLError) as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            if self._release_index_path().exists():
+                logger.warning("NARA latest discovery failed (%s); using cached release index", exc)
+                return self._latest_sources_offline(release_mode="latest_cached_fallback", resolution_error=error)
+            fallback_date = self._fallback_release_date()
+            logger.warning(
+                "NARA latest discovery failed (%s); falling back to pinned %s",
+                exc,
+                fallback_date,
+            )
+            return self._pinned_sources(fallback_date, release_mode="latest_fallback", resolution_error=error)
 
     def _resolved_sources(self) -> list[dict[str, Any]]:
         mode = self._release_mode()
@@ -299,7 +332,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             release_date = _normalize_release_date(self.config.get("release_date") or _DEFAULT_NARA_RELEASE_DATE)
             return self._pinned_sources(release_date, release_mode="pinned")
         if mode == "latest":
-            return self._latest_sources_offline() if self.offline else self._latest_sources_online()
+            return self._latest_sources_offline() if self.offline else self._latest_sources_with_fallback()
         raise ValueError("NARA release_mode must be one of: explicit_uris, pinned, latest")
 
     def acquire(self) -> list[SourceSnapshot]:
@@ -312,6 +345,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                     f"nara_release_mode={source.get('release_mode')}",
                     f"nara_release_date={source.get('release_date')}" if source.get("release_date") else None,
                     f"nara_file_kind={source.get('kind')}",
+                    "release_resolution_error=true" if source.get("release_resolution_error") else None,
                 ] if x
             )
             snapshots.append(
@@ -357,6 +391,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         "github_ref": metadata.get("github_ref"),
                         "github_path": metadata.get("github_path"),
                         "github_blob_sha": metadata.get("github_blob_sha"),
+                        "release_resolution_error": metadata.get("release_resolution_error"),
                         "nara_preservation_action": action,
                         "nara_preservation_plan": plan,
                         "nara_preferred_tools": tools,
@@ -378,10 +413,6 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                         urls=_urls(row),
                         hazard=_hazard(row, self.type_name),
                         evidence=[x for x in evidence if any(v for v in x.values())],
-                        raw={
-                            "snapshot_sha256": snap.sha256,
-                            "snapshot_metadata": metadata,
-                            "row": row,
-                        },
+                        raw={"snapshot_sha256": snap.sha256, "row": row},
                     ))
         return records
