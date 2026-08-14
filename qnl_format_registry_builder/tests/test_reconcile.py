@@ -23,8 +23,8 @@ def test_verified_pronom_puid_reconciles_records():
 
 def test_mime_type_does_not_merge_distinct_formats():
     records = [
-        RawFormatRecord(source_id="qnl", source_type="qnl_policy_xlsx", name="Chemical Markup Language", mime_types=["text"], extensions=["cml"]),
-        RawFormatRecord(source_id="qnl", source_type="qnl_policy_xlsx", name="Crystallographic Information File", mime_types=["text"], extensions=["cif"]),
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="Chemical Markup Language", mime_types=["text"], extensions=["cml"]),
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="Crystallographic Information File", mime_types=["text"], extensions=["cif"]),
     ]
     registry = reconcile(_norm(records))
     assert len(registry) == 2
@@ -33,7 +33,7 @@ def test_mime_type_does_not_merge_distinct_formats():
 
 def test_unverified_spreadsheet_puid_does_not_force_merge_with_pronom():
     records = [
-        RawFormatRecord(source_id="qnl", source_type="qnl_policy_xlsx", name="JPEG 1.00", puids=["fmt/44"], extensions=["jpg"]),
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="JPEG 1.00", puids=["fmt/44"], extensions=["jpg"]),
         RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="JFIF 1.02", puids=["fmt/44"], extensions=["jpg"]),
     ]
     registry = reconcile(_norm(records))
@@ -47,10 +47,10 @@ def test_hazard_reconciler_is_wired_into_canonical_format():
     records = [
         RawFormatRecord(
             source_id="qnl",
-            source_type="qnl_policy_xlsx",
+            source_type="institution_policy_xlsx",
             name="Example Format",
             extensions=["exf"],
-            qnl={"spreadsheet_risk_level": "High Risk"},
+            institution_policy={"institution_id": "qnl", "local_risk_level": "High Risk"},
         ),
         RawFormatRecord(
             source_id="nara",
