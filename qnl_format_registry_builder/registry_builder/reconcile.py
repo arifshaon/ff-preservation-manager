@@ -5,11 +5,12 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from registry_builder.hazard import BAND_TO_SCORE, reconcile_hazard
+from registry_builder.identifier_rules import load_identifier_rules, strong_identifier_kinds
 from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, utc_now_iso
 from registry_builder.utils import slugify
 
-_STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
-_NARA_NATIVE_DIRECTION = "higher_is_safer"
+_NATIVE_GAP_SCALE = "nara_file_format_risk_matrix"
+_NATIVE_GAP_DIRECTION = "higher_is_safer"
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -42,15 +43,16 @@ def _weak_match_key(record: RawFormatRecord) -> tuple[str, str] | None:
     return None
 
 
-def strongest_key(record: RawFormatRecord) -> tuple[str, str]:
+def strongest_key(record: RawFormatRecord, *, strong_kinds: set[str] | None = None) -> tuple[str, str]:
     """Return the strongest safe matching key for a raw record.
 
     Strong one-to-one identifiers may group records only when the identifier was
     verified by its owning authority. Weak identifiers such as MIME types and
     extensions are not primary grouping keys because they can describe broad
-    format classes or families.
+    format classes or families. Strong identifier namespaces are configurable.
     """
-    for kind in ("puid", "loc", "nara"):
+    strong_kinds = strong_kinds or strong_identifier_kinds(load_identifier_rules())
+    for kind in sorted(strong_kinds):
         verified = _verified_identifiers(record, kind)
         if verified:
             return (kind, verified[0].value)
@@ -66,9 +68,9 @@ def canonical_id_for(key: tuple[str, str], name: str | None) -> str:
     kind, value = key
     if kind == "puid":
         return "puid-" + value.replace("/", "-")
-    if kind in {"loc", "nara"}:
-        return kind + "-" + slugify(value)
-    return "fmt-" + slugify(name or value)
+    if kind in {"name", "name_ext", "source_record"}:
+        return "fmt-" + slugify(name or value)
+    return kind + "-" + slugify(value)
 
 
 def _risk_to_score(value: str | None) -> float | None:
@@ -98,9 +100,9 @@ def _float_value(value: Any) -> float | None:
 
 
 def _hazard_score_from_dict(data: dict) -> float | None:
-    # Deliberately do not read native NARA numeric fields here. NARA's native
-    # direction is higher-is-safer, so it must not be treated as a direct hazard
-    # score. Use only normalized values or text bands for reconciliation.
+    # Native external ratings are source-scale values. They must not be treated
+    # as normalized hazard scores unless an adapter explicitly emits a normalized
+    # field such as rating/normalized_rating or a Low/Moderate/High band.
     for key in ("rating", "score", "hazard_rating", "risk_score", "external_rating", "normalized_rating"):
         parsed = _float_value(data.get(key))
         if parsed is not None:
@@ -135,19 +137,33 @@ def _first_policy_with_score(policies: list[dict]) -> dict | None:
 def _native_rating(data: dict | None) -> float | None:
     if not data:
         return None
-    for key in ("external_rating_native", "external_native_rating", "native_rating", "nara_native_numeric_risk_rating"):
+    for key in ("external_rating_native", "external_native_rating", "native_rating"):
         parsed = _float_value(data.get(key))
         if parsed is not None:
             return parsed
     return None
 
 
+def _native_scale(data: dict | None) -> str | None:
+    if not data:
+        return None
+    value = data.get("external_rating_native_scale") or data.get("native_scale")
+    return str(value) if value else None
+
+
+def _native_direction(data: dict | None) -> str | None:
+    if not data:
+        return None
+    value = data.get("external_rating_native_direction") or data.get("native_direction")
+    return str(value) if value else None
+
+
 def _native_gap_to_institution_band(native_rating: float | None, institution_score: float | None) -> float | None:
     """Return distance from NARA native rating to the institution's band.
 
-    NARA native direction is higher-is-safer. The value here is not used to
-    decide hazard basis. It helps review: a one-band disagreement can be barely
-    across a threshold or far into another band.
+    This calculation is intentionally limited to NARA's native scale. Other
+    external sources may use different thresholds/directions; their adapters
+    should emit normalized ratings/bands and may add their own explanatory fields.
     """
     if native_rating is None or institution_score is None:
         return None
@@ -170,24 +186,24 @@ def _copy_external_native_fields(result: dict, external_hazard: dict | None, ins
         return
     result["external_rating_native"] = native
     result["external_native_rating"] = native
-    result["external_rating_native_direction"] = (
-        external_hazard.get("external_rating_native_direction")
-        or external_hazard.get("native_direction")
-        or _NARA_NATIVE_DIRECTION
-    )
-    if external_hazard.get("external_rating_native_scale") or external_hazard.get("native_scale"):
-        result["external_rating_native_scale"] = external_hazard.get("external_rating_native_scale") or external_hazard.get("native_scale")
+    direction = _native_direction(external_hazard)
+    scale = _native_scale(external_hazard)
+    if direction:
+        result["external_rating_native_direction"] = direction
+    if scale:
+        result["external_rating_native_scale"] = scale
     if external_hazard.get("external_native_band") or external_hazard.get("native_band"):
         result["external_native_band"] = external_hazard.get("external_native_band") or external_hazard.get("native_band")
     if external_hazard.get("native_rating_band"):
         result["external_native_rating_band"] = external_hazard.get("native_rating_band")
-    native_gap = _native_gap_to_institution_band(native, institution_score)
-    if native_gap is not None:
-        result["external_native_gap_to_institution_band"] = native_gap
-        result["external_native_gap_note"] = (
-            "Distance from NARA native rating to the nearest threshold for the institution's band; "
-            "not used as the normalized reconciliation score."
-        )
+    if scale == _NATIVE_GAP_SCALE and direction == _NATIVE_GAP_DIRECTION:
+        native_gap = _native_gap_to_institution_band(native, institution_score)
+        if native_gap is not None:
+            result["external_native_gap_to_institution_band"] = native_gap
+            result["external_native_gap_note"] = (
+                "Distance from NARA native rating to the nearest threshold for the institution's band; "
+                "not used as the normalized reconciliation score."
+            )
 
 
 def _hazard_assessment(cf: CanonicalFormat) -> dict:
@@ -203,7 +219,7 @@ def _hazard_assessment(cf: CanonicalFormat) -> dict:
     return result
 
 
-def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]]) -> dict[tuple[str, str], tuple[str, str]]:
+def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, strong_kinds: set[str]) -> dict[tuple[str, str], tuple[str, str]]:
     """Return weak-key aliases that are safe enough for institutional/external bridging.
 
     A weak key may alias to a verified strong group only when:
@@ -213,7 +229,7 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]]) -> 
     - exactly one of the candidate groups has a verified strong identifier.
 
     This lets an institutional row such as "Comma Separated Values + csv" attach
-    to the corresponding NARA NF record while avoiding ambiguous merges where
+    to the corresponding authority record while avoiding ambiguous merges where
     two authority records share the same weak key.
     """
     weak_index: dict[tuple[str, str], list[tuple[tuple[str, str], RawFormatRecord]]] = defaultdict(list)
@@ -233,7 +249,7 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]]) -> 
                 group_keys.append(group_key)
         if len(group_keys) < 2 or len(sources) < 2:
             continue
-        strong_group_keys = [key for key in group_keys if key[0] in _STRONG_IDENTIFIER_KINDS]
+        strong_group_keys = [key for key in group_keys if key[0] in strong_kinds]
         if len(strong_group_keys) != 1:
             continue
         target = strong_group_keys[0]
@@ -243,18 +259,20 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]]) -> 
     return aliases
 
 
-def reconcile(records: Iterable[RawFormatRecord]) -> list[CanonicalFormat]:
+def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
+    rules = identifier_rules or load_identifier_rules()
+    strong_kinds = strong_identifier_kinds(rules)
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
 
     for record in records:
-        key = strongest_key(record)
+        key = strongest_key(record, strong_kinds=strong_kinds)
         groups[key].append(record)
         for identifier in _verified_identifiers(record):
-            if identifier.kind in _STRONG_IDENTIFIER_KINDS:
+            if identifier.kind in strong_kinds:
                 alias_keys[(identifier.kind, identifier.value)] = key
 
-    for weak_key, target_key in _safe_weak_aliases(groups).items():
+    for weak_key, target_key in _safe_weak_aliases(groups, strong_kinds=strong_kinds).items():
         alias_keys.setdefault(weak_key, target_key)
 
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
