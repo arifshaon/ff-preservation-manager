@@ -15,14 +15,18 @@ def score_to_band(score: float | None) -> str | None:
     return "High"
 
 
-def reconcile_hazard(external_score: float | None, qnl_score: float | None, divergence_threshold: float = 0.5) -> dict[str, Any]:
+def reconcile_hazard(
+    external_score: float | None,
+    institution_score: float | None,
+    divergence_threshold: float = 0.5,
+) -> dict[str, Any]:
     """Reconcile two estimators of intrinsic hazard without adding them.
 
-    This implements the agreed principle: authoritative external assessment and
-    QNL criteria assessment estimate the same latent quantity. They are not
-    summed. Disagreement is surfaced as divergence and review need.
+    Authoritative external assessment and an institutional/local assessment
+    estimate the same latent quantity. They are not summed. Disagreement is
+    surfaced as divergence and review need.
     """
-    if external_score is None and qnl_score is None:
+    if external_score is None and institution_score is None:
         return {
             "assessed": False,
             "band": None,
@@ -34,14 +38,14 @@ def reconcile_hazard(external_score: float | None, qnl_score: float | None, dive
     if external_score is None:
         return {
             "assessed": True,
-            "rating": qnl_score,
-            "band": score_to_band(qnl_score),
-            "basis": "qnl_only",
+            "rating": institution_score,
+            "band": score_to_band(institution_score),
+            "basis": "institution_only",
             "confidence": "medium",
             "divergence_flag": False,
             "review_required": False,
         }
-    if qnl_score is None:
+    if institution_score is None:
         return {
             "assessed": True,
             "rating": external_score,
@@ -51,7 +55,7 @@ def reconcile_hazard(external_score: float | None, qnl_score: float | None, dive
             "divergence_flag": False,
             "review_required": False,
         }
-    divergence = abs(external_score - qnl_score)
+    divergence = abs(external_score - institution_score)
     if divergence <= divergence_threshold:
         return {
             "assessed": True,
@@ -59,7 +63,7 @@ def reconcile_hazard(external_score: float | None, qnl_score: float | None, dive
             "band": score_to_band(external_score),
             "basis": "corroborated",
             "external_rating": external_score,
-            "qnl_rating": qnl_score,
+            "institution_rating": institution_score,
             "divergence": round(divergence, 3),
             "confidence": "high",
             "divergence_flag": False,
@@ -67,11 +71,11 @@ def reconcile_hazard(external_score: float | None, qnl_score: float | None, dive
         }
     return {
         "assessed": True,
-        "rating": qnl_score,
-        "band": score_to_band(qnl_score),
-        "basis": "qnl_override",
+        "rating": institution_score,
+        "band": score_to_band(institution_score),
+        "basis": "institution_override",
         "external_rating": external_score,
-        "qnl_rating": qnl_score,
+        "institution_rating": institution_score,
         "divergence": round(divergence, 3),
         "confidence": "low",
         "divergence_flag": True,
