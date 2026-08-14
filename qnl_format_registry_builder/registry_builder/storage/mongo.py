@@ -35,7 +35,7 @@ class MongoRegistryStore(RegistryStore):
     def upsert_identifier(self, record: dict[str, Any]) -> None:
         raise NotImplementedError
 
-    def save_qnl_policy_overlay(self, record: dict[str, Any]) -> None:
+    def save_institution_policy_overlay(self, record: dict[str, Any]) -> None:
         raise NotImplementedError
 
     def save_hazard_assessment(self, record: dict[str, Any]) -> None:
@@ -56,7 +56,7 @@ class MongoRegistryStore(RegistryStore):
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
         raise NotImplementedError
 
-    def list_qnl_policy_formats(self) -> list[dict[str, Any]]:
+    def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def list_changes_since(self, since: str) -> list[dict[str, Any]]:
