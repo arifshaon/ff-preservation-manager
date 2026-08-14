@@ -171,12 +171,13 @@ def _run_timestamp_index(store: RegistryStore) -> dict[str, str]:
 
 
 def _latest_completed_source_run_index(store: RegistryStore) -> dict[str, str]:
-    """Return source_id -> latest completed run_id.
+    """Return source_id -> latest completed contribution run_id.
 
-    This prevents old records from being resurrected after a source refresh that
-    deliberately removed them. The active evidence for a source is the set of
-    source records from that source's latest completed run, not the latest record
-    seen for each individual source_record_id.
+    The active evidence contribution for a source is the evidence set from that
+    source's latest successful run. Earlier evidence sets remain preserved as
+    run history and source-record provenance, but they are not duplicated into
+    the current canonical view when a newer contribution from the same source is
+    available.
     """
     run_index = _run_timestamp_index(store)
     latest: dict[str, tuple[tuple[str, str], str]] = {}
@@ -196,19 +197,19 @@ def _latest_completed_source_run_index(store: RegistryStore) -> dict[str, str]:
     return {source_id: run_id for source_id, (_, run_id) in latest.items()}
 
 
-def _latest_stored_source_records(
+def _stored_source_records_for_augmentation(
     store: RegistryStore,
     *,
-    refreshed_source_ids: set[str],
+    current_run_source_ids: set[str],
     identifier_rules: dict[str, dict[str, Any]],
 ) -> list[RawFormatRecord]:
-    """Return active stored source records for sources not refreshed this run.
+    """Return stored evidence contributions that can augment this run.
 
-    Source-by-source registry population works by replacing only the evidence for
-    sources that completed in the current run, then rebuilding canonical formats
-    from current-run records plus active stored records from all other sources.
-    A failed optional source is not considered refreshed, so its last successful
-    evidence remains active.
+    Source-by-source population works by adding the current run's evidence
+    contribution to the latest successful evidence contributions from sources
+    that did not run this time. A failed optional source contributes no new
+    evidence in this run, so its latest successful contribution remains available
+    for augmentation.
     """
     run_index = _run_timestamp_index(store)
     latest_source_runs = _latest_completed_source_run_index(store)
@@ -217,7 +218,7 @@ def _latest_stored_source_records(
 
     for record in store.query("source_records"):
         source_id = str(record.get("source_id") or "")
-        if not source_id or source_id in refreshed_source_ids:
+        if not source_id or source_id in current_run_source_ids:
             continue
         run_id = str(record.get("run_id") or "")
         expected_run_id = latest_source_runs.get(source_id)
@@ -284,12 +285,7 @@ def _persist_registry_to_store(
     previous_registry: list[dict[str, Any]] | None = None,
     changes: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Persist the build directly to the selected RegistryStore.
-
-    This is not a JSON staging step. The pipeline persists the in-memory objects
-    it has already produced. Export files, when enabled, are generated later and
-    are optional review/interchange products.
-    """
+    """Persist this run's contribution and the recomputed canonical view."""
     previous_registry = previous_registry or []
     changes = changes or []
     current_ids: set[str] = set()
@@ -498,21 +494,21 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
                 raise
             continue
 
-    completed_source_ids = {
+    current_run_source_ids = {
         str(s.get("source_id"))
         for s in source_summaries
         if s.get("enabled", True) and s.get("status") == "completed" and s.get("source_id")
     }
-    prior_source_records = (
-        _latest_stored_source_records(
+    stored_source_records = (
+        _stored_source_records_for_augmentation(
             store,
-            refreshed_source_ids=completed_source_ids,
+            current_run_source_ids=current_run_source_ids,
             identifier_rules=identifier_rules,
         )
         if incremental_source_updates
         else []
     )
-    active_source_records = prior_source_records + raw_records
+    active_source_records = stored_source_records + raw_records
 
     registry = reconcile(active_source_records, identifier_rules=identifier_rules)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
@@ -561,9 +557,9 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "source_change_counts": dict(Counter("changed" if s.get("source_changed") else "unchanged" for s in completed_sources)),
         "raw_records": len(active_source_records),
         "raw_records_extracted": len(raw_records),
-        "prior_source_records_reused": len(prior_source_records),
+        "stored_source_records_used_for_augmentation": len(stored_source_records),
         "active_source_records": len(active_source_records),
-        "refreshed_source_ids": sorted(completed_source_ids),
+        "contributing_source_ids": sorted(current_run_source_ids),
         "canonical_formats": len(registry),
         "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
         "method_profiles_enabled": bool(config.get("method_profiles", {}).get("enabled", False)),
@@ -605,7 +601,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Offline mode: {report.get('offline', False)}",
         f"- Incremental source updates: {report.get('incremental_source_updates', True)}",
         f"- Raw source records extracted this run: {report.get('raw_records_extracted', report.get('raw_records', 0))}",
-        f"- Prior source records reused: {report.get('prior_source_records_reused', 0)}",
+        f"- Stored source records reused for augmentation: {report.get('stored_source_records_used_for_augmentation', 0)}",
         f"- Active source records used for reconciliation: {report.get('active_source_records', report.get('raw_records', 0))}",
         f"- Canonical formats generated: {report['canonical_formats']}",
         f"- Canonical formats with institutional policy overlay: {len(institutional)}",
