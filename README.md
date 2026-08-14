@@ -25,7 +25,7 @@ It runs a repeatable pipeline over configured sources such as:
 - PRONOM/DROID XML signature data;
 - LOC FDD XML records;
 - structured JSON source packages;
-- future third-party adapters loaded by dotted Python path.
+- future third-party adapters loaded by explicit `module:ClassName` plugin path.
 
 The output is a queryable local registry for preservation risk management, action planning, source evidence, and change tracking, plus optional review/export files.
 
@@ -55,7 +55,7 @@ Source acquisition
 - Configurable identifier authority and strong-key matching rules.
 - Generic identifier namespaces, so new sources do not need new model fields.
 - Source-owned native hazard scale/direction metadata.
-- Pluggable source adapters and storage backends through short names or dotted paths.
+- Pluggable source adapters and storage backends through short names or explicit `module:ClassName` plugin paths.
 - Storage backends: memory, file/JSON document store, and MongoDB.
 - Optional exports: JSON, JSONL, CSV, SQLite, Markdown reports.
 - Change detection between runs, including bulk-change collapse into source-level events.
