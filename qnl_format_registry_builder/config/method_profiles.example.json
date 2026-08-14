@@ -1,6 +1,6 @@
 {
-  "version": "method-profiles-v2",
-  "description": "Reusable preservation method profiles. Formats inherit family/domain templates and only use format-specific overrides when required.",
+  "version": "method-profiles-v3",
+  "description": "Reusable preservation method profiles. Formats inherit family/domain templates and only use format-specific overrides when required. Extension/source rules are primary; broad category rules are fallback-only.",
   "profiles": {
     "generic_preservation": {
       "label": "Generic preservation baseline",
@@ -240,54 +240,63 @@
     },
     {
       "profile": "structured_data",
+      "fallback_only": true,
       "match": {
         "category_contains": ["structured data", "tabular data", "data interchange", "dataset"]
       }
     },
     {
       "profile": "structured_text",
+      "fallback_only": true,
       "match": {
         "category_contains": ["textual and word processing", "plain text", "text format"]
       }
     },
     {
       "profile": "office_document",
+      "fallback_only": true,
       "match": {
-        "category_contains": ["office document", "word processing", "spreadsheet", "presentation"]
+        "category_contains": ["office document", "office documents", "microsoft office", "opendocument", "spreadsheet", "presentation"]
       }
     },
     {
       "profile": "xml_based_structured_text",
+      "fallback_only": true,
       "match": {
         "category_contains": ["xml", "markup", "schema"]
       }
     },
     {
       "profile": "scientific_data",
+      "fallback_only": true,
       "match": {
         "category_contains": ["scientific data", "research data", "bioinformatics"]
       }
     },
     {
       "profile": "geospatial_data",
+      "fallback_only": true,
       "match": {
         "category_contains": ["geospatial", "gis", "spatial data"]
       }
     },
     {
       "profile": "archive_or_container",
+      "fallback_only": true,
       "match": {
         "category_contains": ["archive", "container", "compressed"]
       }
     },
     {
       "profile": "raster_image",
+      "fallback_only": true,
       "match": {
         "category_contains": ["raster image", "still image", "image", "graphics"]
       }
     },
     {
       "profile": "audiovisual",
+      "fallback_only": true,
       "match": {
         "category_contains": ["audio", "video", "audiovisual", "moving image"]
       }
