@@ -12,8 +12,6 @@ The design supports a general institutional requirement:
 
 QNL is the first institutional profile, but the core architecture must also support other libraries, archives, repositories, and memory institutions.
 
----
-
 ## Architectural principles
 
 ### 1. The registry is built, not hand-maintained
@@ -34,15 +32,7 @@ Each run should:
 
 A local spreadsheet represents one institution's current policy position for known formats. It is not the universe of all formats.
 
-The canonical registry may include:
-
-- formats from an institutional policy workbook;
-- formats from PRONOM/DROID signatures;
-- formats from LOC FDD records;
-- formats from NARA Digital Preservation Framework data;
-- formats from DPC or other preservation sources;
-- formats discovered later in local collections;
-- manually supplied source packages.
+The canonical registry may include formats from an institutional workbook, PRONOM, LOC FDD, NARA, DPC, local collection discovery, or manually supplied source packages.
 
 Institution-specific fields are stored as `institution_policy_overlays` attached to canonical format records.
 
@@ -102,8 +92,6 @@ Review external-vs-institutional hazard divergence
 
 Recommended actions belong in assessment/change records, not in the stable state enum.
 
----
-
 ## Pipeline overview
 
 ```text
@@ -124,75 +112,121 @@ Assessment and change-detection services
 Export adapters: optional file/API/report outputs
 ```
 
----
-
 ## Adapter-based design
 
-The project uses three adapter families.
+The project uses three adapter families: source adapters, storage adapters, and export adapters.
 
-### 1. Source adapters
+### Source adapters
 
-Source adapters acquire and parse upstream sources.
+Source adapters are **source-first, not file-format-first**.
 
-Examples:
-
-- institution policy XLSX files;
-- standardized JSON source packages;
-- PRONOM/DROID XML signatures;
-- LOC FDD XML records;
-- future NARA Linked Open Data adapter;
-- future DPC Bit List adapter.
-
-Source adapters should not write directly to the registry. They only produce source snapshots and raw extracted records.
-
-The preferred policy spreadsheet adapter is:
+A source adapter represents an authority or institutional source such as PRONOM, NARA, LOC, DPC, or an institutional policy workbook. The source may currently publish CSV, XLSX, XML, JSON, API responses, linked data, or HTML. Those are retrieval/parsing modes, not the conceptual source boundary.
 
 ```text
+source adapter
+  -> acquire source material
+  -> snapshot acquired source material
+  -> parse current representation
+  -> emit RawFormatRecord objects
+```
+
+Every source adapter follows the same two-stage lifecycle:
+
+```python
+acquire() -> list[SourceSnapshot]
+extract(snapshots) -> list[RawFormatRecord]
+```
+
+`acquire()` handles source material and snapshots it. `extract()` parses only the snapshots it receives and should not fetch the network. This keeps offline replay and audit runs reproducible.
+
+Source adapters do **not** write to MongoDB, JSON, CSV, or SQLite directly. They only produce source snapshots and raw extracted records. Persistence belongs to the storage layer.
+
+Preferred source-level names include:
+
+```text
+nara_digital_preservation_framework
+pronom_registry
+loc_fdd_xml
 institution_policy_xlsx
 ```
 
-The old `qnl_policy_xlsx` adapter name remains as a deprecated compatibility alias.
+Representation-specific names are acceptable only as compatibility aliases or deliberately narrow modes:
 
-### 2. Storage adapters
+```text
+nara_preservation_csv      # deprecated alias; CSV is NARA's current retrieval mode
+pronom_droid_xml           # representation-specific DROID signature XML parser
+qnl_policy_xlsx            # deprecated alias for institution_policy_xlsx
+```
+
+For building a new adapter, read [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md). For configuring existing adapters, read [`ADAPTER_REFERENCE.md`](ADAPTER_REFERENCE.md).
+
+### Snapshot cache, offline mode, and local files
+
+Source acquisition uses a content-addressed snapshot cache under:
+
+```text
+work/snapshots/<source_id>/
+```
+
+Each source keeps a `.snapshot_index.json` mapping source URI or local source path to the latest cached SHA-256 and local snapshot path.
+
+Online mode checks the upstream source and reports whether each snapshot changed. Offline mode replays only already-cached snapshots and fails clearly if requested material is not cached.
+
+Local/admin files are different from offline replay:
+
+```text
+--offline
+  replay previously cached snapshots
+
+local_files
+  treat local files as this run's source material and snapshot them
+```
+
+Read [`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md) for the full retrieval model.
+
+### Required and optional sources
+
+A required source failure aborts the run. An optional source failure is recorded in the source summary and the run continues with the remaining sources.
+
+Use `required:true` for sources that define the purpose of the run. Use `required:false` for enrichment or external authority sources that should not destroy an otherwise useful run during an outage.
+
+### Storage adapters
 
 Storage adapters persist the queryable registry and assessment history.
 
-Initial backend:
+Implemented backends:
 
-- MongoDB
+```text
+memory
+file / json_file
+mongodb
+```
 
-Possible future backends:
+Pipeline services depend on the `RegistryStore` interface, not directly on MongoDB. This keeps the storage backend replaceable.
 
-- PostgreSQL
-- MySQL
-- SQLite
-- file-backed local store
-- in-memory test store
+Read [`STORAGE_AND_EXPORT_CONFIG.md`](STORAGE_AND_EXPORT_CONFIG.md) and [`MONGODB_STORAGE_SCHEMA.md`](MONGODB_STORAGE_SCHEMA.md) for current storage behavior.
 
-Pipeline services must talk to the `RegistryStore` interface, not directly to MongoDB. This keeps the storage backend replaceable.
+### Export adapters and file outputs
 
-### 3. Export adapters
-
-Export adapters generate optional outputs from the current registry view.
+Exports are optional outputs from the current run. They are used for review, sharing, auditing, offline use, or interoperability.
 
 Examples:
 
-- JSON
-- JSONL
-- CSV
-- SQLite
-- Markdown reports
-- API bundle
+```text
+JSON
+JSONL
+CSV
+SQLite
+Markdown reports
+```
 
-Exports are not the source of truth. They are generated views used for review, sharing, auditing, offline use, or interoperability.
-
----
+Exports are not the source of truth. No export should update the registry.
 
 ## Storage model
 
-MongoDB is the initial live/queryable local registry store. File outputs remain optional exports.
+MongoDB is the initial production live/queryable local registry store. File outputs remain optional exports.
 
-Recommended collections:
+Core collections:
 
 ```text
 runs
@@ -209,7 +243,7 @@ assessment_changes
 
 ### `canonical_formats`
 
-Stores stable canonical format identity.
+Stores stable canonical format identity and the current embedded assessment summary.
 
 Example summary fields:
 
@@ -218,12 +252,9 @@ Example summary fields:
   "canonical_id": "puid-fmt-353",
   "preferred_name": "Tagged Image File Format",
   "category": "Still Image",
-  "current_summary": {
-    "has_institution_policy": true,
-    "hazard_band": "Low",
-    "readiness_state": "Covered",
-    "trend_direction": "Insufficient Evidence"
-  }
+  "identifiers": {"puid": ["fmt/353"], "extension": ["tif", "tiff"]},
+  "hazard_assessment": {"band": "Low", "basis": "external_only"},
+  "current": true
 }
 ```
 
@@ -244,78 +275,27 @@ QNL-specific values belong here only as data:
 }
 ```
 
----
+## Incremental source updates
 
-## Export model
+Source-by-source registry population is supported. A NARA run can contribute NARA evidence, a later PRONOM run can contribute PRONOM evidence, and the canonical registry is recomputed from active evidence contributions.
 
-Exports are generated from the storage adapter's current registry view.
+The current run contributes new evidence. Stored evidence from sources that did not run this time can be used for augmentation. Earlier source records remain preserved as run history and provenance.
 
-The export layer should be configuration-driven:
+Read [`INCREMENTAL_SOURCE_UPDATES.md`](INCREMENTAL_SOURCE_UPDATES.md) before changing this behavior.
 
-```json
-{
-  "exports": [
-    { "type": "json", "enabled": true, "path": "output/latest/registry.json" },
-    { "type": "jsonl", "enabled": true, "path": "output/latest/registry.jsonl" },
-    { "type": "csv", "enabled": true, "path": "output/latest/registry.csv" },
-    { "type": "sqlite", "enabled": false, "path": "output/latest/registry.sqlite" },
-    { "type": "markdown_report", "enabled": true, "path": "output/latest/coverage_report.md" }
-  ]
-}
-```
+## Identifier reconciliation
 
-If an export adapter exists and is enabled, the pipeline writes that export. Otherwise it does not.
+Identifiers are evidence claims with provenance. Strong reconciliation is allowed only for configured strong identifier namespaces and verified authority sources.
 
-No export should update the registry.
+For example, a PUID from PRONOM can be a verified strong key. A PUID copied from an institutional spreadsheet is still useful evidence, but it should not automatically have the same authority.
 
----
+Read [`IDENTIFIER_RECONCILIATION.md`](IDENTIFIER_RECONCILIATION.md) before changing identifier normalization or adapter identifier output.
 
-## Proposed package structure
+## Reading outputs
 
-```text
-registry_builder/
-  adapters/
-    base.py
-    standard_json.py
-    institution_policy_xlsx.py
-    qnl_policy_xlsx.py        # deprecated compatibility alias
-    pronom_droid_xml.py
-    loc_fdd_xml.py
+The registry outputs contain terms that are easy to misread, including `institution_override`, `no_estimator_available`, `Partially Covered`, `Insufficient Evidence`, and source-native ratings such as NARA numeric scores.
 
-  storage/
-    __init__.py
-    base.py
-    mongo.py
-    memory.py
-
-  exporters/
-    __init__.py
-    base.py
-    json_exporter.py
-    jsonl_exporter.py
-    csv_exporter.py
-    sqlite_exporter.py
-    markdown_reporter.py
-
-  services/
-    normalization.py
-    reconciliation.py
-    assessment.py
-    change_detection.py
-
-  domain/
-    models.py
-    hazard.py
-    enums.py
-    provenance.py
-
-  pipeline.py
-  cli.py
-```
-
-The current implementation may still keep some modules at top level while it is being refactored. The target structure above should guide the next development phase.
-
----
+Preservation officers should start with [`READING_THE_REGISTRY.md`](READING_THE_REGISTRY.md).
 
 ## Configuration model
 
@@ -330,83 +310,26 @@ A single pipeline config may contain:
   },
   "sources": [
     {
-      "id": "qnl_policy_current",
-      "type": "institution_policy_xlsx",
+      "id": "nara_digital_preservation_framework",
+      "type": "nara_digital_preservation_framework",
       "enabled": true,
-      "institution_id": "qnl",
-      "institution_name": "Qatar National Library",
-      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
-      "field_map": {
-        "institution_format_id": ["QNL Format ID"],
-        "name": ["Digital file"],
-        "extensions": ["File Extension(s)"]
-      }
+      "release_mode": "pinned",
+      "release_date": "20260320"
     }
   ],
-  "exports": [
-    {
-      "type": "json",
-      "enabled": true,
-      "path": "output/latest/registry.json"
-    }
-  ]
+  "exports": {
+    "enabled": true
+  }
 }
 ```
 
----
-
-## Interfaces
-
-### RegistryStore
-
-The pipeline should depend on a storage interface like this:
-
-```python
-class RegistryStore:
-    def create_run(self, run): ...
-    def save_snapshot(self, snapshot): ...
-    def save_source_record(self, record): ...
-    def upsert_canonical_format(self, record): ...
-    def upsert_identifier(self, record): ...
-    def save_institution_policy_overlay(self, record): ...
-    def save_hazard_assessment(self, record): ...
-    def save_readiness_assessment(self, record): ...
-    def save_trend_observation(self, record): ...
-    def save_assessment_change(self, record): ...
-    def get_current_registry_view(self): ...
-    def find_by_identifier(self, identifier_type, value): ...
-    def list_institution_policy_formats(self, institution_id=None): ...
-    def list_changes_since(self, since): ...
-```
-
-### RegistryExporter
-
-Exporters should implement:
-
-```python
-class RegistryExporter:
-    def export(self, registry_view, context): ...
-```
-
----
-
 ## Rules to prevent redundancy
 
-1. MongoDB is the initial source of truth for the queryable local registry.
-2. File outputs are exports only.
-3. SQLite is an export adapter unless explicitly configured as a storage adapter in the future.
+1. The registry is generated by the pipeline, not hand-maintained.
+2. MongoDB or another selected `RegistryStore` is the source of truth for the queryable local registry.
+3. File outputs are exports only.
 4. Source adapters never write directly to canonical registry collections.
 5. Export adapters never update storage.
 6. Pipeline orchestration should be thin; storage/export details belong in adapters.
 7. Historical evidence and assessments should be stored separately from canonical format summaries.
 8. `canonical_formats` may store current summary fields for fast lookup, but not full historical assessment history.
-
----
-
-## Immediate next implementation tasks
-
-1. Finish refactoring `pipeline.py` so it writes through `RegistryStore` rather than file writers directly.
-2. Implement the MongoDB storage adapter.
-3. Move JSON/CSV/SQLite/Markdown output into export adapters.
-4. Add the NARA adapter while preserving NARA's native numeric rating alongside normalized bands.
-5. Add tests for the MongoDB adapter and configurable export registry.
