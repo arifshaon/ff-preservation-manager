@@ -12,7 +12,7 @@ from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
 from registry_builder.utils import ensure_dir, write_csv, write_json, write_jsonl
-from registry_builder.validate import validate_registry
+from registry_builder.validate import summarize_validation_warnings, validate_registry, validation_warning_counts
 
 _NON_DISCRIMINATING_METHOD_PROFILES = {"generic_preservation"}
 
@@ -129,6 +129,8 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     registry = reconcile(raw_records)
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     errors, warnings = validate_registry(registry)
+    warning_summary = summarize_validation_warnings(warnings)
+    warning_counts = validation_warning_counts(warnings)
     method_metrics = _method_profile_metrics(registry)
 
     registry_dicts = [fmt.to_dict() for fmt in registry]
@@ -142,6 +144,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         d = fmt.to_dict()
         ids = d.get("identifiers", {})
         method = d.get("preservation_method", {}) or {}
+        hazard = d.get("hazard_assessment", {}) or {}
         csv_rows.append({
             "canonical_id": d["canonical_id"],
             "preferred_name": d["preferred_name"],
@@ -151,13 +154,17 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "puids": ";".join(ids.get("puid", [])),
             "loc_ids": ";".join(ids.get("loc", [])),
             "nara_ids": ";".join(ids.get("nara", [])),
+            "hazard_basis": hazard.get("basis", ""),
+            "hazard_band": hazard.get("band", ""),
+            "external_rating_native": hazard.get("external_rating_native", ""),
+            "external_rating_native_direction": hazard.get("external_rating_native_direction", ""),
             "has_institution_policy": "yes" if d.get("institution_policy_overlays") else "no",
             "direct_method_profiles": ";".join(method.get("direct_profile_ids", [])),
             "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
             "source_count": len(d.get("source_records", [])),
         })
     write_csv(outdir / "registry.csv", csv_rows, [
-        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_institution_policy", "direct_method_profiles", "method_profiles", "source_count"
+        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "hazard_basis", "hazard_band", "external_rating_native", "external_rating_native_direction", "has_institution_policy", "direct_method_profiles", "method_profiles", "source_count"
     ])
 
     write_sqlite(outdir / "registry.sqlite", registry)
@@ -175,6 +182,8 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         **method_metrics,
         "validation_errors": errors,
         "validation_warnings": warnings,
+        "validation_warning_counts": warning_counts,
+        "validation_warning_summary": warning_summary,
         "outputs": ["registry.json", "registry.jsonl", "registry.csv", "registry.sqlite", "source_snapshots.json", "coverage_report.md"],
     }
     write_json(outdir / "run_report.json", report)
@@ -231,11 +240,24 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         lines.extend(f"- {e}" for e in report["validation_errors"])
     else:
         lines.append("- No validation errors.")
-    if report.get("validation_warnings"):
-        lines.append("\n### Warnings")
-        lines.extend(f"- {w}" for w in report["validation_warnings"])
+
+    warning_summary = report.get("validation_warning_summary") or {}
+    if warning_summary:
+        lines.append("\n### Warning summary")
+        for warning_type, info in warning_summary.items():
+            lines.append(f"- {warning_type}: {info.get('count', 0)}")
+            for sample in info.get("samples", [])[:3]:
+                lines.append(f"  - sample: {sample}")
     else:
         lines.append("- No validation warnings.")
+
+    warnings = report.get("validation_warnings") or []
+    if warnings:
+        lines.append("\n### Warning detail, first 50")
+        lines.extend(f"- {w}" for w in warnings[:50])
+        if len(warnings) > 50:
+            lines.append(f"- ... plus {len(warnings) - 50} more warnings; see run_report.json for full detail.")
+
     lines.extend(["", "## Institutional policy records missing PUID", ""])
     if missing_puid:
         for r in missing_puid[:50]:
