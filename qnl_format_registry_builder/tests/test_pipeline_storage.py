@@ -93,6 +93,7 @@ def test_pipeline_records_optional_source_failure_and_continues(tmp_path):
     assert failed["status"] == "failed"
     assert failed["required"] is False
     assert failed["error_type"] == "ValueError"
+    assert "Registered source adapter short names" in failed["error"]
 
 
 def test_pipeline_required_source_failure_still_aborts(tmp_path):
@@ -111,5 +112,5 @@ def test_pipeline_required_source_failure_still_aborts(tmp_path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="No adapter registered"):
+    with pytest.raises(ValueError, match="Registered source adapter short names"):
         run_pipeline(config_path, tmp_path / "work", tmp_path / "out")
