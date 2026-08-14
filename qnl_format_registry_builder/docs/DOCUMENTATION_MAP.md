@@ -19,6 +19,7 @@ Use this map to avoid reading every document in the repository.
 | Configure an existing adapter | `docs/ADAPTER_REFERENCE.md` |
 | Understand NARA release modes and local admin files | `docs/NARA_LOCAL_FILES.md` and `docs/NARA_ADAPTER_REQUIREMENTS.md` |
 | Choose MongoDB, file, or memory storage | `docs/STORAGE_AND_EXPORT_CONFIG.md` |
+| Understand MongoDB collections, fields, indexes, and verification queries | `docs/MONGODB_STORAGE_SCHEMA.md` |
 | Understand institutional policy overlays such as QNL | `docs/INSTITUTIONAL_OVERLAYS.md` |
 | Understand preservation method profiles | `docs/PRESERVATION_METHOD_PROFILES.md` |
 | Understand implementation decisions and constraints | `docs/DECISIONS.md` |
@@ -46,6 +47,9 @@ NARA_ADAPTER_REQUIREMENTS.md / NARA_LOCAL_FILES.md
 
 STORAGE_AND_EXPORT_CONFIG.md
   -> storage backends and optional exports
+
+MONGODB_STORAGE_SCHEMA.md
+  -> MongoDB implementation details, collections, fields, indexes, and example queries
 ```
 
 ## Naming rules
@@ -67,11 +71,10 @@ Compatibility aliases can remain for old names, but new configuration should use
 
 1. Read `ADAPTER_IMPLEMENTATION_GUIDE.md`.
 2. Copy the small source-adapter skeleton.
-3. Add the adapter class under `registry_builder/adapters/`.
-4. Register it in `registry_builder/adapters/__init__.py`.
-5. Add an example source block to `config/sources.example.json` if it is generally useful.
-6. Add tests under `tests/`.
-7. Document the adapter in `ADAPTER_REFERENCE.md`.
+3. Add the adapter class under `registry_builder/adapters/` or ship it as an external package loaded with `module:ClassName`.
+4. Add an example source block to `config/sources.example.json` if it is generally useful.
+5. Add tests under `tests/`.
+6. Document the adapter in `ADAPTER_REFERENCE.md`.
 
 ## Documentation standard for each adapter
 
