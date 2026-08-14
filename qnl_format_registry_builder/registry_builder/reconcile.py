@@ -112,10 +112,6 @@ def _hazard_score_from_dict(data: dict) -> float | None:
     return None
 
 
-def _first_score(values: list[float | None]) -> float | None:
-    return next((x for x in values if x is not None), None)
-
-
 def _local_risk_score(policy: dict) -> float | None:
     for key in ("local_risk_level", "risk_level", "spreadsheet_risk_level"):
         score = _risk_to_score(policy.get(key))
@@ -126,6 +122,10 @@ def _local_risk_score(policy: dict) -> float | None:
 
 def _first_hazard_with_score(hazards: list[dict]) -> dict | None:
     return next((hazard for hazard in hazards if _hazard_score_from_dict(hazard) is not None), None)
+
+
+def _first_hazard_with_native_rating(hazards: list[dict]) -> dict | None:
+    return next((hazard for hazard in hazards if _native_rating(hazard) is not None), None)
 
 
 def _first_policy_with_score(policies: list[dict]) -> dict | None:
@@ -192,11 +192,12 @@ def _copy_external_native_fields(result: dict, external_hazard: dict | None, ins
 
 def _hazard_assessment(cf: CanonicalFormat) -> dict:
     external_hazard = _first_hazard_with_score(cf.external_hazard)
+    native_hazard = _first_hazard_with_native_rating(cf.external_hazard)
     institution_policy = _first_policy_with_score(cf.institution_policy_overlays)
     external_score = _hazard_score_from_dict(external_hazard or {})
     institution_score = _local_risk_score(institution_policy or {})
     result = reconcile_hazard(external_score, institution_score)
-    _copy_external_native_fields(result, external_hazard, institution_score)
+    _copy_external_native_fields(result, native_hazard or external_hazard, institution_score)
     result["computed_at"] = utc_now_iso()
     result["basis_notes"] = "Hazard is reconciled from external and institutional estimators; scores are not added."
     return result
