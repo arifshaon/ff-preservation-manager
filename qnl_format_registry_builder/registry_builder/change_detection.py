@@ -34,8 +34,20 @@ def _hazard(record: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _divergent(record: dict[str, Any] | None) -> bool:
+    """Return true only for actual external-vs-institutional divergence.
+
+    `review_required` is deliberately not used here. Many non-divergent states
+    require review, including no_estimator_available, low confidence, missing
+    evidence, or other data-quality issues. A divergence event should mean either
+    an explicit institutional override, or that both an external and institutional
+    estimator are present and their bands disagree.
+    """
     hazard = _hazard(record)
-    return bool(hazard.get("review_required")) or hazard.get("basis") == "institution_override"
+    if hazard.get("basis") == "institution_override":
+        return True
+    external_band = hazard.get("external_band")
+    institution_band = hazard.get("institution_band")
+    return bool(external_band and institution_band and external_band != institution_band)
 
 
 def _identifiers(record: dict[str, Any] | None) -> dict[str, list[str]]:
