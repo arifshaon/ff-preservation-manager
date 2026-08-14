@@ -91,12 +91,12 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             "puids": ";".join(ids.get("puid", [])),
             "loc_ids": ";".join(ids.get("loc", [])),
             "nara_ids": ";".join(ids.get("nara", [])),
-            "has_qnl_policy": "yes" if d.get("qnl_policy_overlay") else "no",
+            "has_institution_policy": "yes" if d.get("institution_policy_overlays") else "no",
             "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
             "source_count": len(d.get("source_records", [])),
         })
     write_csv(outdir / "registry.csv", csv_rows, [
-        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_qnl_policy", "method_profiles", "source_count"
+        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "has_institution_policy", "method_profiles", "source_count"
     ])
 
     write_sqlite(outdir / "registry.sqlite", registry)
@@ -108,7 +108,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "sources": source_summaries,
         "raw_records": len(raw_records),
         "canonical_formats": len(registry),
-        "qnl_policy_formats": sum(1 for x in registry if x.qnl_policy_overlay),
+        "institution_policy_formats": sum(1 for x in registry if x.institution_policy_overlays),
         "method_profiles_enabled": bool(config.get("method_profiles", {}).get("enabled", False)),
         "method_profile_version": method_profile_version,
         "formats_with_method_profiles": sum(1 for x in registry if x.preservation_method.get("assigned_profile_ids")),
@@ -122,10 +122,10 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
 
 
 def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], report: dict[str, Any]) -> None:
-    qnl = [r for r in registry if r.get("qnl_policy_overlay")]
-    no_qnl = [r for r in registry if not r.get("qnl_policy_overlay")]
-    missing_puid = [r for r in qnl if not r.get("identifiers", {}).get("puid")]
-    missing_loc = [r for r in qnl if not r.get("identifiers", {}).get("loc")]
+    institutional = [r for r in registry if r.get("institution_policy_overlays")]
+    no_institutional = [r for r in registry if not r.get("institution_policy_overlays")]
+    missing_puid = [r for r in institutional if not r.get("identifiers", {}).get("puid")]
+    missing_loc = [r for r in institutional if not r.get("identifiers", {}).get("loc")]
     with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
     lines = [
         "# Registry Build Report",
@@ -136,10 +136,10 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         "",
         f"- Raw source records extracted: {report['raw_records']}",
         f"- Canonical formats generated: {report['canonical_formats']}",
-        f"- Canonical formats with QNL policy overlay: {len(qnl)}",
-        f"- Canonical formats without QNL policy overlay: {len(no_qnl)}",
-        f"- QNL policy formats missing PUID: {len(missing_puid)}",
-        f"- QNL policy formats missing LOC identifier: {len(missing_loc)}",
+        f"- Canonical formats with institutional policy overlay: {len(institutional)}",
+        f"- Canonical formats without institutional policy overlay: {len(no_institutional)}",
+        f"- Institutional policy formats missing PUID: {len(missing_puid)}",
+        f"- Institutional policy formats missing LOC identifier: {len(missing_loc)}",
         f"- Canonical formats with preservation method profiles: {len(with_methods)}",
         "",
         "## Source runs",
@@ -161,7 +161,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         lines.extend(f"- {w}" for w in report["validation_warnings"])
     else:
         lines.append("- No validation warnings.")
-    lines.extend(["", "## QNL policy records missing PUID", ""])
+    lines.extend(["", "## Institutional policy records missing PUID", ""])
     if missing_puid:
         for r in missing_puid[:50]:
             lines.append(f"- {r['preferred_name']} ({r['canonical_id']})")
