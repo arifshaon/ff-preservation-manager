@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 
 from registry_builder.pipeline import run_pipeline
+from registry_builder.storage.file import FileRegistryStore
 
 
 def _write_source(path, records):
     path.write_text(json.dumps({"records": records}), encoding="utf-8")
 
 
-def _write_config(path, source_path, store_path):
+def _write_config(path, source_path, store_path, *, source_id="test_source"):
     path.write_text(
         json.dumps(
             {
@@ -18,7 +19,7 @@ def _write_config(path, source_path, store_path):
                 "method_profiles": {"enabled": False},
                 "sources": [
                     {
-                        "id": "test_source",
+                        "id": source_id,
                         "type": "standard_json",
                         "enabled": True,
                         "uris": [str(source_path)],
@@ -57,6 +58,8 @@ def test_pipeline_persists_to_file_store_without_exports(tmp_path):
     assert report["storage"]["type"] == "file"
     assert report["exports_enabled"] is False
     assert report["canonical_formats"] == 1
+    assert report["raw_records_extracted"] == 1
+    assert report["active_source_records"] == 1
     assert report["change_detection"]["run_kind"] == "baseline"
     assert len(list((store_path / "runs").glob("*.json"))) == 1
     assert len(list((store_path / "source_snapshots").glob("*.json"))) == 1
@@ -105,3 +108,58 @@ def test_pipeline_second_file_store_run_persists_change_events(tmp_path):
     removed = next(record for record in current_records if record["canonical_id"] == "fmt-format-b")
     assert removed["current"] is False
     assert removed["last_removed_run_id"] == change_run["run_id"]
+
+
+def test_source_by_source_runs_reuse_prior_evidence_and_augment_canonical_record(tmp_path):
+    store_path = tmp_path / "registry_store"
+
+    nara_source = tmp_path / "nara.json"
+    _write_source(
+        nara_source,
+        [
+            {
+                "source_record_id": "nara-pdf",
+                "name": "Portable Document Format",
+                "extensions": ["pdf"],
+                "hazard": {"band": "Moderate", "rating": 2.0},
+            }
+        ],
+    )
+    nara_config = tmp_path / "nara-config.json"
+    _write_config(nara_config, nara_source, store_path, source_id="nara_test")
+
+    first = run_pipeline(nara_config, tmp_path / "work-nara", tmp_path / "out-nara")
+    assert first["canonical_formats"] == 1
+    assert first["raw_records_extracted"] == 1
+    assert first["prior_source_records_reused"] == 0
+    assert first["active_source_records"] == 1
+
+    pronom_source = tmp_path / "pronom.json"
+    _write_source(
+        pronom_source,
+        [
+            {
+                "source_record_id": "pronom-pdf",
+                "name": "Portable Document Format",
+                "extensions": ["pdf"],
+                "hazard": {"band": "Low", "rating": 1.0},
+            }
+        ],
+    )
+    pronom_config = tmp_path / "pronom-config.json"
+    _write_config(pronom_config, pronom_source, store_path, source_id="pronom_test")
+
+    second = run_pipeline(pronom_config, tmp_path / "work-pronom", tmp_path / "out-pronom")
+
+    assert second["canonical_formats"] == 1
+    assert second["raw_records_extracted"] == 1
+    assert second["prior_source_records_reused"] == 1
+    assert second["active_source_records"] == 2
+    assert second["change_detection"]["change_counts"].get("record_removed", 0) == 0
+
+    store = FileRegistryStore({"type": "file", "path": str(store_path)})
+    current = store.get_current_registry_view()
+    assert len(current) == 1
+    assert current[0]["preferred_name"] == "Portable Document Format"
+    assert len(current[0]["source_records"]) == 2
+    assert {item["source_id"] for item in current[0]["source_records"]} == {"nara_test", "pronom_test"}
