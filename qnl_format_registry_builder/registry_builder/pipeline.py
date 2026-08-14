@@ -4,13 +4,16 @@ import json
 from collections import Counter
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from registry_builder.adapters import ADAPTERS
 from registry_builder.db import write_sqlite
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.models import CanonicalFormat, RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
+from registry_builder.storage import create_store
+from registry_builder.storage.base import RegistryStore
 from registry_builder.utils import ensure_dir, write_csv, write_json, write_jsonl
 from registry_builder.validate import summarize_validation_warnings, validate_registry, validation_warning_counts
 
@@ -95,11 +98,176 @@ def _method_profile_metrics(registry) -> dict[str, Any]:
     return metrics
 
 
+def _new_run_id() -> str:
+    return f"run-{utc_now_iso().replace(':', '').replace('+', 'Z')}-{uuid4().hex[:8]}"
+
+
+def _exports_enabled(config: dict[str, Any]) -> bool:
+    """Return whether file exports/reports should be written.
+
+    Storage is mandatory and selected through `storage.type`. File outputs are
+    optional exports. To preserve existing clean-clone behaviour, exports remain
+    enabled when the config does not mention `exports`.
+    """
+    exports = config.get("exports")
+    if exports is None:
+        return True
+    if isinstance(exports, bool):
+        return exports
+    if isinstance(exports, dict):
+        return bool(exports.get("enabled", True))
+    if isinstance(exports, list):
+        return any(bool(item.get("enabled", True)) for item in exports)
+    return bool(exports)
+
+
+def _storage_config(config: dict[str, Any]) -> dict[str, Any]:
+    return dict(config.get("storage") or {"type": "memory"})
+
+
+def _snapshot_dict(snapshot: SourceSnapshot, run_id: str) -> dict[str, Any]:
+    data = snapshot.__dict__.copy()
+    data["run_id"] = run_id
+    return data
+
+
+def _source_record_dict(record: RawFormatRecord, run_id: str) -> dict[str, Any]:
+    data = record.to_dict()
+    data["run_id"] = run_id
+    return data
+
+
+def _persist_registry_to_store(
+    store: RegistryStore,
+    *,
+    run_id: str,
+    snapshots: list[SourceSnapshot],
+    raw_records: list[RawFormatRecord],
+    registry: list[CanonicalFormat],
+) -> None:
+    """Persist the build directly to the selected RegistryStore.
+
+    This is not a JSON staging step. The pipeline persists the in-memory objects
+    it has already produced. Export files, when enabled, are generated later and
+    are optional review/interchange products.
+    """
+    for snapshot in snapshots:
+        store.save_snapshot(_snapshot_dict(snapshot, run_id))
+
+    for record in raw_records:
+        store.save_source_record(_source_record_dict(record, run_id))
+
+    for fmt in registry:
+        fmt_dict = fmt.to_dict()
+        canonical_id = fmt_dict["canonical_id"]
+        stored_format = fmt_dict | {"run_id": run_id, "format_id": canonical_id}
+        store.upsert_canonical_format(stored_format)
+
+        for claim in fmt_dict.get("identifier_claims", []):
+            store.upsert_identifier({
+                "run_id": run_id,
+                "format_id": canonical_id,
+                "canonical_id": canonical_id,
+                "type": claim.get("kind"),
+                "value": claim.get("value"),
+                "source": claim.get("source"),
+                "verified": claim.get("verified", False),
+                "source_record_id": claim.get("source_record_id"),
+            })
+
+        for overlay in fmt_dict.get("institution_policy_overlays", []):
+            store.save_institution_policy_overlay(
+                overlay | {"run_id": run_id, "format_id": canonical_id, "canonical_id": canonical_id}
+            )
+
+        hazard = fmt_dict.get("hazard_assessment") or {}
+        if hazard:
+            store.save_hazard_assessment(
+                hazard | {"run_id": run_id, "format_id": canonical_id, "canonical_id": canonical_id}
+            )
+
+        for sequence, readiness in enumerate(fmt_dict.get("readiness", []), start=1):
+            store.save_readiness_assessment(
+                readiness | {"run_id": run_id, "format_id": canonical_id, "canonical_id": canonical_id, "sequence": sequence}
+            )
+
+        for sequence, trend in enumerate(fmt_dict.get("trend", []), start=1):
+            store.save_trend_observation(
+                trend | {"run_id": run_id, "format_id": canonical_id, "canonical_id": canonical_id, "sequence": sequence}
+            )
+
+
+def _write_file_exports(
+    outdir: Path,
+    registry: list[CanonicalFormat],
+    raw_records: list[RawFormatRecord],
+    snapshots: list[SourceSnapshot],
+    report: dict[str, Any],
+) -> list[str]:
+    registry_dicts = [fmt.to_dict() for fmt in registry]
+    write_jsonl(outdir / "registry.jsonl", registry_dicts)
+    write_json(outdir / "registry.json", registry_dicts)
+    write_jsonl(outdir / "raw_records.jsonl", [r.to_dict() for r in raw_records])
+    write_json(outdir / "source_snapshots.json", [s.__dict__ for s in snapshots])
+
+    csv_rows = []
+    for fmt in registry:
+        d = fmt.to_dict()
+        ids = d.get("identifiers", {})
+        method = d.get("preservation_method", {}) or {}
+        hazard = d.get("hazard_assessment", {}) or {}
+        csv_rows.append({
+            "canonical_id": d["canonical_id"],
+            "preferred_name": d["preferred_name"],
+            "category": d.get("category") or "",
+            "extensions": ";".join(ids.get("extension", [])),
+            "mime_types": ";".join(ids.get("mime", [])),
+            "puids": ";".join(ids.get("puid", [])),
+            "loc_ids": ";".join(ids.get("loc", [])),
+            "nara_ids": ";".join(ids.get("nara", [])),
+            "hazard_basis": hazard.get("basis", ""),
+            "hazard_band": hazard.get("band", ""),
+            "external_rating_native": hazard.get("external_rating_native", ""),
+            "external_rating_native_direction": hazard.get("external_rating_native_direction", ""),
+            "has_institution_policy": "yes" if d.get("institution_policy_overlays") else "no",
+            "direct_method_profiles": ";".join(method.get("direct_profile_ids", [])),
+            "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
+            "source_count": len(d.get("source_records", [])),
+        })
+    write_csv(outdir / "registry.csv", csv_rows, [
+        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "hazard_basis", "hazard_band", "external_rating_native", "external_rating_native_direction", "has_institution_policy", "direct_method_profiles", "method_profiles", "source_count"
+    ])
+
+    write_sqlite(outdir / "registry.sqlite", registry)
+    write_json(outdir / "run_report.json", report)
+    write_coverage_report(outdir / "coverage_report.md", registry_dicts, report)
+    return [
+        "registry.json",
+        "registry.jsonl",
+        "registry.csv",
+        "registry.sqlite",
+        "raw_records.jsonl",
+        "source_snapshots.json",
+        "run_report.json",
+        "coverage_report.md",
+    ]
+
+
 def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path) -> dict[str, Any]:
     started_at = utc_now_iso()
+    run_id = _new_run_id()
     config = load_config(config_path)
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
+    storage_config = _storage_config(config)
+    store = create_store(storage_config)
+    store.create_run({
+        "run_id": run_id,
+        "started_at": started_at,
+        "status": "running",
+        "config_path": str(config_path),
+        "storage": storage_config,
+    })
 
     all_snapshots: list[SourceSnapshot] = []
     raw_records: list[RawFormatRecord] = []
@@ -133,46 +301,25 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     warning_counts = validation_warning_counts(warnings)
     method_metrics = _method_profile_metrics(registry)
 
-    registry_dicts = [fmt.to_dict() for fmt in registry]
-    write_jsonl(outdir / "registry.jsonl", registry_dicts)
-    write_json(outdir / "registry.json", registry_dicts)
-    write_jsonl(outdir / "raw_records.jsonl", [r.to_dict() for r in raw_records])
-    write_json(outdir / "source_snapshots.json", [s.__dict__ for s in all_snapshots])
-
-    csv_rows = []
-    for fmt in registry:
-        d = fmt.to_dict()
-        ids = d.get("identifiers", {})
-        method = d.get("preservation_method", {}) or {}
-        hazard = d.get("hazard_assessment", {}) or {}
-        csv_rows.append({
-            "canonical_id": d["canonical_id"],
-            "preferred_name": d["preferred_name"],
-            "category": d.get("category") or "",
-            "extensions": ";".join(ids.get("extension", [])),
-            "mime_types": ";".join(ids.get("mime", [])),
-            "puids": ";".join(ids.get("puid", [])),
-            "loc_ids": ";".join(ids.get("loc", [])),
-            "nara_ids": ";".join(ids.get("nara", [])),
-            "hazard_basis": hazard.get("basis", ""),
-            "hazard_band": hazard.get("band", ""),
-            "external_rating_native": hazard.get("external_rating_native", ""),
-            "external_rating_native_direction": hazard.get("external_rating_native_direction", ""),
-            "has_institution_policy": "yes" if d.get("institution_policy_overlays") else "no",
-            "direct_method_profiles": ";".join(method.get("direct_profile_ids", [])),
-            "method_profiles": ";".join(method.get("assigned_profile_ids", [])),
-            "source_count": len(d.get("source_records", [])),
-        })
-    write_csv(outdir / "registry.csv", csv_rows, [
-        "canonical_id", "preferred_name", "category", "extensions", "mime_types", "puids", "loc_ids", "nara_ids", "hazard_basis", "hazard_band", "external_rating_native", "external_rating_native_direction", "has_institution_policy", "direct_method_profiles", "method_profiles", "source_count"
-    ])
-
-    write_sqlite(outdir / "registry.sqlite", registry)
+    _persist_registry_to_store(
+        store,
+        run_id=run_id,
+        snapshots=all_snapshots,
+        raw_records=raw_records,
+        registry=registry,
+    )
 
     report = {
+        "run_id": run_id,
         "started_at": started_at,
         "finished_at": utc_now_iso(),
+        "status": "completed",
         "config_path": str(config_path),
+        "storage": {
+            "type": storage_config.get("type", "memory"),
+            "database": storage_config.get("database") or storage_config.get("db"),
+            "collection_prefix": storage_config.get("collection_prefix"),
+        },
         "sources": source_summaries,
         "raw_records": len(raw_records),
         "canonical_formats": len(registry),
@@ -184,10 +331,17 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "validation_warnings": warnings,
         "validation_warning_counts": warning_counts,
         "validation_warning_summary": warning_summary,
-        "outputs": ["registry.json", "registry.jsonl", "registry.csv", "registry.sqlite", "source_snapshots.json", "coverage_report.md"],
+        "exports_enabled": _exports_enabled(config),
+        "outputs": [],
     }
-    write_json(outdir / "run_report.json", report)
-    write_coverage_report(outdir / "coverage_report.md", registry_dicts, report)
+
+    if _exports_enabled(config):
+        report["outputs"] = _write_file_exports(outdir, registry, raw_records, all_snapshots, report)
+
+    # Upsert the final run record after persistence and optional exports. This
+    # keeps the run metadata in the selected storage backend even when exports
+    # are disabled and no local JSON report is written.
+    store.create_run(report)
     return report
 
 
@@ -200,10 +354,12 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     lines = [
         "# Registry Build Report",
         "",
+        f"Run ID: {report.get('run_id')}",
         f"Run finished: {report['finished_at']}",
         "",
         "## Summary",
         "",
+        f"- Storage backend: {report.get('storage', {}).get('type')}",
         f"- Raw source records extracted: {report['raw_records']}",
         f"- Canonical formats generated: {report['canonical_formats']}",
         f"- Canonical formats with institutional policy overlay: {len(institutional)}",
