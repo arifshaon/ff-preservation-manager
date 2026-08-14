@@ -1,22 +1,30 @@
 # Next steps
 
-## 1. Run the NARA-enabled pipeline against the real workbook
+## 1. Add baseline/change reports
 
-Enable both sources in `config/sources.example.json`:
+The NARA-enabled run has proved that the registry is no longer bounded by the institutional workbook and that all `reconcile_hazard()` branches can execute against real data.
+
+The next architectural gap is change detection:
+
+- Run 1 should be stored as a baseline.
+- Run 2 should compare against the prior baseline.
+- Source-snapshot hashes should show whether upstream evidence changed.
+- Canonical format diffs should show added/removed/changed formats.
+- Hazard diffs should show band changes, basis changes, divergence changes, and NARA native-rating movement within the same band.
+- Native NARA movement should be reported even when the normalized Low/Moderate/High band is unchanged.
+
+Minimum first report:
 
 ```text
-qnl_policy_current
-nara_digital_preservation_framework
+added canonical formats
+removed canonical formats
+changed preferred names/categories/identifiers
+changed hazard bands
+changed hazard basis
+changed external_rating_native
+new/resolved divergence flags
+new recommended review actions
 ```
-
-Then inspect:
-
-- `hazard_assessment.basis` counts;
-- `corroborated` records;
-- `institution_override` records;
-- `external_only` records;
-- divergence/review-required records;
-- unmatched institutional rows with no NARA bridge.
 
 ## 2. Run a targeted PRONOM registry test
 
@@ -43,15 +51,13 @@ The pipeline should write snapshots, source records, canonical formats, identifi
 
 Use PyMongo to implement the collections described in `ARCHITECTURE.md`.
 
-## 6. Add baseline/change reports
-
-Run 1 should produce a baseline report. Later runs should produce change reports against prior runs.
-
-## 7. Add trend evidence connectors
+## 6. Add trend evidence connectors
 
 Trend should remain `Insufficient Evidence` until connectors exist for specification vitality, implementation vitality, and authority warnings.
 
-## 8. Add more retrieval modes only when needed
+The first usable trend input should be NARA native-rating movement between runs, because it can move within a band before the band itself changes.
+
+## 7. Add more retrieval modes only when needed
 
 Possible future modes:
 
