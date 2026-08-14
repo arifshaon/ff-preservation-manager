@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from registry_builder.storage.file import FileRegistryStore
 from registry_builder.storage.memory import MemoryRegistryStore
 from registry_builder.storage.mongo import MongoRegistryStore
 
 STORAGE_BACKENDS = {
     "memory": MemoryRegistryStore,
+    "file": FileRegistryStore,
+    "json_file": FileRegistryStore,
     "mongodb": MongoRegistryStore,
 }
 
