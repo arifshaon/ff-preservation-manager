@@ -11,7 +11,12 @@
       "type": "qnl_policy_xlsx",
       "enabled": false,
       "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
-      "notes": "Enable this after copying the QNL workbook into input/. Imported as QNL policy overlay, not as the registry boundary."
+      "field_map": {
+        "name": "Digital file",
+        "source_id": "QNL Format ID",
+        "extensions": "File Extension(s)"
+      },
+      "notes": "Enable this after copying the QNL workbook into input/. Imported as QNL policy overlay, not as the registry boundary. field_map values must match workbook headers and fail loudly if renamed."
     },
     {
       "id": "example_curated_source",
