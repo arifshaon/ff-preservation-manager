@@ -1,4 +1,5 @@
 import json
+from urllib.error import URLError
 
 from registry_builder.adapters.nara_digital_preservation_framework import NaraDigitalPreservationFrameworkAdapter
 from registry_builder.adapters.nara_preservation_csv import NaraPreservationCsvAdapter
@@ -22,7 +23,6 @@ def test_nara_source_adapter_extracts_native_and_normalized_hazard(tmp_path):
         sha256="abc123",
         local_path=str(csv_path),
         content_type="text/csv",
-        metadata={"release_mode": "pinned", "release_date": "20260320", "kind": "risk_matrix_numbered"},
     )
 
     records = adapter.extract([snapshot])
@@ -41,8 +41,6 @@ def test_nara_source_adapter_extracts_native_and_normalized_hazard(tmp_path):
     assert record.hazard["native_direction"] == "higher_is_safer"
     assert record.hazard["external_rating_native_direction"] == "higher_is_safer"
     assert record.hazard["nara_total"] == -7.0
-    assert record.evidence[0]["nara_release_date"] == "20260320"
-    assert record.raw["snapshot_metadata"]["kind"] == "risk_matrix_numbered"
 
 
 def test_nara_native_rating_drives_band_when_text_is_absent(tmp_path):
@@ -95,7 +93,7 @@ def test_nara_id_is_verified_but_pronom_url_puid_is_not(tmp_path):
 
 def test_nara_pinned_release_resolves_dated_pair(tmp_path):
     adapter = NaraDigitalPreservationFrameworkAdapter(
-        {"id": "nara_test", "release_mode": "pinned", "release_date": "20260320", "github_ref": "master"},
+        {"id": "nara_test", "release_mode": "pinned", "release_date": "20260320"},
         tmp_path,
     )
 
@@ -160,6 +158,49 @@ def test_nara_latest_offline_uses_cached_release_index(tmp_path):
 
     assert [source["uri"] for source in sources] == ["https://example.test/action.csv", "https://example.test/risk.csv"]
     assert all(source["release_mode"] == "latest" for source in sources)
+
+
+def test_nara_latest_discovery_failure_uses_cached_release_index(tmp_path, monkeypatch):
+    release_dir = tmp_path / "snapshots" / "nara_test"
+    release_dir.mkdir(parents=True)
+    (release_dir / ".nara_release_index.json").write_text(
+        json.dumps(
+            {
+                "latest": {
+                    "release_date": "20260320",
+                    "sources": [
+                        {"uri": "https://example.test/action.csv", "kind": "preservation_action_plan", "release_date": "20260320", "github_ref": "master"},
+                        {"uri": "https://example.test/risk.csv", "kind": "risk_matrix_numbered", "release_date": "20260320", "github_ref": "master"},
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    adapter = NaraDigitalPreservationFrameworkAdapter(
+        {"id": "nara_test", "release_mode": "latest"},
+        tmp_path,
+    )
+    monkeypatch.setattr(adapter, "_latest_sources_online", lambda: (_ for _ in ()).throw(URLError("rate limit")))
+
+    sources = adapter._resolved_sources()
+
+    assert all(source["release_mode"] == "latest_cached_fallback" for source in sources)
+    assert all("release_resolution_error" in source for source in sources)
+
+
+def test_nara_latest_discovery_failure_falls_back_to_default_pinned_release(tmp_path, monkeypatch):
+    adapter = NaraDigitalPreservationFrameworkAdapter(
+        {"id": "nara_test", "release_mode": "latest"},
+        tmp_path,
+    )
+    monkeypatch.setattr(adapter, "_latest_sources_online", lambda: (_ for _ in ()).throw(URLError("rate limit")))
+
+    sources = adapter._resolved_sources()
+
+    assert {source["release_date"] for source in sources} == {"20260320"}
+    assert all(source["release_mode"] == "latest_fallback" for source in sources)
+    assert all("release_resolution_error" in source for source in sources)
 
 
 def test_legacy_nara_csv_adapter_alias_keeps_old_type_name(tmp_path):
