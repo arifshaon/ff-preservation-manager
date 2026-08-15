@@ -128,7 +128,7 @@ def test_build_criterion_claims_from_institution_evidence_claims():
     assert claim["value"] == "public_specification"
     assert claim["source_type"] == "qnl_institution_format_evidence"
     assert claim["institution_id"] == "qnl"
-    assert claim["confidence"] == "medium"
+    assert "confidence" not in claim
     assert claim["review_status"] == "unreviewed"
 
 
