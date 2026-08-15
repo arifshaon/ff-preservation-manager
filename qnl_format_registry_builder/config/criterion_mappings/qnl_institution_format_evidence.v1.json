@@ -1,0 +1,170 @@
+{
+  "source_type": "qnl_institution_format_evidence",
+  "mapping_version": "2026-08-15",
+  "criteria_version": "v1",
+  "native_vocabulary": "qnl_institution_format_evidence_seed_0.1",
+  "mapping_mode": "manual",
+  "review_status": "accepted",
+  "decided_by": "QNL Digital Curation, Preservation, and Access",
+  "decided_at": "2026-08-15",
+  "notes": "Manual seed mapping for the PDF and netCDF QNL institution evidence examples. These claims are institution-scoped observations, not neutral global evidence and not final scoring.",
+  "excluded_from_criteria": [
+    {
+      "field": "risk_direction",
+      "reason": "Directional statement is contextual institutional wording, not a neutral criterion value. The mapped evidence_value supplies the observation."
+    }
+  ],
+  "maps": [
+    {
+      "id": "qnl.disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.disclosure"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "publicly_documented_and_well_understood": "public_specification",
+        "requires_specialist_review": "unknown"
+      },
+      "rationale": "QNL-authored evidence states local assessment of documentation status. It is institution-scoped and should only affect QNL analysis."
+    },
+    {
+      "id": "qnl.adoption.v1",
+      "criterion": "sustainability.adoption",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.adoption"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "high_adoption": "high",
+        "domain_specific_adoption": "low"
+      }
+    },
+    {
+      "id": "qnl.transparency_readability.v1",
+      "criterion": "sustainability.transparency_readability",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.transparency_readability"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "well_characterized_by_tools": "partially_transparent",
+        "requires_domain_tools": "requires_specialist_tools"
+      }
+    },
+    {
+      "id": "qnl.self_documentation.v1",
+      "criterion": "sustainability.self_documentation",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.self_documentation"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "supports_embedded_metadata": "partially_self_describing",
+        "potentially_self_describing_but_domain_specific": "partially_self_describing"
+      }
+    },
+    {
+      "id": "qnl.external_dependencies.v1",
+      "criterion": "sustainability.external_dependencies",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.external_dependencies"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "low_dependency_in_qnl_environment": "low",
+        "specialist_software_dependency": "high"
+      }
+    },
+    {
+      "id": "qnl.ip_licensing.v1",
+      "criterion": "sustainability.ip_licensing",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.ip_licensing"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "no_known_local_licensing_barrier": "no_known_barrier",
+        "not_locally_assessed": "unknown"
+      }
+    },
+    {
+      "id": "qnl.tpm_encryption.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "sustainability.tpm_encryption"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "acceptable_when_unencrypted": "none_or_not_applicable",
+        "no_local_tpm_evidence": "unknown"
+      }
+    },
+    {
+      "id": "qnl.container_complexity.v1",
+      "criterion": "technical.container_complexity",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "technical.container_complexity"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "manageable_complexity": "wrapper",
+        "complex_scientific_dataset_structure": "complex_domain_structure"
+      }
+    },
+    {
+      "id": "qnl.compression.v1",
+      "criterion": "technical.compression",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "technical.compression"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "tool_supported": "tool_supported",
+        "not_locally_tested": "specialist_or_untested"
+      }
+    },
+    {
+      "id": "qnl.accessibility_features.v1",
+      "criterion": "technical.accessibility_features",
+      "from_collection": "institution_evidence_claims",
+      "from_field": "evidence_value",
+      "where": {"criterion_id": "technical.accessibility_features"},
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "institution_scoped",
+      "mapping_status": "accepted",
+      "values": {
+        "supports_accessibility_features": "supports_accessibility_features",
+        "requires_data_specific_access_strategy": "requires_format_specific_strategy"
+      }
+    }
+  ]
+}
