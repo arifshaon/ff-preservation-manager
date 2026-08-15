@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 import pytest
 
 from preservation_risk_manager.errors import FrameworkError
@@ -11,11 +13,15 @@ FRAMEWORK_DATA = {
     "framework_id": "qnl_scoring_fixture",
     "version": "0.1.0",
     "unknown_answer_id": "unknown",
-    "score_bands": [
-        {"band": "Low", "min_score": 0, "max_score": 3},
-        {"band": "Moderate", "min_score": 4, "max_score": 7},
-        {"band": "High", "min_score": 8, "max_score": 20},
-    ],
+    "scale": {
+        "direction": "higher_is_risk",
+        "min_completeness_for_band": 0.5,
+        "bands": [
+            {"band": "Low", "min_score": 0, "max_score": 3},
+            {"band": "Moderate", "min_score": 4, "max_score": 7},
+            {"band": "High", "min_score": 8, "max_score": 20},
+        ],
+    },
     "questions": [
         {
             "id": "q_disclosure",
@@ -47,8 +53,8 @@ FRAMEWORK_DATA = {
 }
 
 
-def _framework() -> RiskFramework:
-    return RiskFramework.from_dict(FRAMEWORK_DATA)
+def _framework(data=None) -> RiskFramework:
+    return RiskFramework.from_dict(data or FRAMEWORK_DATA)
 
 
 def test_scoring_computes_score_band_and_completeness_for_assessed_format():
@@ -64,11 +70,14 @@ def test_scoring_computes_score_band_and_completeness_for_assessed_format():
     assert result["score"] == 4
     assert result["max_score"] == 13
     assert result["analysed_band"] == "Moderate"
+    assert result["band_suppressed_reason"] is None
     assert result["analysis_status"] == "Assessed"
     assert result["answered_questions"] == 3
     assert result["abstention_count"] == 0
     assert result["critical_abstention_count"] == 0
     assert result["evidence_completeness"] == 1.0
+    assert result["min_completeness_for_band"] == 0.5
+    assert result["scale_direction"] == "higher_is_risk"
 
 
 def test_scoring_uses_question_weight_for_points():
@@ -111,6 +120,25 @@ def test_missing_noncritical_answer_becomes_partial_assessment_abstention():
     assert adoption["missing"] is True
 
 
+def test_minimum_completeness_blocks_band_for_under_evidenced_partial_assessment():
+    data = copy.deepcopy(FRAMEWORK_DATA)
+    data["scale"]["min_completeness_for_band"] = 0.75
+
+    result = score_answers(
+        _framework(data),
+        {
+            "q_disclosure": "public_specification",
+            "q_external_dependencies": "no_special_dependency",
+        },
+    )
+
+    assert result["analysis_status"] == "Partially Assessed"
+    assert result["evidence_completeness"] == pytest.approx(2 / 3)
+    assert result["analysed_band"] is None
+    assert result["band_suppressed_reason"] == "insufficient_evidence_completeness"
+    assert result["min_completeness_for_band"] == 0.75
+
+
 def test_critical_abstention_blocks_band_and_requires_assessment():
     result = score_answers(
         _framework(),
@@ -123,6 +151,7 @@ def test_critical_abstention_blocks_band_and_requires_assessment():
 
     assert result["analysis_status"] == "Needs Assessment"
     assert result["analysed_band"] is None
+    assert result["band_suppressed_reason"] == "critical_abstention"
     assert result["critical_abstention_count"] == 1
     assert result["evidence_completeness"] == pytest.approx(2 / 3)
 
@@ -132,6 +161,7 @@ def test_all_missing_answers_are_not_assessed():
 
     assert result["analysis_status"] == "Not Assessed"
     assert result["analysed_band"] is None
+    assert result["band_suppressed_reason"] == "not_assessed"
     assert result["answered_questions"] == 0
     assert result["abstention_count"] == 3
     assert result["critical_abstention_count"] == 1
