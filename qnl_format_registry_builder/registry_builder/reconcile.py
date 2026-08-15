@@ -27,6 +27,21 @@ def _all_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[I
     return identifiers
 
 
+def _has_unverified_strong_identifier(record: RawFormatRecord, *, strong_kinds: set[str]) -> bool:
+    """Return True when a record carries a strong namespace claim that is not verified.
+
+    A copied workbook PUID/LOC/NARA ID is useful evidence, but it is not safe as
+    an identity bridge. If such a claim is present, weak name/extension matching
+    must not silently merge the row into an authority record because that recreates
+    the JPEG 1.00 / JFIF 1.02 class of false-positive merge by another route.
+    """
+    return any(identifier.kind in strong_kinds and not identifier.verified for identifier in record.identifiers)
+
+
+def _group_has_unverified_strong_identifier(items: list[RawFormatRecord], *, strong_kinds: set[str]) -> bool:
+    return any(_has_unverified_strong_identifier(record, strong_kinds=strong_kinds) for record in items)
+
+
 def _institution_policy(record: RawFormatRecord) -> dict:
     return record.institution_policy or record.qnl or {}
 
@@ -243,11 +258,12 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
 
     - at least two groups share the same name+extension key;
     - the matching records come from more than one source;
-    - exactly one of the candidate groups has a verified strong identifier.
+    - exactly one of the candidate groups has a verified strong identifier;
+    - the group being aliased does not contain unverified strong identifiers.
 
-    This lets an institutional row such as "Comma Separated Values + csv" attach
-    to the corresponding authority record while avoiding ambiguous merges where
-    two authority records share the same weak key.
+    This lets a plain institutional row such as "Comma Separated Values + csv"
+    attach to the corresponding authority record while avoiding false merges when
+    a workbook row carries a copied-but-unverified PUID/LOC/NARA identifier.
     """
     weak_index: dict[tuple[str, str], list[tuple[tuple[str, str], RawFormatRecord]]] = defaultdict(list)
     for group_key, items in groups.items():
@@ -271,8 +287,11 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
             continue
         target = strong_group_keys[0]
         for group_key in group_keys:
-            if group_key != target:
-                aliases[group_key] = target
+            if group_key == target:
+                continue
+            if _group_has_unverified_strong_identifier(groups[group_key], strong_kinds=strong_kinds):
+                continue
+            aliases[group_key] = target
     return aliases
 
 
@@ -281,37 +300,15 @@ def _safe_claimed_strong_identifier_aliases(
     *,
     strong_kinds: set[str],
 ) -> dict[tuple[str, str], tuple[str, str]]:
-    """Alias local/evidence groups to one verified authority group by claimed ID.
+    """Return no aliases for copied strong identifiers.
 
-    Institutional evidence often carries a copied PUID or LOC FDD ID so it can
-    point at the right format. That copied identifier is not verified by the
-    institution source, so it must not become a strong key. It may, however,
-    safely bridge to the single canonical group where the same identifier has
-    already been verified by its owning authority.
+    Unverified strong identifiers from non-authority sources are retained as
+    evidence claims, but they are not identity bridges. A copied workbook PUID
+    must not collapse a local row into PRONOM unless a verified authority source
+    supplied that identifier on the same record group through normal verified
+    identifier reconciliation.
     """
-    verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
-    for group_key, items in groups.items():
-        for record in items:
-            for identifier in _verified_identifiers(record):
-                if identifier.kind in strong_kinds:
-                    verified_targets[(identifier.kind, identifier.value)].add(group_key)
-
-    aliases: dict[tuple[str, str], tuple[str, str]] = {}
-    for group_key, items in groups.items():
-        if group_key[0] in strong_kinds:
-            continue
-        candidates: set[tuple[str, str]] = set()
-        for record in items:
-            for identifier in _all_identifiers(record):
-                if identifier.kind not in strong_kinds:
-                    continue
-                targets = verified_targets.get((identifier.kind, identifier.value), set())
-                if len(targets) == 1:
-                    candidates.update(targets)
-        candidates.discard(group_key)
-        if len(candidates) == 1:
-            aliases[group_key] = next(iter(candidates))
-    return aliases
+    return {}
 
 
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
