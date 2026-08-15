@@ -5,15 +5,17 @@ from typing import Any
 from preservation_risk_manager.frameworks import AnswerOption, Question, RiskFramework
 
 
-def _supplied_answer_id(value: Any) -> str | None:
+def _supplied_answer(value: Any) -> tuple[str | None, bool, str | None]:
     if value is None:
-        return None
+        return None, False, None
     if isinstance(value, str):
-        return value
+        return value, False, None
     if isinstance(value, dict):
         answer_id = value.get("answer_id") or value.get("id")
-        return str(answer_id) if answer_id is not None else None
-    return str(value)
+        status = value.get("derivation_status") or value.get("status")
+        missing = bool(value.get("missing", False)) or status == "missing_evidence"
+        return (str(answer_id) if answer_id is not None else None, missing, str(status) if status is not None else None)
+    return str(value), False, None
 
 
 def _answer_for_question(question: Question, supplied_id: str | None, unknown_id: str) -> tuple[AnswerOption | None, bool]:
@@ -42,8 +44,11 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
 
     The scorer accepts only framework-declared answer IDs. Missing answers are
     treated as abstentions when the question provides an unknown/abstention
-    option; otherwise they are recorded as missing with zero points. The LLM, if
-    added later, will only supply controlled answer IDs into this function.
+    option; otherwise they are recorded as missing with zero points. Derived
+    answer metadata can preserve that an explicit `unknown` answer came from
+    missing registry evidence rather than from an affirmative evidence claim.
+    The LLM, if added later, will only supply controlled answer IDs into this
+    function.
     """
     question_results: list[dict[str, Any]] = []
     total_score = 0.0
@@ -53,8 +58,9 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
     missing_count = 0
 
     for question in framework.questions:
-        supplied_id = _supplied_answer_id(answers.get(question.id))
-        answer, missing = _answer_for_question(question, supplied_id, framework.unknown_answer_id)
+        supplied_id, supplied_missing, derivation_status = _supplied_answer(answers.get(question.id))
+        answer, inferred_missing = _answer_for_question(question, supplied_id, framework.unknown_answer_id)
+        missing = inferred_missing or supplied_missing
         if missing:
             missing_count += 1
 
@@ -77,7 +83,7 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
                 critical_abstention_count += 1
 
         total_score += weighted_points
-        question_results.append({
+        result = {
             "question_id": question.id,
             "answer_id": answer_id,
             "points": points,
@@ -86,7 +92,10 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
             "critical": question.critical,
             "abstention": abstention,
             "missing": missing,
-        })
+        }
+        if derivation_status:
+            result["derivation_status"] = derivation_status
+        question_results.append(result)
 
     total_questions = len(framework.questions)
     evidence_completeness = answered_questions / total_questions if total_questions else 0.0
