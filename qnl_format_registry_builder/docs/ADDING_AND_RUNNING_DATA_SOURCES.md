@@ -112,9 +112,28 @@ NARA CSV files downloaded manually
 institutional policy workbook
 local JSON source package
 local XML files
+LOC FDD XML ZIP downloaded manually
 ```
 
 Use a retained snapshot. The file is source evidence for this run.
+
+For local files in JSON config, prefer plain filesystem paths. On Windows, forward slashes are the simplest and avoid escaping problems:
+
+```json
+{
+  "zip_uri": "C:/Users/Arif Shaon/Downloads/fddXML.zip"
+}
+```
+
+Relative project paths are also good when you stage files inside the repository working tree:
+
+```json
+{
+  "zip_uri": "input/loc/fddXML.zip"
+}
+```
+
+`file://` URIs are supported by the URI reader, but plain Windows paths are easier to read and less error-prone in local config files.
 
 Adapter implementation pattern:
 
@@ -213,7 +232,7 @@ Config pattern:
 }
 ```
 
-LOC example:
+LOC remote ZIP example:
 
 ```json
 {
@@ -223,6 +242,19 @@ LOC example:
   "required": false,
   "retrieval_mode": "fdd_xml_zip",
   "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
+}
+```
+
+LOC downloaded ZIP example on Windows:
+
+```json
+{
+  "id": "loc_fdd_xml",
+  "type": "loc_fdd_xml",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "fdd_xml_zip",
+  "zip_uri": "C:/Users/Arif Shaon/Downloads/fddXML.zip"
 }
 ```
 
@@ -607,7 +639,7 @@ Use this when the source exposes individual JSON files and no archive is availab
 
 ## Running LOC only with MongoDB
 
-Use the official LOC FDD XML ZIP. This keeps one ZIP snapshot and extracts many LOC records from it.
+Use the official LOC FDD XML ZIP when downloading directly from LOC. This keeps one ZIP snapshot and extracts many LOC records from it.
 
 ```json
 {
@@ -639,6 +671,23 @@ Use the official LOC FDD XML ZIP. This keeps one ZIP snapshot and extracts many 
   ]
 }
 ```
+
+If the LOC ZIP has already been downloaded locally, use a normal Windows path in `zip_uri`:
+
+```json
+{
+  "id": "loc_fdd_xml",
+  "type": "loc_fdd_xml",
+  "enabled": true,
+  "required": true,
+  "retrieval_mode": "fdd_xml_zip",
+  "zip_uri": "C:/Users/Arif Shaon/Downloads/fddXML.zip",
+  "progress": true,
+  "progress_interval": 25
+}
+```
+
+The path above is preferable to a `file://` URI in local Windows configs. It is clear, readable, and works with spaces in the user profile path.
 
 Run:
 
@@ -777,6 +826,22 @@ db.canonical_formats.countDocuments({current: {$ne: false}})
 ```
 
 This is only for smoke tests. Use MongoDB for real runs.
+
+### Mistake: using awkward local file URIs on Windows
+
+For downloaded local files, prefer this:
+
+```json
+"zip_uri": "C:/Users/Arif Shaon/Downloads/fddXML.zip"
+```
+
+Avoid this unless there is a specific reason to use URI syntax:
+
+```json
+"zip_uri": "file:///C:/Users/Arif%20Shaon/Downloads/fddXML.zip"
+```
+
+Plain Windows paths with forward slashes are easier to read and have been confirmed to work with local LOC ZIP runs.
 
 ### Mistake: retaining thousands of individual source files
 
