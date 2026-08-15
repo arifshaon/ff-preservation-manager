@@ -1,0 +1,10 @@
+{
+  "format_id": "fmt/pdf",
+  "readiness_status": "Covered",
+  "exposure_level": "High",
+  "answers": {
+    "q_disclosure": "public_specification",
+    "q_adoption": "widely_adopted",
+    "q_external_dependencies": "no_special_dependency"
+  }
+}
