@@ -1,0 +1,103 @@
+{
+  "framework_id": "qnl_sustainability_example",
+  "version": "0.1.0",
+  "label": "QNL Sustainability Risk Example",
+  "unknown_answer_id": "unknown",
+  "score_bands": [
+    {
+      "band": "Low",
+      "min_score": 0,
+      "max_score": 5
+    },
+    {
+      "band": "Moderate",
+      "min_score": 6,
+      "max_score": 12
+    },
+    {
+      "band": "High",
+      "min_score": 13,
+      "max_score": 30
+    }
+  ],
+  "questions": [
+    {
+      "id": "q_disclosure",
+      "label": "Is the format publicly documented with an accessible specification?",
+      "critical": true,
+      "evidence_fields": [
+        "sustainability.disclosure"
+      ],
+      "answers": [
+        {
+          "id": "public_specification",
+          "label": "Public specification is available",
+          "points": 0
+        },
+        {
+          "id": "limited_or_unclear_specification",
+          "label": "Specification exists but is limited, unclear, or difficult to access",
+          "points": 3
+        },
+        {
+          "id": "unknown",
+          "label": "Evidence is unavailable or insufficient",
+          "points": 1,
+          "abstention": true
+        }
+      ]
+    },
+    {
+      "id": "q_adoption",
+      "label": "Is the format widely adopted or actively used?",
+      "evidence_fields": [
+        "sustainability.adoption"
+      ],
+      "answers": [
+        {
+          "id": "widely_adopted",
+          "label": "Widely adopted or actively used",
+          "points": 0
+        },
+        {
+          "id": "niche_or_declining",
+          "label": "Niche, declining, or domain-specific adoption",
+          "points": 4
+        },
+        {
+          "id": "unknown",
+          "label": "Evidence is unavailable or insufficient",
+          "points": 1,
+          "abstention": true
+        }
+      ]
+    },
+    {
+      "id": "q_external_dependencies",
+      "label": "Does the format require specialist external dependencies for rendering, validation, or reuse?",
+      "weight": 2,
+      "evidence_fields": [
+        "sustainability.external_dependencies",
+        "technical.container_complexity"
+      ],
+      "answers": [
+        {
+          "id": "no_special_dependency",
+          "label": "No specialist dependency beyond common preservation tooling",
+          "points": 0
+        },
+        {
+          "id": "specialist_dependency",
+          "label": "Specialist software, domain knowledge, or runtime environment is required",
+          "points": 3
+        },
+        {
+          "id": "unknown",
+          "label": "Evidence is unavailable or insufficient",
+          "points": 1,
+          "abstention": true
+        }
+      ]
+    }
+  ]
+}
