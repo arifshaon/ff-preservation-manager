@@ -1,6 +1,6 @@
 from registry_builder.models import RawFormatRecord
 from registry_builder.normalize import normalize_record
-from registry_builder.reconcile import reconcile
+from registry_builder.reconcile import reconcile, version_tokens
 
 
 def _norm(records):
@@ -221,3 +221,53 @@ def test_weak_bridge_does_not_merge_when_two_authority_records_share_name_extens
 
     assert len(registry) == 3
     assert {fmt.canonical_id for fmt in registry} == {"fmt-example-format", "nara-nf00001", "nara-nf00002"}
+
+
+def test_version_tokens_cover_lettered_pdfa_and_office_discriminators():
+    assert version_tokens("GIF 87a") == frozenset({"87a"})
+    assert version_tokens("GIF 89a") == frozenset({"89a"})
+    assert version_tokens("PDF/A-1a") == frozenset({"pdf/a-1a"})
+    assert version_tokens("ISO/A-2b") == frozenset({"iso/a-2b"})
+    assert version_tokens("Word 97-2003") == frozenset({"97-2003"})
+
+
+def test_unverified_spreadsheet_puid_does_not_merge_lettered_version_conflict():
+    records = [
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="GIF 87a", puids=["fmt/4"], extensions=["gif"]),
+        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="GIF 89a", puids=["fmt/4"], extensions=["gif"]),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 2
+    assert {x.preferred_name for x in registry} == {"GIF 87a", "GIF 89a"}
+
+
+def test_unverified_spreadsheet_puid_does_not_merge_pdfa_version_conflict():
+    records = [
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="PDF/A-1a", puids=["fmt/354"], extensions=["pdf"]),
+        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="PDF/A-2b", puids=["fmt/354"], extensions=["pdf"]),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 2
+    assert {x.preferred_name for x in registry} == {"PDF/A-1a", "PDF/A-2b"}
+
+
+def test_unverified_spreadsheet_puid_asymmetric_version_bridge_is_marked_heuristic():
+    records = [
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="Word for Macintosh 5.1", puids=["fmt/9999"], extensions=["doc"]),
+        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="Microsoft Word", puids=["fmt/9999"], extensions=["doc"]),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 1
+    fmt = registry[0]
+    copied_claim = next(
+        c for c in fmt.identifier_claims
+        if c["kind"] == "puid" and c["value"] == "fmt/9999" and not c["verified"]
+    )
+    assert copied_claim["confidence"] == "heuristic"
+    assert "only one side carries" in copied_claim["confidence_reason"]
