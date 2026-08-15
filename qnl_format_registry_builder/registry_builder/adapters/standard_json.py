@@ -21,6 +21,7 @@ class StandardJsonAdapter(SourceAdapter):
           "urls": {"loc": "https://..."},
           "hazard": {"external_band": "Low"},
           "institution_policy": {},
+          "institution_evidence": [],
           "evidence": []
         }
       ]
@@ -63,6 +64,7 @@ class StandardJsonAdapter(SourceAdapter):
                     wikidata_ids=list(identifiers.get("wikidata", []) or record.get("wikidata_ids", []) or []),
                     urls=record.get("urls", {}) or {},
                     institution_policy=institution_policy,
+                    institution_evidence=record.get("institution_evidence", []) or record.get("institution_evidence_claims", []) or [],
                     hazard=record.get("hazard", {}) or {},
                     readiness=record.get("readiness", {}) or {},
                     trend=record.get("trend", {}) or {},
