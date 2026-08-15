@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from preservation_risk_manager import data_access
 from preservation_risk_manager.cli import main
 
 
@@ -48,29 +49,46 @@ FRAMEWORK = {
 }
 
 
-def test_analyze_format_resolves_registry_json_and_derives_answers(tmp_path, capsys):
+class FakeStore:
+    def __init__(self, collections):
+        self.collections = collections
+
+    def query(self, collection, filt=None):
+        filt = filt or {}
+        return [
+            row
+            for row in self.collections.get(collection, [])
+            if all(row.get(key) == value for key, value in filt.items())
+        ]
+
+
+def _write_framework(tmp_path):
     framework_path = tmp_path / "framework.json"
     framework_path.write_text(json.dumps(FRAMEWORK), encoding="utf-8")
+    return framework_path
+
+
+def _pdf_record():
+    return {
+        "canonical_id": "puid-fmt-18",
+        "preferred_name": "Portable Document Format",
+        "identifiers": {
+            "puid": ["fmt/18"],
+            "extension": ["pdf"],
+            "mime": ["application/pdf"],
+        },
+        "evidence_claims": [
+            {"claim_id": "a", "criterion_id": "sustainability.disclosure", "value": "openly_documented"},
+            {"claim_id": "b", "criterion_id": "sustainability.adoption", "value": "widely_adopted"},
+            {"claim_id": "c", "criterion_id": "sustainability.external_dependencies", "value": "none"},
+        ],
+    }
+
+
+def test_analyze_format_resolves_registry_json_and_derives_answers(tmp_path, capsys):
+    framework_path = _write_framework(tmp_path)
     registry_path = tmp_path / "registry.json"
-    registry_path.write_text(
-        json.dumps([
-            {
-                "canonical_id": "puid-fmt-18",
-                "preferred_name": "Portable Document Format",
-                "identifiers": {
-                    "puid": ["fmt/18"],
-                    "extension": ["pdf"],
-                    "mime": ["application/pdf"],
-                },
-                "evidence_claims": [
-                    {"claim_id": "a", "criterion_id": "sustainability.disclosure", "value": "openly_documented"},
-                    {"claim_id": "b", "criterion_id": "sustainability.adoption", "value": "widely_adopted"},
-                    {"claim_id": "c", "criterion_id": "sustainability.external_dependencies", "value": "none"},
-                ],
-            }
-        ]),
-        encoding="utf-8",
-    )
+    registry_path.write_text(json.dumps([_pdf_record()]), encoding="utf-8")
 
     rc = main([
         "analyze-format",
@@ -94,9 +112,43 @@ def test_analyze_format_resolves_registry_json_and_derives_answers(tmp_path, cap
     assert output["derived_answers"]["answers"]["q_disclosure"] == "public_specification"
 
 
+def test_analyze_format_can_read_registry_builder_storage_config(tmp_path, monkeypatch, capsys):
+    framework_path = _write_framework(tmp_path)
+    storage_config_path = tmp_path / "registry-builder-config.json"
+    storage_config_path.write_text(
+        json.dumps({
+            "storage": {"type": "file", "path": "registry_store"},
+            "sources": [],
+        }),
+        encoding="utf-8",
+    )
+    created = []
+
+    def fake_create_store(config):
+        created.append(config)
+        return FakeStore({"canonical_formats": [_pdf_record()]})
+
+    monkeypatch.setattr(data_access, "create_store_from_registry_builder", fake_create_store)
+
+    rc = main([
+        "analyze-format",
+        "--framework", str(framework_path),
+        "--storage-config", str(storage_config_path),
+        "--format", "fmt/18",
+        "--institution", "qnl",
+        "--readiness-status", "Covered",
+    ])
+
+    assert rc == 0
+    assert created == [{"type": "file", "path": "registry_store"}]
+    output = json.loads(capsys.readouterr().out)
+    assert output["resolution"]["status"] == "resolved"
+    assert output["analysis"]["analysis_status"] == "Assessed"
+    assert output["local_risk_posture"] == "Low"
+
+
 def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, capsys):
-    framework_path = tmp_path / "framework.json"
-    framework_path.write_text(json.dumps(FRAMEWORK), encoding="utf-8")
+    framework_path = _write_framework(tmp_path)
     registry_path = tmp_path / "registry.json"
     registry_path.write_text(
         json.dumps([
@@ -125,19 +177,19 @@ def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, cap
     assert output["derived_answers"]["derivation"]["q_disclosure"]["status"] == "missing_evidence"
 
 
-def test_analyze_format_missing_registry_json_reports_clean_error(tmp_path, capsys):
-    framework_path = tmp_path / "framework.json"
-    framework_path.write_text(json.dumps(FRAMEWORK), encoding="utf-8")
+def test_analyze_format_reports_missing_registry_json_without_traceback(tmp_path, capsys):
+    framework_path = _write_framework(tmp_path)
+    missing_registry = tmp_path / "missing-registry.json"
 
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(SystemExit) as exc:
         main([
             "analyze-format",
             "--framework", str(framework_path),
-            "--registry-json", str(tmp_path / "missing-registry.json"),
+            "--registry-json", str(missing_registry),
             "--format", "fmt/18",
         ])
 
-    assert exc_info.value.code == 2
+    assert exc.value.code == 2
     captured = capsys.readouterr()
     assert "Registry JSON file not found" in captured.err
     assert "Traceback" not in captured.err
