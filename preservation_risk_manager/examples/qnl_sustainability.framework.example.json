@@ -3,23 +3,27 @@
   "version": "0.1.0",
   "label": "QNL Sustainability Risk Example",
   "unknown_answer_id": "unknown",
-  "score_bands": [
-    {
-      "band": "Low",
-      "min_score": 0,
-      "max_score": 5
-    },
-    {
-      "band": "Moderate",
-      "min_score": 6,
-      "max_score": 12
-    },
-    {
-      "band": "High",
-      "min_score": 13,
-      "max_score": 30
-    }
-  ],
+  "scale": {
+    "direction": "higher_is_risk",
+    "min_completeness_for_band": 0.67,
+    "bands": [
+      {
+        "band": "Low",
+        "min_score": 0,
+        "max_score": 5
+      },
+      {
+        "band": "Moderate",
+        "min_score": 6,
+        "max_score": 12
+      },
+      {
+        "band": "High",
+        "min_score": 13,
+        "max_score": 30
+      }
+    ]
+  },
   "questions": [
     {
       "id": "q_disclosure",
