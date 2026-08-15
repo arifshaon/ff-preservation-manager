@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 
 from registry_builder.adapters.qnl_institution_format_evidence import QnlInstitutionFormatEvidenceAdapter
+from registry_builder.models import RawFormatRecord
 from registry_builder.normalize import normalize_record
 from registry_builder.pipeline import run_pipeline
+from registry_builder.reconcile import reconcile
 from registry_builder.storage.file import FileRegistryStore
 
 
@@ -97,6 +99,40 @@ def test_qnl_institution_format_evidence_extracts_claims(tmp_path):
     assert netcdf.extensions == ["cdf", "nc"]
     assert netcdf.institution_evidence[0]["evidence_value"] == "no_current_institutional_expertise"
     assert netcdf.institution_evidence[0]["risk_direction"] == "raises_risk_for_qnl"
+
+
+def test_qnl_evidence_claimed_puid_bridges_to_verified_pronom_group(tmp_path):
+    source_path = tmp_path / "qnl_evidence.json"
+    _write_qnl_evidence(source_path)
+    adapter = QnlInstitutionFormatEvidenceAdapter(
+        {"id": "qnl_institution_format_evidence_2026_seed", "uris": [str(source_path)]},
+        tmp_path / "work",
+    )
+    qnl_pdf = next(
+        normalize_record(record)
+        for record in adapter.extract(adapter.acquire())
+        if record.source_record_id == "qnl-evidence-pdf"
+    )
+    pronom_pdf = normalize_record(
+        RawFormatRecord(
+            source_id="pronom_registry",
+            source_type="pronom_registry",
+            source_record_id="fmt/18",
+            name="Portable Document Format",
+            puids=["fmt/18"],
+        )
+    )
+
+    registry = reconcile([pronom_pdf, qnl_pdf])
+
+    assert len(registry) == 1
+    record = registry[0].to_dict()
+    assert record["canonical_id"] == "puid-fmt-18"
+    assert {source["source_id"] for source in record["source_records"]} == {
+        "pronom_registry",
+        "qnl_institution_format_evidence_2026_seed",
+    }
+    assert record["institution_evidence_claims"][0]["criterion_id"] == "institution.workflow_integration"
 
 
 def test_pipeline_carries_qnl_evidence_into_canonical_registry(tmp_path):
