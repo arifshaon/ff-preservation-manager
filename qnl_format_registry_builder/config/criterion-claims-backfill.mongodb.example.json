@@ -1,0 +1,20 @@
+{
+  "mode": "criterion_claims_backfill",
+  "description": "Mode 2: enrich an already-ingested registry by generating criterion_claims from approved mapping configs. This does not reacquire NARA, PRONOM, LOC, or QNL source data.",
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry"
+  },
+  "criteria": "criteria/v1.json",
+  "mappings": "criterion_mappings",
+  "include_drafts": false,
+  "dry_run": false,
+  "out": "../audit/criterion_claims_backfill.json",
+  "notes": [
+    "Use this when mappings are added after source data has already been ingested.",
+    "Run with --dry-run first to inspect counts before writing criterion_claims.",
+    "Machine-generated claims are written with review_status=unreviewed unless a mapping explicitly says otherwise.",
+    "Composite source ratings such as NARA Risk Level remain hazard estimators and are blocked from criterion_claims by mapping validation."
+  ]
+}
