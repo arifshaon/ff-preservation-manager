@@ -28,6 +28,28 @@ def _matches_filter(row: dict[str, Any], filt: dict[str, Any]) -> bool:
     return True
 
 
+def load_storage_config(path: str | Path) -> dict[str, Any]:
+    """Load a registry-builder storage config from JSON.
+
+    The risk manager accepts either the storage block itself:
+
+    {"type": "file", "path": "..."}
+
+    or a full registry-builder pipeline config containing a top-level
+    `storage` object. This keeps analysis pointed at the same evidence store used
+    to build the registry without duplicating storage implementation here.
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RegistryAccessError(f"Storage config {path} must contain a JSON object")
+    storage = data.get("storage")
+    if storage is None:
+        return dict(data)
+    if not isinstance(storage, dict):
+        raise RegistryAccessError(f"Storage config {path} has non-object 'storage' value")
+    return dict(storage)
+
+
 class JsonRegistryStore:
     """Read a registry JSON export through the RegistryStore query contract."""
 
