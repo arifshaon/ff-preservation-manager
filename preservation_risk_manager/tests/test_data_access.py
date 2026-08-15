@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from preservation_risk_manager.data_access import RegistryAccessError, RegistryReader
+from preservation_risk_manager.data_access import RegistryAccessError, RegistryReader, load_storage_config
 
 
 class FakeStore:
@@ -15,6 +17,34 @@ class FakeStore:
         self.queries.append((collection, dict(filt)))
         rows = self.collections.get(collection, [])
         return [row for row in rows if all(row.get(key) == value for key, value in filt.items())]
+
+
+def test_load_storage_config_accepts_direct_storage_block(tmp_path):
+    path = tmp_path / "storage.json"
+    path.write_text(json.dumps({"type": "file", "path": "registry_store"}), encoding="utf-8")
+
+    assert load_storage_config(path) == {"type": "file", "path": "registry_store"}
+
+
+def test_load_storage_config_extracts_storage_from_pipeline_config(tmp_path):
+    path = tmp_path / "pipeline-config.json"
+    path.write_text(
+        json.dumps({
+            "storage": {"type": "mongodb", "database": "formats"},
+            "sources": [],
+        }),
+        encoding="utf-8",
+    )
+
+    assert load_storage_config(path) == {"type": "mongodb", "database": "formats"}
+
+
+def test_load_storage_config_rejects_non_object_storage_value(tmp_path):
+    path = tmp_path / "bad-config.json"
+    path.write_text(json.dumps({"storage": "mongodb://example"}), encoding="utf-8")
+
+    with pytest.raises(RegistryAccessError, match="non-object 'storage' value"):
+        load_storage_config(path)
 
 
 def test_registry_reader_queries_store_contract():
