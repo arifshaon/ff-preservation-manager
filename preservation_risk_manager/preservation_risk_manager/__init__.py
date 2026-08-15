@@ -10,6 +10,8 @@ __all__ = [
     "actions",
     "currency",
     "errors",
+    "frameworks",
     "posture",
     "responses",
+    "scoring",
 ]
