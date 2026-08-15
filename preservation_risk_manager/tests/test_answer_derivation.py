@@ -48,6 +48,11 @@ def test_derives_answers_from_explicit_criterion_evidence():
         "q_disclosure": "public_specification",
         "q_external_dependencies": "no_special_dependency",
     }
+    assert derived["scoring_answers"]["q_disclosure"] == {
+        "answer_id": "public_specification",
+        "derivation_status": "derived",
+        "missing": False,
+    }
     assert derived["derivation"]["q_disclosure"]["status"] == "derived"
 
 
@@ -55,6 +60,11 @@ def test_missing_evidence_remains_unknown_not_inferred():
     derived = derive_answers(_framework(), {"global_evidence": []})
 
     assert derived["answers"]["q_disclosure"] == "unknown"
+    assert derived["scoring_answers"]["q_disclosure"] == {
+        "answer_id": "unknown",
+        "derivation_status": "missing_evidence",
+        "missing": True,
+    }
     assert derived["derivation"]["q_disclosure"]["status"] == "missing_evidence"
 
 
@@ -69,6 +79,11 @@ def test_conflicting_evidence_uses_highest_risk_answer_and_exposes_conflict():
     derived = derive_answers(_framework(), evidence_pack)
 
     assert derived["answers"]["q_external_dependencies"] == "specialist_dependency"
+    assert derived["scoring_answers"]["q_external_dependencies"] == {
+        "answer_id": "specialist_dependency",
+        "derivation_status": "derived_conflict_conservative",
+        "missing": False,
+    }
     details = derived["derivation"]["q_external_dependencies"]
     assert details["status"] == "derived_conflict_conservative"
     assert details["conflicting_answer_ids"] == ["no_special_dependency", "specialist_dependency"]
