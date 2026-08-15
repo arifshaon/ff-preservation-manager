@@ -12,9 +12,48 @@ from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
 
 DEFAULT_LOC_FDD_XML_ZIP = "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
 
+_DECLARED_EXTENSION_ELEMENT_NAMES = {
+    "extension",
+    "extensions",
+    "ext",
+    "exts",
+    "fileextension",
+    "fileextensions",
+    "filenameextension",
+    "filenameextensions",
+    "fileformatextension",
+    "fileformatextensions",
+}
+_EXTENSION_STOPWORDS = {
+    "a",
+    "and",
+    "applicable",
+    "ext",
+    "extension",
+    "extensions",
+    "file",
+    "files",
+    "format",
+    "formats",
+    "multiple",
+    "n",
+    "na",
+    "none",
+    "not",
+    "or",
+    "see",
+    "unknown",
+    "varies",
+    "various",
+}
+
 
 def _local_name(tag: str) -> str:
     return tag.split("}", 1)[-1].lower() if "}" in tag else tag.lower()
+
+
+def _normalized_local_name(tag: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _local_name(tag))
 
 
 def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
@@ -23,6 +62,41 @@ def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
         if _local_name(elem.tag) in names and elem.text and elem.text.strip():
             out.append(elem.text.strip())
     return out
+
+
+def _extension_tokens(value: str) -> list[str]:
+    out: list[str] = []
+    for token in re.split(r"[\s,;|]+", value or ""):
+        candidate = token.strip().strip('"\'`()[]{}<>')
+        candidate = candidate.lstrip(".").rstrip(".:)"]}")
+        candidate = candidate.lower()
+        if not re.fullmatch(r"[a-z][a-z0-9]{0,11}", candidate):
+            continue
+        if candidate in _EXTENSION_STOPWORDS:
+            continue
+        out.append(candidate)
+    return out
+
+
+def _declared_extensions(root: ET.Element) -> list[str]:
+    """Return extensions only from XML elements that declare extensions.
+
+    LOC FDD records contain many free-text fields with dotted numbers and URLs.
+    Scanning all text with a generic dot-regex injects junk such as `0`, `4`,
+    `gov`, and `loc` into weak extension identifiers. Keep extension extraction
+    scoped to extension-declaring elements and require extension values to begin
+    with a letter.
+    """
+    extensions: set[str] = set()
+    for elem in root.iter():
+        if _normalized_local_name(elem.tag) not in _DECLARED_EXTENSION_ELEMENT_NAMES:
+            continue
+        if elem.text:
+            extensions.update(_extension_tokens(elem.text))
+        for attr_name, attr_value in elem.attrib.items():
+            if _normalized_local_name(attr_name) in _DECLARED_EXTENSION_ELEMENT_NAMES or attr_name.lower() in {"value", "name"}:
+                extensions.update(_extension_tokens(attr_value))
+    return sorted(extensions)
 
 
 def _snapshot_is_zip(snapshot: SourceSnapshot) -> bool:
@@ -68,7 +142,7 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     # Conservative regex fallbacks for common identifiers embedded in FDD text.
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
     wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
-    extensions = sorted({x.lower() for x in re.findall(r"\.([A-Za-z0-9]{1,12})\b", text)})
+    extensions = _declared_extensions(root)
     name = titles[0] if titles else None
     if not loc_id and not name:
         return None
