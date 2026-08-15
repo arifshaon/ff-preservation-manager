@@ -61,9 +61,17 @@ python -m pip install -e ".[dev,mongo]"
 pytest
 ```
 
-## Quickstart: run a real NARA registry build
+## Quickstart: run a real multi-source registry build
 
-The default config now enables the NARA Digital Preservation Framework source. It downloads pinned public NARA CSV files from GitHub and produces a real registry, not a two-record toy example.
+The default config now enables three real evidence sources:
+
+```text
+NARA   -> pinned external preservation hazard evidence
+PRONOM -> verified PUID and format-identity evidence
+LOC    -> FDD XML sustainability/evidence records
+```
+
+NARA is required in the sample config. PRONOM and LOC are enabled but optional, so a temporary network or upstream issue is recorded in `run_report.json` without destroying the baseline run.
 
 ```bash
 python -m registry_builder run \
@@ -81,7 +89,13 @@ output/registry.csv
 output/registry.json
 ```
 
-The exact count depends on the pinned NARA release and the current adapter behavior, but the run should produce hundreds of real NARA file-format records with hazard evidence.
+The exact count depends on the pinned NARA release and the current PRONOM/LOC data. The run should produce a real external-evidence registry, not a two-record toy example.
+
+For scheduled or repeated runs that use PRONOM's GitHub tree, set a `GITHUB_TOKEN` to reduce GitHub API rate-limit risk:
+
+```bash
+GITHUB_TOKEN=<token>
+```
 
 Read the outputs with:
 
@@ -105,9 +119,9 @@ Export/report directory. When `exports.enabled` is true, the pipeline writes fil
 
 If the selected storage backend is MongoDB, MongoDB remains the registry store; `output/` is only the export/report folder.
 
-## Add an institutional workbook after the NARA quickstart
+## Add an institutional workbook after the external-evidence quickstart
 
-The default NARA run shows that the pipeline works with real external evidence.
+The default NARA + PRONOM + LOC run shows that the pipeline works with real external evidence.
 
 To make it institutional, enable the institutional workbook source in `config/sources.example.json` or in a local copied config:
 
@@ -183,6 +197,10 @@ Run PRONOM later
   -> contributes verified PUID/format identity evidence
   -> reuses latest successful NARA evidence
   -> recomputes canonical records from active evidence contributions
+
+Run LOC later
+  -> contributes LOC FDD identifiers and sustainability evidence
+  -> reuses latest successful NARA and PRONOM evidence
 ```
 
 Earlier source records remain in storage as provenance/history. The current canonical view uses the active contribution from each source.
