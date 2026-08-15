@@ -16,5 +16,4 @@ where = ["src"]
 include = ["preservation_risk_manager*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
 testpaths = ["tests"]
