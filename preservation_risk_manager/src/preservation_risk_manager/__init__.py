@@ -8,6 +8,7 @@ action recommendations.
 
 __all__ = [
     "actions",
+    "answer_derivation",
     "cli",
     "currency",
     "data_access",
