@@ -1,0 +1,18 @@
+[project]
+name = "preservation-risk-manager"
+version = "0.1.0"
+description = "Institution-specific preservation risk posture and action-policy manager."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["preservation_risk_manager*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
