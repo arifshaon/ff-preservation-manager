@@ -120,6 +120,23 @@ def test_missing_noncritical_answer_becomes_partial_assessment_abstention():
     assert adoption["missing"] is True
 
 
+def test_derived_unknown_from_missing_evidence_remains_missing():
+    result = score_answers(
+        _framework(),
+        {
+            "q_disclosure": {"answer_id": "unknown", "derivation_status": "missing_evidence", "missing": True},
+            "q_adoption": {"answer_id": "unknown", "derivation_status": "missing_evidence", "missing": True},
+            "q_external_dependencies": {"answer_id": "unknown", "derivation_status": "missing_evidence", "missing": True},
+        },
+    )
+
+    assert result["analysis_status"] == "Not Assessed"
+    assert result["missing_count"] == 3
+    assert result["answered_questions"] == 0
+    assert all(row["missing"] is True for row in result["question_results"])
+    assert {row["derivation_status"] for row in result["question_results"]} == {"missing_evidence"}
+
+
 def test_minimum_completeness_blocks_band_for_under_evidenced_partial_assessment():
     data = copy.deepcopy(FRAMEWORK_DATA)
     data["scale"]["min_completeness_for_band"] = 0.75
@@ -163,6 +180,7 @@ def test_all_missing_answers_are_not_assessed():
     assert result["analysed_band"] is None
     assert result["band_suppressed_reason"] == "not_assessed"
     assert result["answered_questions"] == 0
+    assert result["missing_count"] == 3
     assert result["abstention_count"] == 3
     assert result["critical_abstention_count"] == 1
     assert result["evidence_completeness"] == 0
