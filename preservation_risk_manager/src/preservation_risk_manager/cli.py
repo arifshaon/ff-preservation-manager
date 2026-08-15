@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from preservation_risk_manager.answer_derivation import derive_answers
-from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader
+from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
@@ -107,12 +107,20 @@ def _resolution_summary(resolution) -> dict[str, Any]:
     }
 
 
+def _registry_reader_from_args(args: argparse.Namespace) -> RegistryReader:
+    registry_json = getattr(args, "registry_json", None)
+    storage_config_path = getattr(args, "storage_config", None)
+    if registry_json:
+        registry_path = _require_file(registry_json, label="Registry JSON file")
+        return RegistryReader(store=JsonRegistryStore.from_registry_json(registry_path))
+    storage_path = _require_file(storage_config_path, label="Storage config file")
+    return RegistryReader(storage_config=load_storage_config(storage_path))
+
+
 def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     framework_path = _require_file(args.framework, label="Framework file")
-    registry_path = _require_file(args.registry_json, label="Registry JSON file")
     framework = load_framework(framework_path)
-    store = JsonRegistryStore.from_registry_json(registry_path)
-    reader = RegistryReader(store=store)
+    reader = _registry_reader_from_args(args)
     resolution = FormatResolver(reader).resolve(args.format)
     if not resolution.resolved or not resolution.format_doc:
         result = {"resolution": _resolution_summary(resolution)}
@@ -164,10 +172,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze_registry = subparsers.add_parser(
         "analyze-format",
-        help="Resolve one format from a registry JSON export and run deterministic risk analysis.",
+        help="Resolve one format from a registry export or registry-builder store and run deterministic risk analysis.",
     )
     analyze_registry.add_argument("--framework", required=True, help="Path to risk framework JSON.")
-    analyze_registry.add_argument("--registry-json", required=True, help="Path to registry_builder registry.json export.")
+    source = analyze_registry.add_mutually_exclusive_group(required=True)
+    source.add_argument("--registry-json", help="Path to registry_builder registry.json export.")
+    source.add_argument(
+        "--storage-config",
+        help="Path to a registry-builder storage block or full pipeline config containing 'storage'.",
+    )
     analyze_registry.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
     analyze_registry.add_argument("--institution", help="Optional institution ID for local posture analysis.")
     analyze_registry.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
