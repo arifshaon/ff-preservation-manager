@@ -103,6 +103,12 @@ class MongoRegistryStore(RegistryStore):
             "readiness_assessments": [[("run_id", A), ("format_id", A)]],
             "trend_observations": [[("run_id", A), ("format_id", A)]],
             "assessment_changes": [[("created_at", A)], [("format_id", A)], [("change_type", A)]],
+            "criterion_claims": [
+                [("canonical_id", A), ("criterion_id", A)],
+                [("source_id", A), ("mapping_rule_id", A)],
+                [("criteria_version", A), ("mapping_version", A)],
+                [("institution_id", A)],
+            ],
         }
         for collection, collection_indexes in indexes.items():
             coll = self._collection(collection)
