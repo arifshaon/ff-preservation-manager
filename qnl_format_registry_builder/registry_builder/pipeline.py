@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from registry_builder.adapters import resolve_adapter
 from registry_builder.change_detection import compact_change_summary, detect_registry_changes
+from registry_builder.criteria import CriteriaVocabulary, load_criteria
+from registry_builder.criterion_mapping import build_criterion_claims, load_mappings, validate_mappings
 from registry_builder.db import write_sqlite
 from registry_builder.identifier_rules import load_identifier_rules
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
@@ -84,8 +86,6 @@ def _method_profile_metrics(registry) -> dict[str, Any]:
         "direct_method_profile_distribution": dict(sorted(direct_distribution.items())),
         "effective_method_profile_distribution": dict(sorted(effective_distribution.items())),
     }
-    # Backwards-compatible aliases. These now intentionally mean discriminating
-    # profiles only; `generic_preservation` is tracked separately above.
     metrics["average_direct_method_profiles_per_format"] = metrics[
         "average_direct_discriminating_method_profiles_per_format"
     ]
@@ -124,6 +124,60 @@ def _incremental_source_updates_enabled(config: dict[str, Any]) -> bool:
 
 def _storage_config(config: dict[str, Any]) -> dict[str, Any]:
     return dict(config.get("storage") or {"type": "memory"})
+
+
+def _criterion_mapping_config(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get("criterion_mapping") or {}
+    return dict(raw) if isinstance(raw, dict) else {"enabled": bool(raw)}
+
+
+def _criterion_mapping_enabled(config: dict[str, Any]) -> bool:
+    mapping_config = _criterion_mapping_config(config)
+    mode = str(mapping_config.get("mode") or "apply").lower()
+    return bool(mapping_config.get("enabled", False)) and mode not in {"off", "disabled", "none"}
+
+
+def _load_criterion_mapping_inputs(
+    config: dict[str, Any],
+    config_path: str | Path,
+) -> tuple[CriteriaVocabulary, list[dict[str, Any]], dict[str, Any]] | None:
+    if not _criterion_mapping_enabled(config):
+        return None
+    mapping_config = _criterion_mapping_config(config)
+    criteria_path = mapping_config.get("criteria")
+    mappings_path = mapping_config.get("mappings")
+    if not criteria_path:
+        raise ValueError("criterion_mapping.enabled is true but criterion_mapping.criteria is missing")
+    if not mappings_path:
+        raise ValueError("criterion_mapping.enabled is true but criterion_mapping.mappings is missing")
+    criteria = load_criteria(resolve_config_path(config_path, criteria_path))
+    mappings = load_mappings(resolve_config_path(config_path, mappings_path))
+    errors, warnings = validate_mappings(mappings, criteria)
+    if errors:
+        raise ValueError("Invalid criterion mappings: " + "; ".join(errors))
+    metadata = {
+        "enabled": True,
+        "mode": str(mapping_config.get("mode") or "apply"),
+        "criteria_path": str(criteria_path),
+        "mappings_path": str(mappings_path),
+        "criteria_version": criteria.criteria_version,
+        "include_drafts": bool(mapping_config.get("include_drafts", False)),
+        "scope": str(mapping_config.get("scope") or "all"),
+        "validation_warnings": warnings,
+        "mapping_versions": {
+            str(mapping.get("source_id") or mapping.get("source_type") or f"mapping-{idx}"): mapping.get("mapping_version")
+            for idx, mapping in enumerate(mappings, start=1)
+        },
+    }
+    return criteria, mappings, metadata
+
+
+def _criterion_claim_summary(claims: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "claims_generated": len(claims),
+        "claims_by_source": dict(sorted(Counter(str(claim.get("source_id") or claim.get("source_type") or "") for claim in claims).items())),
+        "claims_by_criterion": dict(sorted(Counter(str(claim.get("criterion_id") or "") for claim in claims).items())),
+    }
 
 
 def _source_required(source: dict[str, Any]) -> bool:
@@ -171,14 +225,6 @@ def _run_timestamp_index(store: RegistryStore) -> dict[str, str]:
 
 
 def _latest_completed_source_run_index(store: RegistryStore) -> dict[str, str]:
-    """Return source_id -> latest completed contribution run_id.
-
-    The active evidence contribution for a source is the evidence set from that
-    source's latest successful run. Earlier evidence sets remain preserved as
-    run history and source-record provenance, but they are not duplicated into
-    the current canonical view when a newer contribution from the same source is
-    available.
-    """
     run_index = _run_timestamp_index(store)
     latest: dict[str, tuple[tuple[str, str], str]] = {}
     for run in store.query("runs"):
@@ -203,14 +249,6 @@ def _stored_source_records_for_augmentation(
     current_run_source_ids: set[str],
     identifier_rules: dict[str, dict[str, Any]],
 ) -> list[RawFormatRecord]:
-    """Return stored evidence contributions that can augment this run.
-
-    Source-by-source population works by adding the current run's evidence
-    contribution to the latest successful evidence contributions from sources
-    that did not run this time. A failed optional source contributes no new
-    evidence in this run, so its latest successful contribution remains available
-    for augmentation.
-    """
     run_index = _run_timestamp_index(store)
     latest_source_runs = _latest_completed_source_run_index(store)
     legacy_latest: dict[tuple[str, str], tuple[tuple[str, str], dict[str, Any]]] = {}
@@ -227,8 +265,6 @@ def _stored_source_records_for_augmentation(
                 selected.append(record)
             continue
 
-        # Backwards-compatible fallback for stores populated before run reports
-        # carried source summaries. Use the latest version per source_record_id.
         source_record_id = str(
             record.get("source_record_id")
             or record.get("_storage_key")
@@ -275,6 +311,39 @@ def _empty_source_status(*, offline: bool) -> dict[str, Any]:
     }
 
 
+def _criterion_claim_key(claim: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(claim.get("canonical_id") or claim.get("format_id") or ""),
+        str(claim.get("criterion_id") or ""),
+        str(claim.get("source_id") or claim.get("source_type") or ""),
+        str(claim.get("source_record_id") or ""),
+        str(claim.get("mapping_rule_id") or ""),
+        str(claim.get("institution_id") or ""),
+    )
+
+
+def _persist_criterion_claims(store: RegistryStore, *, run_id: str, criterion_claims: list[dict[str, Any]]) -> None:
+    if not criterion_claims:
+        return
+    active_keys = {_criterion_claim_key(claim) for claim in criterion_claims}
+    managed_rules = {str(claim.get("mapping_rule_id") or "") for claim in criterion_claims if claim.get("mapping_rule_id")}
+    for existing in store.query("criterion_claims"):
+        if existing.get("current", True) is False:
+            continue
+        if str(existing.get("mapping_rule_id") or "") not in managed_rules:
+            continue
+        if _criterion_claim_key(existing) in active_keys:
+            continue
+        superseded = dict(existing)
+        superseded["current"] = False
+        superseded["superseded_by_run_id"] = run_id
+        store.save_criterion_claim(superseded)
+    for claim in criterion_claims:
+        stored = dict(claim)
+        stored.update({"run_id": run_id, "current": True, "last_seen_run_id": run_id})
+        store.save_criterion_claim(stored)
+
+
 def _persist_registry_to_store(
     store: RegistryStore,
     *,
@@ -282,10 +351,10 @@ def _persist_registry_to_store(
     snapshots: list[SourceSnapshot],
     raw_records: list[RawFormatRecord],
     registry: list[CanonicalFormat],
+    criterion_claims: list[dict[str, Any]] | None = None,
     previous_registry: list[dict[str, Any]] | None = None,
     changes: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Persist this run's contribution and the recomputed canonical view."""
     previous_registry = previous_registry or []
     changes = changes or []
     current_ids: set[str] = set()
@@ -354,6 +423,8 @@ def _persist_registry_to_store(
             }
             store.upsert_canonical_format(removed)
 
+    _persist_criterion_claims(store, run_id=run_id, criterion_claims=criterion_claims or [])
+
     for change in changes:
         store.save_assessment_change(change)
 
@@ -364,12 +435,16 @@ def _write_file_exports(
     active_source_records: list[RawFormatRecord],
     snapshots: list[SourceSnapshot],
     report: dict[str, Any],
+    criterion_claims: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     registry_dicts = [fmt.to_dict() for fmt in registry]
     write_jsonl(outdir / "registry.jsonl", registry_dicts)
     write_json(outdir / "registry.json", registry_dicts)
     write_jsonl(outdir / "raw_records.jsonl", [r.to_dict() for r in active_source_records])
     write_json(outdir / "source_snapshots.json", [s.__dict__ for s in snapshots])
+    if criterion_claims is not None:
+        write_jsonl(outdir / "criterion_claims.jsonl", criterion_claims)
+        write_json(outdir / "criterion_claims.json", criterion_claims)
 
     csv_rows = []
     for fmt in registry:
@@ -402,7 +477,7 @@ def _write_file_exports(
     write_sqlite(outdir / "registry.sqlite", registry)
     write_json(outdir / "run_report.json", report)
     write_coverage_report(outdir / "coverage_report.md", registry_dicts, report)
-    return [
+    outputs = [
         "registry.json",
         "registry.jsonl",
         "registry.csv",
@@ -412,6 +487,9 @@ def _write_file_exports(
         "run_report.json",
         "coverage_report.md",
     ]
+    if criterion_claims is not None:
+        outputs.extend(["criterion_claims.json", "criterion_claims.jsonl"])
+    return outputs
 
 
 def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path, *, offline: bool = False) -> dict[str, Any]:
@@ -421,6 +499,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     offline = bool(offline or config.get("offline", False))
     incremental_source_updates = _incremental_source_updates_enabled(config)
     identifier_rules = load_identifier_rules(config.get("identifier_kinds"))
+    criterion_mapping_inputs = _load_criterion_mapping_inputs(config, config_path)
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
     storage_config = _storage_config(config)
@@ -517,6 +596,21 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     warning_counts = validation_warning_counts(warnings)
     method_metrics = _method_profile_metrics(registry)
     registry_dicts = [fmt.to_dict() for fmt in registry]
+
+    criterion_claims: list[dict[str, Any]] = []
+    criterion_mapping_report: dict[str, Any] = {"enabled": False, "claims_generated": 0}
+    if criterion_mapping_inputs is not None:
+        criteria, mappings, criterion_mapping_report = criterion_mapping_inputs
+        active_source_record_dicts = [record.to_dict() for record in active_source_records]
+        criterion_claims = build_criterion_claims(
+            registry_dicts,
+            active_source_record_dicts,
+            mappings,
+            criteria,
+            include_drafts=criterion_mapping_report.get("include_drafts", False),
+        )
+        criterion_mapping_report = criterion_mapping_report | _criterion_claim_summary(criterion_claims)
+
     change_detection = detect_registry_changes(
         previous_registry_view,
         registry_dicts,
@@ -531,6 +625,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         snapshots=all_snapshots,
         raw_records=raw_records,
         registry=registry,
+        criterion_claims=criterion_claims,
         previous_registry=previous_registry_view,
         changes=change_detection.get("changes", []),
     )
@@ -545,6 +640,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         "config_path": str(config_path),
         "offline": offline,
         "incremental_source_updates": incremental_source_updates,
+        "criterion_mapping": criterion_mapping_report,
         "storage": {
             "type": storage_config.get("type", "memory"),
             "path": storage_config.get("path") or storage_config.get("directory") or storage_config.get("root"),
@@ -577,7 +673,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     }
 
     if _exports_enabled(config):
-        report["outputs"] = _write_file_exports(outdir, registry, active_source_records, all_snapshots, report)
+        report["outputs"] = _write_file_exports(outdir, registry, active_source_records, all_snapshots, report, criterion_claims if criterion_mapping_inputs is not None else None)
 
     store.create_run(report)
     return report
@@ -589,6 +685,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     missing_puid = [r for r in institutional if not r.get("identifiers", {}).get("puid")]
     missing_loc = [r for r in institutional if not r.get("identifiers", {}).get("loc")]
     with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
+    criterion_mapping = report.get("criterion_mapping") or {}
     lines = [
         "# Registry Build Report",
         "",
@@ -612,6 +709,8 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Generic preservation baseline count: {report.get('generic_preservation_count', 0)}",
         f"- Average direct discriminating method profiles per format: {report.get('average_direct_discriminating_method_profiles_per_format', 0)}",
         f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
+        f"- Criterion mapping enabled: {criterion_mapping.get('enabled', False)}",
+        f"- Criterion claims generated: {criterion_mapping.get('claims_generated', 0)}",
         "",
         "## Source runs",
         "",
@@ -630,6 +729,22 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
                 f"- {src.get('source_id')}: {src.get('records_extracted')} records from {src.get('snapshots')} snapshot(s); "
                 f"{status}; changed={src.get('snapshots_changed', 0)}, unchanged={src.get('snapshots_unchanged', 0)}, cached={src.get('snapshots_from_cache', 0)}"
             )
+
+    if criterion_mapping.get("enabled"):
+        lines.extend(["", "## Criterion mapping", ""])
+        lines.append(f"- Mode: {criterion_mapping.get('mode')}")
+        lines.append(f"- Criteria version: {criterion_mapping.get('criteria_version')}")
+        lines.append(f"- Include drafts: {criterion_mapping.get('include_drafts', False)}")
+        lines.append(f"- Claims generated: {criterion_mapping.get('claims_generated', 0)}")
+        if criterion_mapping.get("claims_by_criterion"):
+            lines.append("- Claims by criterion:")
+            lines.extend(f"  - {k}: {v}" for k, v in criterion_mapping.get("claims_by_criterion", {}).items())
+        if criterion_mapping.get("claims_by_source"):
+            lines.append("- Claims by source:")
+            lines.extend(f"  - {k}: {v}" for k, v in criterion_mapping.get("claims_by_source", {}).items())
+        if criterion_mapping.get("validation_warnings"):
+            lines.append("- Mapping validation warnings:")
+            lines.extend(f"  - {w}" for w in criterion_mapping.get("validation_warnings", [])[:20])
 
     lines.extend(["", "## Change detection", ""])
     change_detection = report.get("change_detection") or {}
