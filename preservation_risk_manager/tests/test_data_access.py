@@ -62,6 +62,20 @@ def test_registry_reader_gets_canonical_format_by_known_id_field():
     assert reader.get_canonical_format("format/pdf") == {"format_id": "format/pdf", "name": "PDF"}
 
 
+def test_registry_reader_ignores_inactive_canonical_formats():
+    store = FakeStore({
+        "canonical_formats": [
+            {"canonical_id": "fmt-old", "name": "Old", "current": False},
+            {"canonical_id": "fmt-current", "name": "Current", "current": True},
+            {"canonical_id": "fmt-legacy", "name": "Legacy Without Flag"},
+        ]
+    })
+    reader = RegistryReader(store=store)
+
+    assert [row["canonical_id"] for row in reader.list_canonical_formats()] == ["fmt-current", "fmt-legacy"]
+    assert reader.get_canonical_format("fmt-old") is None
+
+
 def test_registry_reader_can_be_created_from_injected_store_factory():
     created = []
 
