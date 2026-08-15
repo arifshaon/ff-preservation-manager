@@ -43,6 +43,35 @@ def test_unverified_spreadsheet_puid_does_not_force_merge_with_pronom():
     assert any(c["kind"] == "puid" and not c["verified"] for c in qnl.identifier_claims)
 
 
+def test_unverified_strong_identifier_blocks_weak_bridge_to_authority():
+    records = [
+        RawFormatRecord(
+            source_id="qnl",
+            source_type="institution_policy_xlsx",
+            name="JFIF 1.02",
+            puids=["fmt/999"],
+            extensions=["jpg"],
+            institution_policy={"institution_id": "qnl", "local_risk_level": "Low Risk"},
+        ),
+        RawFormatRecord(
+            source_id="pronom",
+            source_type="pronom_droid_xml",
+            name="JFIF 1.02",
+            puids=["fmt/44"],
+            extensions=["jpg"],
+        ),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 2
+    qnl = next(x for x in registry if x.canonical_id == "fmt-jfif-1-02")
+    pronom = next(x for x in registry if x.canonical_id == "puid-fmt-44")
+    assert qnl.preferred_name == "JFIF 1.02"
+    assert pronom.preferred_name == "JFIF 1.02"
+    assert any(c["kind"] == "puid" and c["value"] == "fmt/999" and not c["verified"] for c in qnl.identifier_claims)
+
+
 def test_hazard_reconciler_is_wired_into_canonical_format():
     records = [
         RawFormatRecord(
