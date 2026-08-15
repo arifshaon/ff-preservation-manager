@@ -1,0 +1,46 @@
+{
+  "prompt_version": "propose_mapping/v1.0",
+  "negative_rules": [
+    {
+      "id": "no_composite_risk_to_criteria",
+      "reject_when_field_matches": [
+        "risk level",
+        "numeric risk rating",
+        "total numeric risk rating",
+        "overall risk",
+        "hazard band",
+        "risk band",
+        "rating"
+      ],
+      "reason": "Composite risk or hazard conclusions are hazard estimators, not criterion observations."
+    },
+    {
+      "id": "no_action_or_tooling_to_hazard_criteria",
+      "reject_when_field_matches": [
+        "preservation action",
+        "preservation plan",
+        "preferred processing",
+        "preferred tool",
+        "transformation tool",
+        "action",
+        "tooling"
+      ],
+      "reason": "Actions and tooling belong to action/readiness layers, not sustainability or technical hazard criteria."
+    },
+    {
+      "id": "url_presence_not_public_specification",
+      "reject_when": "when_present == public_specification",
+      "reason": "A URL may point to restricted documentation. URL presence can at most infer partial_specification."
+    },
+    {
+      "id": "nara_no_wildcards",
+      "reject_when": "source_type contains nara and from_field contains *",
+      "reason": "NARA rubric questions must be reviewed one-by-one."
+    },
+    {
+      "id": "ai_never_approves",
+      "reject_when": "review_status == approved or decided_by is not null",
+      "reason": "AI may draft mappings only; approved mappings require human decided_by."
+    }
+  ]
+}
