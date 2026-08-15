@@ -8,8 +8,8 @@ This map is the starting point for the documentation. Use it to avoid reading ev
 | --- | --- |
 | New user or operator | `README.md` |
 | Preservation officer reading outputs | `READING_THE_REGISTRY.md` |
-| Administrator configuring sources/storage | `ADAPTER_REFERENCE.md`, `STORAGE_AND_EXPORT_CONFIG.md` |
-| Developer adding an adapter | `ADAPTER_IMPLEMENTATION_GUIDE.md` |
+| Administrator configuring sources/storage | `ADDING_AND_RUNNING_DATA_SOURCES.md`, `ADAPTER_REFERENCE.md`, `STORAGE_AND_EXPORT_CONFIG.md` |
+| Developer adding an adapter | `ADDING_AND_RUNNING_DATA_SOURCES.md`, `ADAPTER_IMPLEMENTATION_GUIDE.md` |
 | Developer changing matching/update logic | `IDENTIFIER_RECONCILIATION.md`, `INCREMENTAL_SOURCE_UPDATES.md` |
 | Maintainer planning future work | `NEXT_STEPS.md` |
 
@@ -17,8 +17,9 @@ This map is the starting point for the documentation. Use it to avoid reading ev
 
 | Need | Read |
 | --- | --- |
-| Understand the project goal and run the default NARA quickstart | `README.md` |
+| Understand the project goal and run the default multi-source quickstart | `README.md` |
 | Navigate all documentation | `docs/DOCUMENTATION_MAP.md` |
+| Add a new data source, choose downloaded-file/JSON/CSV/archive acquisition, or run NARA/PRONOM/LOC individually | `docs/ADDING_AND_RUNNING_DATA_SOURCES.md` |
 | Interpret `registry.csv`, `registry.json`, MongoDB records, hazard fields, review flags, and change events | `docs/READING_THE_REGISTRY.md` |
 | Understand the end-to-end architecture and source-adapter concept | `docs/ARCHITECTURE.md` |
 | Understand source retrieval, cache, offline replay, local files, and fallback logic | `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md` |
@@ -42,6 +43,7 @@ This map is the starting point for the documentation. Use it to avoid reading ev
 | `DOCUMENTATION_MAP.md` | Live | This navigation map. |
 | `ARCHITECTURE.md` | Live | Core design, source-adapter concept, storage/export boundaries. |
 | `READING_THE_REGISTRY.md` | Live | User-facing glossary and examples for preservation officers. |
+| `ADDING_AND_RUNNING_DATA_SOURCES.md` | Live | Practical runbook for adding source adapters, choosing downloaded-file/JSON/CSV/archive acquisition, and running sources together or individually. |
 | `SOURCE_RETRIEVAL_AND_FALLBACKS.md` | Live | Online, cached, offline, local-file, fallback and required/optional behavior. |
 | `INCREMENTAL_SOURCE_UPDATES.md` | Live | Source-by-source augmentation model and active evidence reuse. |
 | `IDENTIFIER_RECONCILIATION.md` | Live | Verified identifier rules and strong-key matching behavior. |
@@ -80,6 +82,9 @@ README.md
 DOCUMENTATION_MAP.md
   -> choose the right document
 
+ADDING_AND_RUNNING_DATA_SOURCES.md
+  -> practical source plug-in and runbook: downloaded file, JSON, CSV, archive, individual runs
+
 READING_THE_REGISTRY.md
   -> understand generated outputs and MongoDB records
 
@@ -112,7 +117,8 @@ The adapter docs have a clean split:
 | Document | Boundary |
 | --- | --- |
 | `ARCHITECTURE.md` | Concept: what a source adapter is and where it fits. |
-| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Build: how to implement a new adapter. |
+| `ADDING_AND_RUNNING_DATA_SOURCES.md` | Runbook: how to plug in and run a source today, including MongoDB configs and acquisition patterns. |
+| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Build: how to implement a new adapter class. |
 | `ADAPTER_REFERENCE.md` | Configure: how existing adapters work. |
 
 ## Naming rules
