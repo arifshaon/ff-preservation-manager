@@ -43,6 +43,13 @@ def _as_iter(value: Any) -> Iterable[Any]:
     return (value,)
 
 
+def _identifier_bucket(format_doc: dict[str, Any], kind: str) -> set[str]:
+    identifiers = format_doc.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        return {_normalize(value) for value in _as_iter(identifiers.get(kind)) if _normalize(value)}
+    return set()
+
+
 def _field_values(format_doc: dict[str, Any], fields: tuple[str, ...]) -> set[str]:
     values: set[str] = set()
     for field in fields:
@@ -52,20 +59,32 @@ def _field_values(format_doc: dict[str, Any], fields: tuple[str, ...]) -> set[st
 
 
 def _extension_values(format_doc: dict[str, Any]) -> set[str]:
-    return {_normalize_extension(value) for value in _field_values(format_doc, ("extensions", "extension", "file_extensions"))}
+    values = {_normalize_extension(value) for value in _field_values(format_doc, ("extensions", "extension", "file_extensions"))}
+    values.update(_normalize_extension(value) for value in _identifier_bucket(format_doc, "extension"))
+    return {value for value in values if value}
+
+
+def _mime_values(format_doc: dict[str, Any]) -> set[str]:
+    values = _field_values(format_doc, ("mime_types", "mime_type", "mimes"))
+    values.update(_identifier_bucket(format_doc, "mime"))
+    return values
 
 
 def _identifier_values(format_doc: dict[str, Any]) -> set[str]:
     values = set()
     for field in ("puids", "loc_ids", "nara_ids", "wikidata_ids"):
         values.update(_field_values(format_doc, (field,)))
-    for identifier in _as_iter(format_doc.get("identifiers")):
-        if not isinstance(identifier, dict):
-            values.add(_normalize(identifier))
-            continue
-        for key in ("value", "id", "identifier", "identifier_value"):
-            if identifier.get(key):
-                values.add(_normalize(identifier[key]))
+    for kind in ("puid", "loc", "nara", "wikidata"):
+        values.update(_identifier_bucket(format_doc, kind))
+    identifiers = format_doc.get("identifiers")
+    if not isinstance(identifiers, dict):
+        for identifier in _as_iter(identifiers):
+            if not isinstance(identifier, dict):
+                values.add(_normalize(identifier))
+                continue
+            for key in ("value", "id", "identifier", "identifier_value"):
+                if identifier.get(key):
+                    values.add(_normalize(identifier[key]))
     return {value for value in values if value}
 
 
@@ -77,11 +96,11 @@ def _candidate_match(format_doc: dict[str, Any], query: str) -> tuple[int, str] 
         return (100, "canonical_id")
     if normalized in _identifier_values(format_doc):
         return (90, "authority_identifier")
-    if normalized in _field_values(format_doc, ("mime_types", "mime_type", "mimes")):
+    if normalized in _mime_values(format_doc):
         return (80, "mime_type")
     if normalized_ext and normalized_ext in _extension_values(format_doc):
         return (70, "extension")
-    if normalized in _field_values(format_doc, ("name", "label", "short_name", "display_name")):
+    if normalized in _field_values(format_doc, ("name", "preferred_name", "label", "short_name", "display_name")):
         return (60, "name")
     if normalized in _field_values(format_doc, ("aliases", "alternative_names")):
         return (50, "alias")
