@@ -35,16 +35,23 @@ _EXTENSION_STOPWORDS = {
     "files",
     "format",
     "formats",
+    "gov",
+    "http",
+    "https",
+    "loc",
     "multiple",
     "n",
     "na",
     "none",
     "not",
     "or",
+    "path",
     "see",
     "unknown",
     "varies",
     "various",
+    "version",
+    "www",
 }
 
 
@@ -66,7 +73,7 @@ def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
 
 def _extension_tokens(value: str) -> list[str]:
     out: list[str] = []
-    for token in re.split(r"[\s,;|]+", value or ""):
+    for token in re.split(r"[\s,;|/]+", value or ""):
         candidate = token.strip().strip('"\'`()[]{}<>')
         candidate = candidate.lstrip(".").rstrip(".:)]}")
         candidate = candidate.lower()
