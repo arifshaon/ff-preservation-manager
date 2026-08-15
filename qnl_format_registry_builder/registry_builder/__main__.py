@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from registry_builder.collision_report import build_collision_report
 from registry_builder.criteria import load_criteria
@@ -14,6 +15,7 @@ from registry_builder.criterion_mapping import (
     validate_mappings,
 )
 from registry_builder.pipeline import run_pipeline
+from registry_builder.storage import create_store
 from registry_builder.validate import validate_registry
 from registry_builder.models import CanonicalFormat
 
@@ -23,6 +25,20 @@ def _load_registry(path: str | Path) -> list[CanonicalFormat]:
     return [CanonicalFormat(**row) for row in rows]
 
 
+def _load_json(path: str | Path) -> dict[str, Any]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Config must contain a JSON object: {path}")
+    return data
+
+
+def _resolve_relative(base: str | Path, candidate: str | Path) -> str:
+    path = Path(candidate)
+    if path.is_absolute():
+        return str(path)
+    return str(Path(base).parent / path)
+
+
 def _write_or_print(result: dict, out: str | None = None) -> None:
     text = json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True)
     if out:
@@ -30,6 +46,51 @@ def _write_or_print(result: dict, out: str | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text + "\n", encoding="utf-8")
     print(text)
+
+
+def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, bool, bool]:
+    if not args.config:
+        missing = [
+            name
+            for name, value in (
+                ("--storage-config", args.storage_config),
+                ("--criteria", args.criteria),
+                ("--mappings", args.mappings),
+            )
+            if not value
+        ]
+        if missing:
+            raise SystemExit("criterion-claims backfill requires --config or " + ", ".join(missing))
+        return (
+            create_store_from_storage_config(args.storage_config),
+            load_criteria(args.criteria),
+            load_mappings(args.mappings),
+            args.out,
+            args.dry_run,
+            args.include_drafts,
+        )
+
+    cfg = _load_json(args.config)
+    storage_config = cfg.get("storage")
+    if not isinstance(storage_config, dict):
+        raise SystemExit("Backfill config must contain a storage object")
+    criteria_path = args.criteria or cfg.get("criteria")
+    mappings_path = args.mappings or cfg.get("mappings")
+    if not criteria_path:
+        raise SystemExit("Backfill config must contain criteria, or pass --criteria")
+    if not mappings_path:
+        raise SystemExit("Backfill config must contain mappings, or pass --mappings")
+    out = args.out if args.out is not None else cfg.get("out")
+    dry_run = bool(args.dry_run or cfg.get("dry_run", False))
+    include_drafts = bool(args.include_drafts or cfg.get("include_drafts", False))
+    return (
+        create_store(storage_config),
+        load_criteria(_resolve_relative(args.config, criteria_path)),
+        load_mappings(_resolve_relative(args.config, mappings_path)),
+        _resolve_relative(args.config, out) if out else None,
+        dry_run,
+        include_drafts,
+    )
 
 
 def main() -> None:
@@ -65,9 +126,10 @@ def main() -> None:
     claims = sub.add_parser("criterion-claims", help="Criterion-claim collection operations")
     claims_sub = claims.add_subparsers(dest="claims_command", required=True)
     claims_backfill = claims_sub.add_parser("backfill", help="Backfill criterion_claims from existing canonical/source records")
-    claims_backfill.add_argument("--storage-config", required=True)
-    claims_backfill.add_argument("--criteria", required=True)
-    claims_backfill.add_argument("--mappings", required=True)
+    claims_backfill.add_argument("--config", help="Mode 2 backfill config containing storage, criteria, mappings and optional output")
+    claims_backfill.add_argument("--storage-config")
+    claims_backfill.add_argument("--criteria")
+    claims_backfill.add_argument("--mappings")
     claims_backfill.add_argument("--dry-run", action="store_true")
     claims_backfill.add_argument("--include-drafts", action="store_true", help="Apply draft mappings too; intended for projection/debug only")
     claims_backfill.add_argument("--out", help="Optional JSON output file")
@@ -108,17 +170,15 @@ def main() -> None:
         if errors:
             raise SystemExit(1)
     elif args.command == "criterion-claims" and args.claims_command == "backfill":
-        store = create_store_from_storage_config(args.storage_config)
-        criteria = load_criteria(args.criteria)
-        mappings = load_mappings(args.mappings)
+        store, criteria, mappings, out, dry_run, include_drafts = _backfill_inputs(args)
         result = backfill_criterion_claims(
             store=store,
             criteria=criteria,
             mappings=mappings,
-            dry_run=args.dry_run,
-            include_drafts=args.include_drafts,
+            dry_run=dry_run,
+            include_drafts=include_drafts,
         )
-        _write_or_print(result, args.out)
+        _write_or_print(result, out)
 
 
 if __name__ == "__main__":
