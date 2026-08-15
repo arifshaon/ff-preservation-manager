@@ -103,6 +103,8 @@ class CanonicalFormat:
         source: str | None = None,
         verified: bool = False,
         source_record_id: str | None = None,
+        confidence: str | None = None,
+        confidence_reason: str | None = None,
     ) -> None:
         if not value:
             return
@@ -120,6 +122,10 @@ class CanonicalFormat:
             "verified": bool(verified),
             "source_record_id": source_record_id,
         }
+        if confidence:
+            claim["confidence"] = confidence
+        if confidence_reason:
+            claim["confidence_reason"] = confidence_reason
         if claim not in self.identifier_claims:
             self.identifier_claims.append(claim)
 
