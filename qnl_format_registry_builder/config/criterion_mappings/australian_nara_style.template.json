@@ -1,0 +1,63 @@
+{
+  "source_type": "australian_preservation_framework",
+  "mapping_version": "YYYY-MM-DD-draft",
+  "criteria_version": "v1",
+  "native_vocabulary": "australian_framework_v1",
+  "mapping_mode": "manual_or_ai_draft",
+  "review_status": "draft",
+  "notes": "Template for a NARA-like external preservation framework using different terminology. Composite source risk remains a hazard estimator; rubric/source-observation fields may map to criterion claims after review.",
+  "excluded_from_criteria": [
+    {
+      "field": "overall_risk_rating",
+      "reason": "Composite conclusion; hazard estimator only."
+    },
+    {
+      "field": "archive_suitability_score",
+      "reason": "Composite conclusion; hazard estimator only."
+    },
+    {
+      "field": "recommended_action",
+      "reason": "Decision/action recommendation, not criterion observation."
+    },
+    {
+      "field": "preferred_tools",
+      "reason": "Readiness/tooling evidence, not sustainability or technical hazard criterion."
+    }
+  ],
+  "maps": [
+    {
+      "id": "australian.disclosure_status.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "native_fields.rubric_answers.disclosure_status",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "open": "public_specification",
+        "partially_open": "partial_specification",
+        "proprietary_documented": "proprietary_documented",
+        "undocumented": "undocumented",
+        "unknown": "unknown"
+      },
+      "rationale": "Example mapping only. Replace native values with values observed by criterion-evidence-audit."
+    },
+    {
+      "id": "australian.external_dependencies.v1",
+      "criterion": "sustainability.external_dependencies",
+      "from_field": "native_fields.rubric_answers.dependency_level",
+      "directness": "explicit",
+      "covers": "partial",
+      "covers_note": "Example assumes software dependencies only. Revise if source includes hardware or institutional capability.",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "none": "none",
+        "minor": "low",
+        "moderate": "moderate",
+        "major": "high",
+        "unknown": "unknown"
+      }
+    }
+  ]
+}
