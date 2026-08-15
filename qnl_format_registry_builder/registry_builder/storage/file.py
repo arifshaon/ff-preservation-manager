@@ -20,6 +20,7 @@ _COLLECTIONS = (
     "readiness_assessments",
     "trend_observations",
     "assessment_changes",
+    "criterion_claims",
 )
 
 
