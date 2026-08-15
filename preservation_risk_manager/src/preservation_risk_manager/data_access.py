@@ -28,6 +28,11 @@ def _matches_filter(row: dict[str, Any], filt: dict[str, Any]) -> bool:
     return True
 
 
+def _is_current(row: dict[str, Any]) -> bool:
+    """Return True unless registry-builder explicitly marked a format inactive."""
+    return row.get("current") is not False
+
+
 def load_storage_config(path: str | Path) -> dict[str, Any]:
     """Load a registry-builder storage config from JSON.
 
@@ -113,12 +118,12 @@ class RegistryReader:
         return list(self.store.query(collection, filt or {}))
 
     def list_canonical_formats(self) -> list[dict[str, Any]]:
-        return self.query("canonical_formats", {})
+        return [row for row in self.query("canonical_formats", {}) if _is_current(row)]
 
     def get_canonical_format(self, canonical_id: str) -> dict[str, Any] | None:
-        """Return one canonical format by known ID field, or None."""
+        """Return one current canonical format by known ID field, or None."""
         for field in ("canonical_id", "format_id", "id"):
-            rows = self.query("canonical_formats", {field: canonical_id})
+            rows = [row for row in self.query("canonical_formats", {field: canonical_id}) if _is_current(row)]
             if rows:
                 return rows[0]
         return None
