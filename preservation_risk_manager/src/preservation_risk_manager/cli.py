@@ -165,7 +165,7 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
         include_unapproved=bool(args.include_unapproved),
     )
     answer_document = derive_answers(framework, evidence_pack)
-    analysis = score_answers(framework, answer_document["answers"])
+    analysis = score_answers(framework, answer_document.get("scoring_answers") or answer_document["answers"])
     result: dict[str, Any] = {
         "status": "ok",
         "resolution": _resolution_summary(resolution),
