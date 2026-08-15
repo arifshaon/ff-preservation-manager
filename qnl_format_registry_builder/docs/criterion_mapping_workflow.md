@@ -12,19 +12,49 @@ Readiness is capability.
 Framework binding is judgement.
 ```
 
-## Existing data
+The registry builder now supports three operating modes:
 
-Do not wipe MongoDB to adopt this layer. The first path is enrichment/backfill:
+| Mode | Use when | Command |
+|---|---|---|
+| 1. Registry build only | Current behaviour; source ingest, reconciliation, hazard assessment, no criterion mapping | `python -m registry_builder run --config ...` with no `criterion_mapping` block |
+| 2. Mapping/backfill only | Source data already exists and mappings are added or corrected later | `python -m registry_builder criterion-claims backfill --config ...` |
+| 3. Integrated build + mapping | Normal production path once mappings exist | `python -m registry_builder run --config ...` with `criterion_mapping.enabled=true` |
+
+Mode 2 is an enrichment/repair path. Mode 3 is the efficient production path: mappings are applied in memory after `reconcile()` and before persistence, so the pipeline does not write records and then reread Mongo just to generate vocabulary claims.
+
+## Mode 1 — registry build only
+
+This is the existing pipeline behaviour. Use it when onboarding a new source before mappings exist.
 
 ```powershell
-python -m registry_builder criterion-evidence-audit `
-  --storage-config config\storage.mongodb.example.json `
-  --criteria config\criteria\v1.json `
-  --mappings config\criterion_mappings `
-  --out audit\current_registry_evidence.json
+python -m registry_builder run `
+  --config config\sources.example.json `
+  --workdir work `
+  --out out
 ```
 
-Then backfill approved mappings into the new collection:
+For NARA or a NARA-like source, this is already useful because source identifiers and composite risk/rating fields participate in reconciliation and hazard assessment. The source does not need criterion mappings to be useful as a hazard estimator.
+
+## Mode 2 — existing data backfill
+
+Do not wipe MongoDB to adopt this layer. Use the configured backfill path when mappings are added after source data already exists.
+
+Dry run:
+
+```powershell
+python -m registry_builder criterion-claims backfill `
+  --config config\criterion-claims-backfill.mongodb.example.json `
+  --dry-run
+```
+
+Write claims:
+
+```powershell
+python -m registry_builder criterion-claims backfill `
+  --config config\criterion-claims-backfill.mongodb.example.json
+```
+
+The same command still supports explicit paths:
 
 ```powershell
 python -m registry_builder criterion-claims backfill `
@@ -34,15 +64,53 @@ python -m registry_builder criterion-claims backfill `
   --out audit\criterion_claims_backfill.json
 ```
 
-Use `--dry-run` first when reviewing a new mapping:
+Backfill reads existing `canonical_formats` and `source_records`, writes `criterion_claims`, and does not reacquire NARA, PRONOM, LOC, or QNL source data.
+
+## Mode 3 — integrated build with mapping
+
+Use this once mappings are approved. Add this block to a pipeline config:
+
+```json
+"criterion_mapping": {
+  "enabled": true,
+  "mode": "apply",
+  "criteria": "criteria/v1.json",
+  "mappings": "criterion_mappings",
+  "include_drafts": false,
+  "scope": "all"
+}
+```
+
+Then run the normal pipeline:
 
 ```powershell
-python -m registry_builder criterion-claims backfill `
+python -m registry_builder run `
+  --config config\sources.criterion-mapping.mongodb.example.json `
+  --workdir work `
+  --out out
+```
+
+Internally the order is:
+
+```text
+acquire/extract -> normalize -> reconcile -> method profiles -> criterion mapping -> persist -> export
+```
+
+This means `criterion_claims` are generated from the active in-memory source records and reconciled canonical formats before persistence. Exports include `criterion_claims.json` and `criterion_claims.jsonl` when integrated mapping is enabled.
+
+## Audit before mapping
+
+Use the read-only audit before approving mappings, especially for NARA rubric questions and new NARA-like sources:
+
+```powershell
+python -m registry_builder criterion-evidence-audit `
   --storage-config config\storage.mongodb.example.json `
   --criteria config\criteria\v1.json `
   --mappings config\criterion_mappings `
-  --dry-run
+  --out audit\current_registry_evidence.json
 ```
+
+The audit tells you what fields and values actually exist, and projects coverage when mappings are supplied.
 
 ## Validate mappings
 
