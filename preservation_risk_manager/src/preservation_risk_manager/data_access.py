@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from preservation_risk_manager.errors import PreservationRiskManagerError
@@ -17,6 +19,39 @@ class RegistryStore(Protocol):
 
 
 StoreFactory = Callable[[dict[str, Any]], RegistryStore]
+
+
+def _matches_filter(row: dict[str, Any], filt: dict[str, Any]) -> bool:
+    for key, expected in (filt or {}).items():
+        if row.get(key) != expected:
+            return False
+    return True
+
+
+class JsonRegistryStore:
+    """Read a registry JSON export through the RegistryStore query contract."""
+
+    def __init__(self, collections: dict[str, list[dict[str, Any]]]) -> None:
+        self.collections = collections
+
+    @classmethod
+    def from_registry_json(cls, path: str | Path) -> "JsonRegistryStore":
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            canonical_formats = [item for item in data if isinstance(item, dict)]
+        elif isinstance(data, dict):
+            rows = data.get("canonical_formats") or data.get("formats") or data.get("registry") or []
+            if not isinstance(rows, list):
+                raise RegistryAccessError(f"Registry JSON {path} does not contain a canonical format list")
+            canonical_formats = [item for item in rows if isinstance(item, dict)]
+        else:
+            raise RegistryAccessError(f"Registry JSON {path} must be a list or object")
+        return cls({"canonical_formats": canonical_formats})
+
+    def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        rows = self.collections.get(collection, [])
+        filt = filt or {}
+        return [row for row in rows if _matches_filter(row, filt)]
 
 
 def create_store_from_registry_builder(storage_config: dict[str, Any]) -> RegistryStore:
