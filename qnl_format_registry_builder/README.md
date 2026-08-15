@@ -73,6 +73,8 @@ LOC    -> FDD XML sustainability/evidence records
 
 NARA is required in the sample config. PRONOM and LOC are enabled but optional, so a temporary network or upstream issue is recorded in `run_report.json` without destroying the baseline run.
 
+Full PRONOM acquisition uses one GitHub archive snapshot and extracts JSON records from it. It should not create thousands of per-record source snapshot files.
+
 ```bash
 python -m registry_builder run \
   --config config/sources.example.json \
@@ -91,12 +93,6 @@ output/registry.json
 
 The exact count depends on the pinned NARA release and the current PRONOM/LOC data. The run should produce a real external-evidence registry, not a two-record toy example.
 
-For scheduled or repeated runs that use PRONOM's GitHub tree, set a `GITHUB_TOKEN` to reduce GitHub API rate-limit risk:
-
-```bash
-GITHUB_TOKEN=<token>
-```
-
 Read the outputs with:
 
 ```text
@@ -110,6 +106,8 @@ docs/READING_THE_REGISTRY.md
 ```
 
 Working/cache directory. Source snapshots are stored under `work/snapshots/<source_id>/` with hashes so acquisition is auditable and replayable.
+
+For large bundled sources such as PRONOM and LOC, the snapshot should be one ZIP/archive, not thousands of individual files.
 
 ```text
 --out output
