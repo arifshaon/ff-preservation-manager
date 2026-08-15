@@ -114,11 +114,48 @@ class ScoreBand:
 
 
 @dataclass(frozen=True)
+class RiskScale:
+    direction: str
+    bands: tuple[ScoreBand, ...]
+    min_completeness_for_band: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], *, framework_id: str) -> "RiskScale":
+        if not isinstance(data, dict):
+            raise FrameworkError(f"Framework {framework_id} must define a scale object")
+        direction = str(data.get("direction") or "").strip()
+        if direction not in {"higher_is_risk", "lower_is_risk"}:
+            raise FrameworkError(
+                f"Framework {framework_id} scale.direction must be 'higher_is_risk' or 'lower_is_risk'"
+            )
+        bands_data = data.get("bands")
+        if not isinstance(bands_data, list) or not bands_data:
+            raise FrameworkError(f"Framework {framework_id} scale.bands must define at least one score band")
+        bands = tuple(ScoreBand.from_dict(band) for band in bands_data)
+        _validate_score_bands(bands)
+        try:
+            min_completeness = float(data["min_completeness_for_band"])
+        except KeyError as exc:
+            raise FrameworkError(
+                f"Framework {framework_id} scale is missing required field: min_completeness_for_band"
+            ) from exc
+        except (TypeError, ValueError) as exc:
+            raise FrameworkError(
+                f"Framework {framework_id} scale.min_completeness_for_band must be numeric"
+            ) from exc
+        if not 0 <= min_completeness <= 1:
+            raise FrameworkError(
+                f"Framework {framework_id} scale.min_completeness_for_band must be between 0 and 1"
+            )
+        return cls(direction=direction, bands=bands, min_completeness_for_band=min_completeness)
+
+
+@dataclass(frozen=True)
 class RiskFramework:
     framework_id: str
     version: str
     questions: tuple[Question, ...]
-    score_bands: tuple[ScoreBand, ...]
+    scale: RiskScale
     label: str | None = None
     unknown_answer_id: str = "unknown"
 
@@ -134,18 +171,29 @@ class RiskFramework:
         question_ids = [question.id for question in questions]
         if len(question_ids) != len(set(question_ids)):
             raise FrameworkError(f"Framework {framework_id} has duplicate question IDs")
-        score_bands = tuple(ScoreBand.from_dict(band) for band in data.get("score_bands", data.get("bands", [])))
-        if not score_bands:
-            raise FrameworkError(f"Framework {framework_id} must define score_bands")
-        _validate_score_bands(score_bands)
+        if "scale" not in data:
+            raise FrameworkError(f"Framework {framework_id} must define scale")
+        scale = RiskScale.from_dict(data["scale"], framework_id=framework_id)
         return cls(
             framework_id=framework_id,
             version=version,
             label=data.get("label"),
             questions=questions,
-            score_bands=score_bands,
+            scale=scale,
             unknown_answer_id=str(data.get("unknown_answer_id") or "unknown"),
         )
+
+    @property
+    def score_bands(self) -> tuple[ScoreBand, ...]:
+        return self.scale.bands
+
+    @property
+    def scale_direction(self) -> str:
+        return self.scale.direction
+
+    @property
+    def min_completeness_for_band(self) -> float:
+        return self.scale.min_completeness_for_band
 
     def question_by_id(self, question_id: str) -> Question:
         for question in self.questions:
@@ -154,7 +202,7 @@ class RiskFramework:
         raise FrameworkError(f"Framework {self.framework_id} has no question ID: {question_id}")
 
     def band_for_score(self, score: float) -> str:
-        for band in self.score_bands:
+        for band in self.scale.bands:
             if band.contains(score):
                 return band.band
         raise FrameworkError(f"Score {score} does not fit any band in framework {self.framework_id}")
