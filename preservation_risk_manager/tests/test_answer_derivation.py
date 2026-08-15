@@ -6,7 +6,11 @@ def _framework():
     return RiskFramework.from_dict({
         "framework_id": "example",
         "version": "1",
-        "score_bands": [{"band": "Low", "min_score": 0, "max_score": 10}],
+        "scale": {
+            "direction": "higher_is_risk",
+            "min_completeness_for_band": 0.5,
+            "bands": [{"band": "Low", "min_score": 0, "max_score": 10}],
+        },
         "questions": [
             {
                 "id": "q_disclosure",
