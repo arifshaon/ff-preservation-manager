@@ -14,6 +14,13 @@ from preservation_risk_manager.posture import compute_local_risk_posture
 from preservation_risk_manager.scoring import score_answers
 
 
+class CliFailure(Exception):
+    def __init__(self, result: dict[str, Any], *, exit_code: int = 2) -> None:
+        super().__init__(result.get("status", "cli_failure"))
+        self.result = result
+        self.exit_code = exit_code
+
+
 def _require_file(path: str | Path, *, label: str) -> Path:
     candidate = Path(path).expanduser()
     if candidate.is_file():
@@ -57,6 +64,7 @@ def _analysis_result(
     framework = load_framework(_require_file(framework_path, label="Framework file"))
     analysis = score_answers(framework, _answer_map(answer_document))
     result: dict[str, Any] = {
+        "status": "ok",
         "format": evidence_pack.get("format"),
         "scope": evidence_pack.get("scope", "global"),
         "evidence_hash": evidence_hash(evidence_pack),
@@ -92,11 +100,32 @@ def analyze_fixture(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _resolution_message(resolution) -> str | None:
+    if resolution.status == "ambiguous":
+        noun = {
+            "extension": "Extension",
+            "mime_type": "MIME type",
+            "authority_identifier": "Identifier",
+            "verified_authority_identifier": "Verified identifier",
+            "name": "Name",
+            "alias": "Alias",
+            "canonical_id": "Canonical ID",
+        }.get(resolution.match_type or "", "Query")
+        return (
+            f"{noun} '{resolution.query}' matches {len(resolution.matches)} formats; "
+            "specify a canonical ID or PUID."
+        )
+    if resolution.status == "not_found":
+        return f"No format matched '{resolution.query}'."
+    return None
+
+
 def _resolution_summary(resolution) -> dict[str, Any]:
-    return {
+    summary = {
         "query": resolution.query,
         "status": resolution.status,
         "match_type": resolution.match_type,
+        "match_count": len(resolution.matches),
         "matches": [
             {
                 "canonical_id": match.get("canonical_id") or match.get("format_id") or match.get("id"),
@@ -105,6 +134,10 @@ def _resolution_summary(resolution) -> dict[str, Any]:
             for match in resolution.matches
         ],
     }
+    message = _resolution_message(resolution)
+    if message:
+        summary["message"] = message
+    return summary
 
 
 def _registry_reader_from_args(args: argparse.Namespace) -> RegistryReader:
@@ -123,8 +156,8 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     reader = _registry_reader_from_args(args)
     resolution = FormatResolver(reader).resolve(args.format)
     if not resolution.resolved or not resolution.format_doc:
-        result = {"resolution": _resolution_summary(resolution)}
-        raise SystemExit(json.dumps(result, indent=2, sort_keys=True))
+        result = {"status": resolution.status, "resolution": _resolution_summary(resolution)}
+        raise CliFailure(result, exit_code=2)
 
     evidence_pack = build_evidence_pack(
         resolution.format_doc,
@@ -134,6 +167,7 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     answer_document = derive_answers(framework, evidence_pack)
     analysis = score_answers(framework, answer_document["answers"])
     result: dict[str, Any] = {
+        "status": "ok",
         "resolution": _resolution_summary(resolution),
         "format": evidence_pack.get("format"),
         "scope": evidence_pack.get("scope", "global"),
@@ -197,5 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         result = args.func(args)
     except FileNotFoundError as exc:
         parser.exit(2, f"error: {exc}\n")
+    except CliFailure as exc:
+        print(json.dumps(exc.result, indent=2, sort_keys=True))
+        return exc.exit_code
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
