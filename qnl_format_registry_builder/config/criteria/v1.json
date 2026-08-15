@@ -1,0 +1,122 @@
+{
+  "criteria_version": "v1",
+  "criteria": {
+    "sustainability.disclosure": {
+      "kind": "ordinal",
+      "values": [
+        "public_specification",
+        "partial_specification",
+        "proprietary_documented",
+        "undocumented"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.adoption": {
+      "kind": "ordinal",
+      "values": [
+        "very_high",
+        "high",
+        "moderate",
+        "low",
+        "negligible"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.transparency_readability": {
+      "kind": "ordinal",
+      "values": [
+        "transparent",
+        "partially_transparent",
+        "opaque",
+        "requires_specialist_tools"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.self_documentation": {
+      "kind": "ordinal",
+      "values": [
+        "self_describing",
+        "partially_self_describing",
+        "externally_documented",
+        "not_self_describing"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.external_dependencies": {
+      "kind": "ordinal",
+      "values": [
+        "none",
+        "low",
+        "moderate",
+        "high"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.ip_licensing": {
+      "kind": "ordinal",
+      "values": [
+        "no_known_barrier",
+        "limited_or_unclear",
+        "known_constraint"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.tpm_encryption": {
+      "kind": "ordinal",
+      "values": [
+        "none_or_not_applicable",
+        "possible",
+        "known_constraint"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.container_complexity": {
+      "kind": "nominal",
+      "values": [
+        "flat",
+        "compound",
+        "wrapper",
+        "complex_domain_structure"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.compression": {
+      "kind": "nominal",
+      "values": [
+        "none_or_standard",
+        "tool_supported",
+        "specialist_or_untested"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.accessibility_features": {
+      "kind": "nominal",
+      "values": [
+        "supports_accessibility_features",
+        "not_applicable",
+        "requires_format_specific_strategy"
+      ],
+      "null_value": "unknown"
+    },
+    "source.currency": {
+      "kind": "temporal",
+      "unit": "days_since_update",
+      "null_value": "unknown"
+    }
+  },
+  "reconciliation": {
+    "defaults": {
+      "policy": "highest_directness_then_independence",
+      "on_disagreement": "use_reconciled",
+      "tolerance": 1,
+      "escalate_when": {
+        "distance": ">=2"
+      }
+    },
+    "overrides": {
+      "technical.container_complexity": {
+        "tolerance": 0
+      }
+    }
+  }
+}
