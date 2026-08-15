@@ -1,0 +1,51 @@
+{
+  "scope": "institution",
+  "institution_id": "qnl",
+  "format": {
+    "format_id": "fmt/pdf",
+    "label": "Portable Document Format",
+    "puids": ["fmt/18"],
+    "extensions": ["pdf"],
+    "mime_types": ["application/pdf"],
+    "identifiers": [],
+    "loc_ids": [],
+    "nara_ids": []
+  },
+  "global_evidence": [
+    {
+      "claim_id": "loc-pdf-disclosure",
+      "source_id": "loc_fdd",
+      "criterion_id": "sustainability.disclosure",
+      "value": "openly_documented"
+    }
+  ],
+  "migration_pathway_evidence": [
+    {
+      "pathway_id": "authority-pdf-to-pdfa",
+      "source_id": "authority_source",
+      "evidence_type": "authority_asserted_pathway",
+      "from_format": "fmt/pdf",
+      "to_format": "fmt/pdfa"
+    }
+  ],
+  "institution_evidence": [
+    {
+      "claim_id": "qnl-pdf-workflow",
+      "institution_id": "qnl",
+      "criterion_id": "institution.workflow_integration",
+      "value": "covered",
+      "review_status": "approved"
+    }
+  ],
+  "local_migration_readiness": [
+    {
+      "readiness_id": "qnl-pdf-to-pdfa-tested",
+      "institution_id": "qnl",
+      "from_format": "fmt/pdf",
+      "to_format": "fmt/pdfa",
+      "readiness_status": "tested",
+      "review_status": "approved"
+    }
+  ],
+  "evidence_hash": "computed-by-build_evidence_pack"
+}
