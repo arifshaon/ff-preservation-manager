@@ -80,11 +80,10 @@
       "type": "pronom_registry",
       "enabled": true,
       "required": false,
-      "retrieval_mode": "github_json",
-      "github_tree_url": "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1",
-      "raw_base_url": "https://raw.githubusercontent.com/nationalarchives/pronom/develop",
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
       "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
-      "notes": "Default identity-enrichment source. It verifies PUIDs from the public PRONOM GitHub JSON dataset. Optional so a GitHub/network issue is reported without destroying a NARA baseline run. Set GITHUB_TOKEN for more reliable scheduled runs."
+      "notes": "Default identity-enrichment source. Full PRONOM runs snapshot one GitHub archive and extract JSON records from it, avoiding thousands of per-record snapshot files. Optional so a GitHub/network issue is reported without destroying a NARA baseline run."
     },
     {
       "id": "loc_fdd_xml",
