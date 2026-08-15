@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from preservation_risk_manager.cli import main
 
 
@@ -121,3 +123,21 @@ def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, cap
     assert output["analysis"]["analysed_band"] is None
     assert output["local_risk_posture"] == "Needs Assessment"
     assert output["derived_answers"]["derivation"]["q_disclosure"]["status"] == "missing_evidence"
+
+
+def test_analyze_format_missing_registry_json_reports_clean_error(tmp_path, capsys):
+    framework_path = tmp_path / "framework.json"
+    framework_path.write_text(json.dumps(FRAMEWORK), encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([
+            "analyze-format",
+            "--framework", str(framework_path),
+            "--registry-json", str(tmp_path / "missing-registry.json"),
+            "--format", "fmt/18",
+        ])
+
+    assert exc_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "Registry JSON file not found" in captured.err
+    assert "Traceback" not in captured.err
