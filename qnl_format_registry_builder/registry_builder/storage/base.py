@@ -90,6 +90,17 @@ class RegistryStore(ABC):
         ))
         self.upsert("format_evidence_claims", key or None, record)
 
+    def save_criterion_claim(self, record: dict[str, Any]) -> None:
+        key = "|".join(str(x or "") for x in (
+            record.get("canonical_id") or record.get("format_id"),
+            record.get("criterion_id"),
+            record.get("source_id") or record.get("source_type"),
+            record.get("source_record_id"),
+            record.get("mapping_rule_id"),
+            record.get("institution_id"),
+        ))
+        self.upsert("criterion_claims", key or None, record)
+
     def save_hazard_assessment(self, record: dict[str, Any]) -> None:
         key = "|".join(str(x or "") for x in (record.get("run_id"), record.get("format_id") or record.get("canonical_id")))
         self.upsert("hazard_assessments", key or None, record)
