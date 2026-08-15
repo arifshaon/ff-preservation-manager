@@ -62,10 +62,24 @@ class PronomRegistryAdapter(SourceAdapter):
 
     type_name = "pronom_registry"
 
+    def _progress_enabled(self) -> bool:
+        return bool(self.config.get("progress", True))
+
+    def _progress_interval(self) -> int:
+        try:
+            return max(1, int(self.config.get("progress_interval", 100)))
+        except (TypeError, ValueError):
+            return 100
+
+    def _progress(self, message: str) -> None:
+        if self._progress_enabled():
+            print(f"[pronom_registry] {message}", flush=True)
+
     def _uris_from_tree(self) -> list[str]:
         tree_url = self.config.get("github_tree_url") or self.config.get("tree_url")
         if not tree_url:
             return []
+        self._progress(f"Reading GitHub tree: {tree_url}")
         if self.offline:
             cached = self._cached_snapshot(uri=tree_url, suffix=".json", note="retrieval_mode=github_json_tree")
             if not cached:
@@ -73,9 +87,12 @@ class PronomRegistryAdapter(SourceAdapter):
                     f"Offline mode requested but no cached PRONOM tree snapshot exists for {tree_url}"
                 )
             data = Path(cached.local_path).read_bytes()
+            self._progress("Using cached PRONOM tree snapshot")
         else:
             tree_snapshot = self.acquire_uri_snapshot(tree_url, suffix=".json", note="retrieval_mode=github_json_tree")
             data = Path(tree_snapshot.local_path).read_bytes()
+            status = "changed" if tree_snapshot.changed else "unchanged"
+            self._progress(f"GitHub tree snapshot acquired ({status})")
         raw_base_url = self.config.get("raw_base_url", DEFAULT_PRONOM_RAW_BASE)
         include_paths = tuple(self.config.get("include_paths") or DEFAULT_INCLUDE_PATHS)
         tree = json.loads(data.decode("utf-8"))
@@ -87,6 +104,7 @@ class PronomRegistryAdapter(SourceAdapter):
             if not any(path.startswith(prefix) for prefix in include_paths):
                 continue
             uris.append(f"{raw_base_url.rstrip('/')}/{path}")
+        self._progress(f"Tree resolved to {len(uris)} PRONOM JSON records")
         return uris
 
     def _uris(self) -> list[str]:
@@ -103,18 +121,30 @@ class PronomRegistryAdapter(SourceAdapter):
         max_records = self.config.get("max_records")
         deduped = list(dict.fromkeys(uris))
         if max_records is not None:
-            return deduped[: int(max_records)]
+            limited = deduped[: int(max_records)]
+            self._progress(f"Applying max_records={max_records}; acquiring {len(limited)} of {len(deduped)} records")
+            return limited
         return deduped
 
     def acquire(self) -> list[SourceSnapshot]:
-        return [
-            self.acquire_uri_snapshot(uri, suffix=".json", note="retrieval_mode=github_json")
-            for uri in self._uris()
-        ]
+        uris = self._uris()
+        total = len(uris)
+        interval = self._progress_interval()
+        self._progress(f"Acquiring {total} PRONOM JSON records")
+        snapshots: list[SourceSnapshot] = []
+        for index, uri in enumerate(uris, start=1):
+            snapshots.append(self.acquire_uri_snapshot(uri, suffix=".json", note="retrieval_mode=github_json"))
+            if index == 1 or index % interval == 0 or index == total:
+                self._progress(f"Acquired {index}/{total} PRONOM JSON records")
+        return snapshots
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         records: list[RawFormatRecord] = []
-        for snap in snapshots:
+        total = len(snapshots)
+        interval = self._progress_interval()
+        if total:
+            self._progress(f"Extracting {total} PRONOM snapshots")
+        for index, snap in enumerate(snapshots, start=1):
             record = json.loads(Path(snap.local_path).read_text(encoding="utf-8"))
             puid = _first_identifier(record, "PUID")
             if not puid:
@@ -153,4 +183,6 @@ class PronomRegistryAdapter(SourceAdapter):
                 }],
                 raw={"snapshot_sha256": snap.sha256, "record": record},
             ))
+            if index == 1 or index % interval == 0 or index == total:
+                self._progress(f"Extracted {index}/{total} PRONOM snapshots")
         return records
