@@ -5,6 +5,14 @@ import json
 from pathlib import Path
 
 from registry_builder.collision_report import build_collision_report
+from registry_builder.criteria import load_criteria
+from registry_builder.criterion_evidence_audit import run_criterion_evidence_audit
+from registry_builder.criterion_mapping import (
+    backfill_criterion_claims,
+    create_store_from_storage_config,
+    load_mappings,
+    validate_mappings,
+)
 from registry_builder.pipeline import run_pipeline
 from registry_builder.validate import validate_registry
 from registry_builder.models import CanonicalFormat
@@ -13,6 +21,15 @@ from registry_builder.models import CanonicalFormat
 def _load_registry(path: str | Path) -> list[CanonicalFormat]:
     rows = json.loads(Path(path).read_text(encoding="utf-8"))
     return [CanonicalFormat(**row) for row in rows]
+
+
+def _write_or_print(result: dict, out: str | None = None) -> None:
+    text = json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True)
+    if out:
+        path = Path(out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text + "\n", encoding="utf-8")
+    print(text)
 
 
 def main() -> None:
@@ -32,6 +49,29 @@ def main() -> None:
     collision.add_argument("--registry", required=True)
     collision.add_argument("--sample-limit", type=int, default=50)
 
+    audit = sub.add_parser("criterion-evidence-audit", help="Read-only audit of source fields and projected criterion-claim coverage")
+    audit.add_argument("--storage-config", required=True, help="Registry-builder storage block or full pipeline config containing storage")
+    audit.add_argument("--criteria", help="Neutral criteria vocabulary JSON")
+    audit.add_argument("--mappings", help="Mapping file or directory for projected coverage")
+    audit.add_argument("--source", help="Optional source_id or source_type filter")
+    audit.add_argument("--out", help="Optional JSON output file")
+
+    mapping = sub.add_parser("mapping", help="Mapping configuration operations")
+    mapping_sub = mapping.add_subparsers(dest="mapping_command", required=True)
+    mapping_validate = mapping_sub.add_parser("validate", help="Validate criterion mapping config(s)")
+    mapping_validate.add_argument("--criteria", required=True)
+    mapping_validate.add_argument("--mappings", required=True)
+
+    claims = sub.add_parser("criterion-claims", help="Criterion-claim collection operations")
+    claims_sub = claims.add_subparsers(dest="claims_command", required=True)
+    claims_backfill = claims_sub.add_parser("backfill", help="Backfill criterion_claims from existing canonical/source records")
+    claims_backfill.add_argument("--storage-config", required=True)
+    claims_backfill.add_argument("--criteria", required=True)
+    claims_backfill.add_argument("--mappings", required=True)
+    claims_backfill.add_argument("--dry-run", action="store_true")
+    claims_backfill.add_argument("--include-drafts", action="store_true", help="Apply draft mappings too; intended for projection/debug only")
+    claims_backfill.add_argument("--out", help="Optional JSON output file")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -49,6 +89,36 @@ def main() -> None:
         print(json.dumps(report, indent=2, ensure_ascii=False))
         if report.get("status") == "error":
             raise SystemExit(1)
+    elif args.command == "criterion-evidence-audit":
+        store = create_store_from_storage_config(args.storage_config)
+        criteria = load_criteria(args.criteria) if args.criteria else None
+        report = run_criterion_evidence_audit(
+            store,
+            criteria=criteria,
+            mappings_path=args.mappings,
+            source=args.source,
+        )
+        _write_or_print(report, args.out)
+    elif args.command == "mapping" and args.mapping_command == "validate":
+        criteria = load_criteria(args.criteria)
+        mappings = load_mappings(args.mappings)
+        errors, warnings = validate_mappings(mappings, criteria)
+        result = {"status": "error" if errors else "ok", "errors": errors, "warnings": warnings}
+        _write_or_print(result)
+        if errors:
+            raise SystemExit(1)
+    elif args.command == "criterion-claims" and args.claims_command == "backfill":
+        store = create_store_from_storage_config(args.storage_config)
+        criteria = load_criteria(args.criteria)
+        mappings = load_mappings(args.mappings)
+        result = backfill_criterion_claims(
+            store=store,
+            criteria=criteria,
+            mappings=mappings,
+            dry_run=args.dry_run,
+            include_drafts=args.include_drafts,
+        )
+        _write_or_print(result, args.out)
 
 
 if __name__ == "__main__":
