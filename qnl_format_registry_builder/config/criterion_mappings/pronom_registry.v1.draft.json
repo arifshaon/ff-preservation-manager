@@ -1,0 +1,61 @@
+{
+  "source_type": "pronom_registry",
+  "mapping_version": "2026-08-15-draft",
+  "criteria_version": "v1",
+  "native_vocabulary": "pronom_github_json",
+  "mapping_mode": "manual_draft",
+  "review_status": "draft",
+  "notes": "Draft mapping scaffold. Validate against audit output before approving. formatRisk is intentionally excluded until its meaning and coverage are profiled.",
+  "excluded_from_criteria": [
+    {
+      "field": "formatRisk",
+      "reason": "Field name suggests risk, but PRONOM is primarily an identification registry. Profile distinct values and coverage before mapping. Do not treat as a hazard criterion."
+    }
+  ],
+  "maps": [
+    {
+      "id": "pronom.disclosure.from_format_disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_collection": "evidence",
+      "from_field": "format_disclosure",
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "Full": "public_specification",
+        "full": "public_specification",
+        "Partial": "partial_specification",
+        "partial": "partial_specification",
+        "None": "undocumented",
+        "none": "undocumented",
+        "Unknown": "unknown",
+        "unknown": "unknown"
+      },
+      "rationale": "Use only after audit confirms PRONOM formatDisclosure value semantics and coverage."
+    },
+    {
+      "id": "pronom.currency.from_last_updated_date.v1",
+      "criterion": "source.currency",
+      "from_collection": "evidence",
+      "from_field": "last_updated_date",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "transform": "days_since_date",
+      "rationale": "Last updated date is source currency evidence, not sustainability risk scoring."
+    },
+    {
+      "id": "pronom.disclosure.from_specification_identifier_presence.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "urls.pronom",
+      "directness": "inferred",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "when_present": "partial_specification",
+      "confidence_reason": "A PRONOM URL indicates registry documentation exists, but does not prove open public specification."
+    }
+  ]
+}
