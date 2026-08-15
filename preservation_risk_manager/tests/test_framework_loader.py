@@ -12,11 +12,15 @@ VALID_FRAMEWORK = {
     "framework_id": "qnl_sustainability_fixture",
     "version": "0.1.0",
     "unknown_answer_id": "unknown",
-    "score_bands": [
-        {"band": "Low", "min_score": 0, "max_score": 3},
-        {"band": "Moderate", "min_score": 4, "max_score": 7},
-        {"band": "High", "min_score": 8, "max_score": 20},
-    ],
+    "scale": {
+        "direction": "higher_is_risk",
+        "min_completeness_for_band": 0.67,
+        "bands": [
+            {"band": "Low", "min_score": 0, "max_score": 3},
+            {"band": "Moderate", "min_score": 4, "max_score": 7},
+            {"band": "High", "min_score": 8, "max_score": 20},
+        ],
+    },
     "questions": [
         {
             "id": "q_disclosure",
@@ -48,6 +52,8 @@ def test_framework_loader_accepts_valid_framework_dict():
     assert framework.framework_id == "qnl_sustainability_fixture"
     assert framework.version == "0.1.0"
     assert framework.max_score == 7
+    assert framework.scale_direction == "higher_is_risk"
+    assert framework.min_completeness_for_band == 0.67
     assert framework.question_by_id("q_disclosure").critical is True
     assert framework.band_for_score(5) == "Moderate"
 
@@ -60,6 +66,22 @@ def test_load_framework_reads_json_file(tmp_path):
 
     assert framework.framework_id == "qnl_sustainability_fixture"
     assert [question.id for question in framework.questions] == ["q_disclosure", "q_adoption"]
+
+
+def test_framework_rejects_missing_scale():
+    data = json.loads(json.dumps(VALID_FRAMEWORK))
+    del data["scale"]
+
+    with pytest.raises(FrameworkError, match="must define scale"):
+        RiskFramework.from_dict(data)
+
+
+def test_framework_rejects_missing_min_completeness_for_band():
+    data = json.loads(json.dumps(VALID_FRAMEWORK))
+    del data["scale"]["min_completeness_for_band"]
+
+    with pytest.raises(FrameworkError, match="min_completeness_for_band"):
+        RiskFramework.from_dict(data)
 
 
 def test_framework_rejects_duplicate_question_ids():
@@ -83,7 +105,7 @@ def test_framework_rejects_duplicate_answer_ids():
 
 def test_framework_rejects_overlapping_score_bands():
     data = json.loads(json.dumps(VALID_FRAMEWORK))
-    data["score_bands"] = [
+    data["scale"]["bands"] = [
         {"band": "Low", "min_score": 0, "max_score": 5},
         {"band": "Moderate", "min_score": 5, "max_score": 10},
     ]
