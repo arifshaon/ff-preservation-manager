@@ -68,6 +68,9 @@ class RawFormatRecord:
     readiness: dict[str, Any] = field(default_factory=dict)
     trend: dict[str, Any] = field(default_factory=dict)
     evidence: list[dict[str, Any]] = field(default_factory=list)
+    # Source-native fields retained for declarative criterion mappings. Adapters
+    # should put upstream vocabulary here and keep criterion IDs out of adapter code.
+    native_fields: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
