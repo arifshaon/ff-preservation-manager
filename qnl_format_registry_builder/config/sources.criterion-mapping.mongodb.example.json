@@ -1,0 +1,74 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "method_profiles": {
+    "enabled": true,
+    "path": "method_profiles.example.json"
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings",
+    "include_drafts": false,
+    "scope": "all",
+    "notes": "Mode 3: apply approved criterion mappings in memory after reconcile() and before persistence. This avoids a second database pass during normal registry updates. Use include_drafts=true only for projection/debug runs."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "qnl_institution_format_evidence_2026_seed",
+      "type": "qnl_institution_format_evidence",
+      "enabled": true,
+      "required": true,
+      "institution_id": "qnl",
+      "institution_name": "Qatar National Library",
+      "retrieval_mode": "local_files",
+      "uris": ["examples/qnl_institution_format_evidence.seed.json"],
+      "notes": "Small local source used to demonstrate integrated criterion mapping. Add NARA, PRONOM, LOC, and future sources exactly as in sources.example.json for production runs."
+    },
+    {
+      "id": "nara_digital_preservation_framework",
+      "type": "nara_digital_preservation_framework",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "published_csv",
+      "release_mode": "pinned",
+      "release_date": "20260320",
+      "fallback_release_date": "20260320",
+      "github_ref": "master",
+      "fallback_local_files": [],
+      "notes": "NARA is useful immediately as an identity and hazard source. Criterion claims are generated only for accepted NARA rubric-answer mappings; composite NARA ratings remain hazard estimators."
+    },
+    {
+      "id": "pronom_registry",
+      "type": "pronom_registry",
+      "enabled": true,
+      "required": false,
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"]
+    },
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml",
+      "enabled": true,
+      "required": false,
+      "retrieval_mode": "fdd_xml_zip",
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
+    }
+  ]
+}
