@@ -59,6 +59,9 @@ class RawFormatRecord:
     identifiers: list[Identifier] = field(default_factory=list)
     urls: dict[str, str] = field(default_factory=dict)
     institution_policy: dict[str, Any] = field(default_factory=dict)
+    # Criterion-level institutional evidence used by preservation-risk analysis.
+    # Unlike institution_policy, this is evidence/context rather than a decision.
+    institution_evidence: list[dict[str, Any]] = field(default_factory=list)
     # Backwards-compatible input alias. New adapters should use institution_policy.
     qnl: dict[str, Any] = field(default_factory=dict)
     hazard: dict[str, Any] = field(default_factory=dict)
@@ -84,6 +87,7 @@ class CanonicalFormat:
     identifier_claims: list[dict[str, Any]] = field(default_factory=list)
     source_records: list[dict[str, Any]] = field(default_factory=list)
     institution_policy_overlays: list[dict[str, Any]] = field(default_factory=list)
+    institution_evidence_claims: list[dict[str, Any]] = field(default_factory=list)
     external_hazard: list[dict[str, Any]] = field(default_factory=list)
     hazard_assessment: dict[str, Any] = field(default_factory=dict)
     readiness: list[dict[str, Any]] = field(default_factory=list)
@@ -126,5 +130,13 @@ class CanonicalFormat:
         data["identifier_claims"] = sorted(
             data.get("identifier_claims", []),
             key=lambda x: (x.get("kind") or "", x.get("value") or "", x.get("source") or ""),
+        )
+        data["institution_evidence_claims"] = sorted(
+            data.get("institution_evidence_claims", []),
+            key=lambda x: (
+                x.get("institution_id") or "",
+                x.get("criterion_id") or "",
+                x.get("claim_id") or "",
+            ),
         )
         return data
