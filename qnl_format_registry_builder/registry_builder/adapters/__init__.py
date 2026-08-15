@@ -6,6 +6,7 @@ from registry_builder.adapters.pronom_registry import PronomRegistryAdapter
 from registry_builder.adapters.pronom_droid_xml import PronomDroidXmlAdapter
 from registry_builder.adapters.loc_fdd_xml import LocFddXmlAdapter
 from registry_builder.adapters.institution_policy_xlsx import InstitutionPolicyXlsxAdapter
+from registry_builder.adapters.qnl_institution_format_evidence import QnlInstitutionFormatEvidenceAdapter
 from registry_builder.adapters.qnl_policy_xlsx import QnlPolicyXlsxAdapter
 from registry_builder.adapters.nara_digital_preservation_framework import NaraDigitalPreservationFrameworkAdapter
 from registry_builder.adapters.nara_preservation_csv import NaraPreservationCsvAdapter
@@ -18,6 +19,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = build_registry(
         PronomDroidXmlAdapter,
         LocFddXmlAdapter,
         InstitutionPolicyXlsxAdapter,
+        QnlInstitutionFormatEvidenceAdapter,
         NaraDigitalPreservationFrameworkAdapter,
         # Deprecated compatibility aliases. Prefer source-level adapter names.
         NaraPreservationCsvAdapter,
