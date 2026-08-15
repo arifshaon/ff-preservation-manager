@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Any
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, url2pathname
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -39,11 +39,31 @@ def _request_headers(uri: str, user_agent: str) -> dict[str, str]:
     return headers
 
 
+def _file_uri_to_path(uri: str) -> Path:
+    """Convert a file:// URI into a local pathlib path.
+
+    `Path("file:///C:/...")` is not valid on Windows. Use URL parsing and
+    url2pathname so URI-escaped characters such as `%20` become normal local
+    path characters before the file is read.
+    """
+    parsed = urlparse(uri)
+    if parsed.scheme != "file":
+        raise ValueError(f"Not a file URI: {uri}")
+    if parsed.netloc and parsed.netloc.lower() != "localhost":
+        path = f"//{parsed.netloc}{parsed.path}"
+    else:
+        path = parsed.path
+    return Path(url2pathname(path))
+
+
 def read_uri(uri: str, user_agent: str = "QNL-Format-Registry-Builder/0.1") -> tuple[bytes, dict[str, str]]:
-    if uri.startswith("http://") or uri.startswith("https://"):
+    parsed = urlparse(uri)
+    if parsed.scheme in {"http", "https"}:
         req = Request(uri, headers=_request_headers(uri, user_agent))
         with urlopen(req, timeout=60) as resp:
             return resp.read(), {k.lower(): v for k, v in resp.headers.items()}
+    if parsed.scheme == "file":
+        return _file_uri_to_path(uri).read_bytes(), {}
     path = Path(uri)
     return path.read_bytes(), {}
 
