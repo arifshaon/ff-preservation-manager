@@ -20,6 +20,7 @@ This map is the starting point for the documentation. Use it to avoid reading ev
 | Understand the project goal and run the default multi-source quickstart | `README.md` |
 | Navigate all documentation | `docs/DOCUMENTATION_MAP.md` |
 | Add a new data source, choose downloaded-file/JSON/CSV/archive acquisition, or run NARA/PRONOM/LOC individually | `docs/ADDING_AND_RUNNING_DATA_SOURCES.md` |
+| Add QNL-specific preservation-risk evidence for formats such as PDF and netCDF | `docs/QNL_INSTITUTION_FORMAT_EVIDENCE.md` |
 | Interpret `registry.csv`, `registry.json`, MongoDB records, hazard fields, review flags, and change events | `docs/READING_THE_REGISTRY.md` |
 | Understand the end-to-end architecture and source-adapter concept | `docs/ARCHITECTURE.md` |
 | Understand source retrieval, cache, offline replay, local files, and fallback logic | `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md` |
@@ -44,6 +45,7 @@ This map is the starting point for the documentation. Use it to avoid reading ev
 | `ARCHITECTURE.md` | Live | Core design, source-adapter concept, storage/export boundaries. |
 | `READING_THE_REGISTRY.md` | Live | User-facing glossary and examples for preservation officers. |
 | `ADDING_AND_RUNNING_DATA_SOURCES.md` | Live | Practical runbook for adding source adapters, choosing downloaded-file/JSON/CSV/archive acquisition, and running sources together or individually. |
+| `QNL_INSTITUTION_FORMAT_EVIDENCE.md` | Live | QNL-specific preservation-risk evidence source, seed data, template, and run instructions. |
 | `SOURCE_RETRIEVAL_AND_FALLBACKS.md` | Live | Online, cached, offline, local-file, fallback and required/optional behavior. |
 | `INCREMENTAL_SOURCE_UPDATES.md` | Live | Source-by-source augmentation model and active evidence reuse. |
 | `IDENTIFIER_RECONCILIATION.md` | Live | Verified identifier rules and strong-key matching behavior. |
@@ -84,6 +86,9 @@ DOCUMENTATION_MAP.md
 
 ADDING_AND_RUNNING_DATA_SOURCES.md
   -> practical source plug-in and runbook: downloaded file, JSON, CSV, archive, individual runs
+
+QNL_INSTITUTION_FORMAT_EVIDENCE.md
+  -> QNL-specific evidence template for future preservation-risk analysis
 
 READING_THE_REGISTRY.md
   -> understand generated outputs and MongoDB records
@@ -130,6 +135,7 @@ nara_digital_preservation_framework
 pronom_registry
 loc_fdd_xml
 institution_policy_xlsx
+qnl_institution_format_evidence
 ```
 
 Avoid naming a new adapter after a temporary file representation unless that representation is truly the source boundary. For example, CSV is only NARA's current publication format, so the preferred adapter is `nara_digital_preservation_framework`, not `nara_csv`.
