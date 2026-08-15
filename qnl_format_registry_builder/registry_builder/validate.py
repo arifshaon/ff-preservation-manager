@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from registry_builder.collision_report import build_collision_report
 from registry_builder.models import CanonicalFormat
 
 
@@ -10,6 +11,8 @@ _STRONG_IDENTIFIER_KINDS = {"puid", "loc", "nara"}
 def _warning_type(warning: str) -> str:
     if warning.startswith("weak identifier "):
         return "weak_identifier_overlap"
+    if warning.startswith("heuristic identifier bridge "):
+        return "heuristic_identifier_bridge"
     if warning.startswith("institutional policy identifier "):
         return "institution_policy_duplicate"
     return "other"
@@ -72,6 +75,12 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
     for (kind, value), owners in identifier_seen.items():
         if len(set(owners)) > 1 and kind not in _STRONG_IDENTIFIER_KINDS:
             warnings.append(f"weak identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
+    for bridge in build_collision_report(registry).get("heuristic_identifier_bridges", []):
+        warnings.append(
+            "heuristic identifier bridge "
+            f"{bridge.get('kind')}:{bridge.get('value')} in {bridge.get('canonical_id')} "
+            f"from {bridge.get('source')}: {bridge.get('confidence_reason') or 'review recommended'}"
+        )
     for (institution_id, institution_format_id), owners in institution_policy_id_seen.items():
         if len(owners) > 1:
             warnings.append(
