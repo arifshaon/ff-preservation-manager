@@ -11,7 +11,19 @@ from registry_builder.utils import slugify
 
 _NATIVE_GAP_SCALE = "nara_file_format_risk_matrix"
 _NATIVE_GAP_DIRECTION = "higher_is_safer"
-_VERSION_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(?:v(?:ersion)?\s*)?(\d+(?:\.\d+)+[a-z]?)\b", re.I)
+_VERSION_TOKEN_RE = re.compile(
+    r"\b("
+    r"\d+\.\d+(?:\.\d+)?"  # 1.02, 6.0, 1.4.1
+    r"|\d{2,4}[a-z]"  # 87a, 89a
+    r"|(?:pdf|iso)?/?[a-z]-\d+[a-z]?"  # a-1a, a-2b, x-4, pdf/a-1a
+    r"|\d{2,4}-\d{2,4}"  # 97-2003
+    r")\b",
+    re.I,
+)
+_COPIED_IDENTIFIER_HEURISTIC_REASON = (
+    "Copied identifier bridged to a single verified authority group, but only one side carries "
+    "an explicit version discriminator."
+)
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -46,9 +58,9 @@ def _group_has_unverified_strong_identifier(items: list[RawFormatRecord], *, str
 def version_tokens(name: str | None) -> frozenset[str]:
     """Return explicit version-like tokens from a format name.
 
-    This intentionally captures decimal version discriminators such as 1.00 and
-    1.02. Plain class numbers are ignored, so names such as PDF and Portable
-    Document Format do not conflict merely because one is abbreviated.
+    Captured examples include decimal versions (1.02), lettered image-format
+    discriminators (87a), PDF/A-style family discriminators (a-1a, pdf/a-2b),
+    and Office-era ranges (97-2003). Plain class numbers remain ignored.
     """
     if not name:
         return frozenset()
@@ -62,10 +74,24 @@ def _names_conflict(a: str | None, b: str | None) -> bool:
     return bool(left and right and left != right)
 
 
+def _names_have_asymmetric_version_signal(a: str | None, b: str | None) -> bool:
+    left = version_tokens(a)
+    right = version_tokens(b)
+    return bool((left and not right) or (right and not left))
+
+
 def _groups_name_conflict(left: list[RawFormatRecord], right: list[RawFormatRecord]) -> bool:
     for left_record in left:
         for right_record in right:
             if _names_conflict(left_record.name, right_record.name):
+                return True
+    return False
+
+
+def _groups_have_asymmetric_version_signal(left: list[RawFormatRecord], right: list[RawFormatRecord]) -> bool:
+    for left_record in left:
+        for right_record in right:
+            if _names_have_asymmetric_version_signal(left_record.name, right_record.name):
                 return True
     return False
 
@@ -327,13 +353,15 @@ def _safe_claimed_strong_identifier_aliases(
     groups: dict[tuple[str, str], list[RawFormatRecord]],
     *,
     strong_kinds: set[str],
-) -> dict[tuple[str, str], tuple[str, str]]:
-    """Alias copied strong identifiers to a single verified group when names agree.
+) -> tuple[dict[tuple[str, str], tuple[str, str]], dict[tuple[str, str], dict[str, str]]]:
+    """Alias copied strong identifiers to a single verified group when names do not conflict.
 
     Institutional evidence often carries copied PUID/LOC/NARA identifiers so it
     can point at an authority format. The copied identifier is not verified by
     that institutional source, so it may bridge only to one verified authority
     group, and only when explicit version tokens in the names do not conflict.
+    If only one side has a version discriminator, the bridge is allowed but the
+    copied identifier claim is marked as heuristic for collision review.
     """
     verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
     for group_key, items in groups.items():
@@ -343,6 +371,7 @@ def _safe_claimed_strong_identifier_aliases(
                     verified_targets[(identifier.kind, identifier.value)].add(group_key)
 
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
+    alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
     for group_key, items in groups.items():
         if group_key[0] in strong_kinds:
             continue
@@ -361,7 +390,12 @@ def _safe_claimed_strong_identifier_aliases(
         if _groups_name_conflict(items, groups[target]):
             continue
         aliases[group_key] = target
-    return aliases
+        if _groups_have_asymmetric_version_signal(items, groups[target]):
+            alias_confidence[group_key] = {
+                "confidence": "heuristic",
+                "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
+            }
+    return aliases, alias_confidence
 
 
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
@@ -370,9 +404,12 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
     strong_kinds = strong_identifier_kinds(rules)
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
+    alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
+    record_keys: dict[int, tuple[str, str]] = {}
 
     for record in records:
         key = strongest_key(record, strong_kinds=strong_order)
+        record_keys[id(record)] = key
         groups[key].append(record)
         for identifier in _verified_identifiers(record):
             if identifier.kind in strong_kinds:
@@ -381,8 +418,12 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
     for weak_key, target_key in _safe_weak_aliases(groups, strong_kinds=strong_kinds).items():
         alias_keys.setdefault(weak_key, target_key)
 
-    for claimed_key, target_key in _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds).items():
-        alias_keys.setdefault(claimed_key, target_key)
+    claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds)
+    for claimed_key, target_key in claimed_aliases.items():
+        if claimed_key not in alias_keys:
+            alias_keys[claimed_key] = target_key
+            if claimed_key in claimed_alias_confidence:
+                alias_confidence[claimed_key] = claimed_alias_confidence[claimed_key]
 
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     for key, items in groups.items():
@@ -400,13 +441,22 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
             provenance={"created_at": utc_now_iso(), "reconciliation_key": {"kind": key[0], "value": key[1]}},
         )
         for r in items:
+            original_key = record_keys.get(id(r), key)
+            confidence = alias_confidence.get(original_key)
             for identifier in _all_identifiers(r):
+                claim_confidence = None
+                confidence_reason = None
+                if confidence and identifier.kind in strong_kinds and not identifier.verified:
+                    claim_confidence = confidence["confidence"]
+                    confidence_reason = confidence["confidence_reason"]
                 cf.add_identifier(
                     identifier.kind,
                     identifier.value,
                     source=identifier.source,
                     verified=identifier.verified,
                     source_record_id=identifier.source_record_id,
+                    confidence=claim_confidence,
+                    confidence_reason=confidence_reason,
                 )
             cf.source_records.append({
                 "source_id": r.source_id,
