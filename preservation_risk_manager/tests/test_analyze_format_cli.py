@@ -116,6 +116,7 @@ def test_analyze_format_resolves_registry_json_and_derives_answers(tmp_path, cap
     assert output["analysis"]["min_completeness_for_band"] == 0.67
     assert output["local_risk_posture"] == "Low"
     assert output["derived_answers"]["answers"]["q_disclosure"] == "public_specification"
+    assert output["derived_answers"]["scoring_answers"]["q_disclosure"]["missing"] is False
 
 
 def test_analyze_format_can_read_registry_builder_storage_config(tmp_path, monkeypatch, capsys):
@@ -218,8 +219,14 @@ def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, cap
     assert output["analysis"]["analysis_status"] == "Not Assessed"
     assert output["analysis"]["analysed_band"] is None
     assert output["analysis"]["band_suppressed_reason"] == "not_assessed"
+    assert output["analysis"]["missing_count"] == 3
     assert output["local_risk_posture"] == "Needs Assessment"
     assert output["derived_answers"]["derivation"]["q_disclosure"]["status"] == "missing_evidence"
+    assert output["derived_answers"]["scoring_answers"]["q_disclosure"] == {
+        "answer_id": "unknown",
+        "derivation_status": "missing_evidence",
+        "missing": True,
+    }
 
 
 def test_analyze_format_reports_missing_registry_json_without_traceback(tmp_path, capsys):
