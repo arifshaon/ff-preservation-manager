@@ -70,12 +70,34 @@ def _mime_values(format_doc: dict[str, Any]) -> set[str]:
     return values
 
 
+def _claim_kind(claim: dict[str, Any]) -> str:
+    return _normalize(claim.get("kind") or claim.get("type") or claim.get("identifier_type"))
+
+
+def _claim_value(claim: dict[str, Any]) -> str:
+    return _normalize(claim.get("value") or claim.get("id") or claim.get("identifier") or claim.get("identifier_value"))
+
+
+def _identifier_claim_values(format_doc: dict[str, Any], *, verified: bool | None = None) -> set[str]:
+    values: set[str] = set()
+    for claim in _as_iter(format_doc.get("identifier_claims")):
+        if not isinstance(claim, dict):
+            continue
+        if verified is not None and bool(claim.get("verified", False)) is not verified:
+            continue
+        value = _claim_value(claim)
+        if value:
+            values.add(value)
+    return values
+
+
 def _identifier_values(format_doc: dict[str, Any]) -> set[str]:
     values = set()
     for field in ("puids", "loc_ids", "nara_ids", "wikidata_ids"):
         values.update(_field_values(format_doc, (field,)))
     for kind in ("puid", "loc", "nara", "wikidata"):
         values.update(_identifier_bucket(format_doc, kind))
+    values.update(_identifier_claim_values(format_doc))
     identifiers = format_doc.get("identifiers")
     if not isinstance(identifiers, dict):
         for identifier in _as_iter(identifiers):
@@ -94,6 +116,8 @@ def _candidate_match(format_doc: dict[str, Any], query: str) -> tuple[int, str] 
 
     if normalized in _field_values(format_doc, ("canonical_id", "format_id", "id")):
         return (100, "canonical_id")
+    if normalized in _identifier_claim_values(format_doc, verified=True):
+        return (95, "verified_authority_identifier")
     if normalized in _identifier_values(format_doc):
         return (90, "authority_identifier")
     if normalized in _mime_values(format_doc):
@@ -110,9 +134,10 @@ def _candidate_match(format_doc: dict[str, Any], query: str) -> tuple[int, str] 
 def resolve_format(query: str, format_docs: Iterable[dict[str, Any]]) -> FormatResolution:
     """Resolve a user-supplied format token against canonical format documents.
 
-    Resolution is strict by design: exact IDs and identifiers have highest
-    precedence; extensions and names must identify a single top-priority match.
-    Ambiguity is reported instead of guessed.
+    Resolution is strict by design: exact IDs and verified authority identifiers
+    have highest precedence; copied/unverified identifiers are weaker evidence;
+    extensions and names must identify a single top-priority match. Ambiguity is
+    reported instead of guessed.
     """
     candidates: list[tuple[int, str, dict[str, Any]]] = []
     for format_doc in format_docs:
