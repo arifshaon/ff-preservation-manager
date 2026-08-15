@@ -11,7 +11,7 @@ mongo = ["pymongo>=4.8"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["registry_builder*", "preservation_risk_manager*"]
+include = ["registry_builder*"]
 exclude = ["config*", "output*", "work*", "tests*"]
 
 [tool.pytest.ini_options]
