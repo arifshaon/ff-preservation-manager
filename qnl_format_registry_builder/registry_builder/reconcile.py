@@ -276,6 +276,44 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
     return aliases
 
 
+def _safe_claimed_strong_identifier_aliases(
+    groups: dict[tuple[str, str], list[RawFormatRecord]],
+    *,
+    strong_kinds: set[str],
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Alias local/evidence groups to one verified authority group by claimed ID.
+
+    Institutional evidence often carries a copied PUID or LOC FDD ID so it can
+    point at the right format. That copied identifier is not verified by the
+    institution source, so it must not become a strong key. It may, however,
+    safely bridge to the single canonical group where the same identifier has
+    already been verified by its owning authority.
+    """
+    verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    for group_key, items in groups.items():
+        for record in items:
+            for identifier in _verified_identifiers(record):
+                if identifier.kind in strong_kinds:
+                    verified_targets[(identifier.kind, identifier.value)].add(group_key)
+
+    aliases: dict[tuple[str, str], tuple[str, str]] = {}
+    for group_key, items in groups.items():
+        if group_key[0] in strong_kinds:
+            continue
+        candidates: set[tuple[str, str]] = set()
+        for record in items:
+            for identifier in _all_identifiers(record):
+                if identifier.kind not in strong_kinds:
+                    continue
+                targets = verified_targets.get((identifier.kind, identifier.value), set())
+                if len(targets) == 1:
+                    candidates.update(targets)
+        candidates.discard(group_key)
+        if len(candidates) == 1:
+            aliases[group_key] = next(iter(candidates))
+    return aliases
+
+
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
     rules = identifier_rules or load_identifier_rules()
     strong_order = strong_identifier_order(rules)
@@ -292,6 +330,9 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
 
     for weak_key, target_key in _safe_weak_aliases(groups, strong_kinds=strong_kinds).items():
         alias_keys.setdefault(weak_key, target_key)
+
+    for claimed_key, target_key in _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds).items():
+        alias_keys.setdefault(claimed_key, target_key)
 
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     for key, items in groups.items():
