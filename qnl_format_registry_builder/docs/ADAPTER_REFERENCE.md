@@ -249,7 +249,7 @@ Use this to verify PUIDs and strengthen canonical matching.
 
 ### Config: full GitHub archive
 
-Use archive mode for full PRONOM runs. This snapshots one repository ZIP and extracts PRONOM JSON records from it. It avoids creating thousands of per-record snapshot files.
+Use archive mode for full PRONOM runs when the upstream archive is available. This snapshots one repository ZIP and extracts PRONOM JSON records from it.
 
 ```json
 {
@@ -263,9 +263,29 @@ Use archive mode for full PRONOM runs. This snapshots one repository ZIP and ext
 }
 ```
 
+### Config: full GitHub tree with temporary per-record snapshots
+
+Use this when PRONOM is only available as individual JSON files. The tree snapshot is retained, but each JSON file is downloaded to a temporary file, extracted, and deleted after extraction. The normalized source records, including raw PRONOM record payloads, are still persisted through the selected storage backend such as MongoDB.
+
+```json
+{
+  "id": "pronom_registry",
+  "type": "pronom_registry",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "github_json",
+  "github_tree_url": "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1",
+  "raw_base_url": "https://raw.githubusercontent.com/nationalarchives/pronom/develop",
+  "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
+  "snapshot_policy": "temporary"
+}
+```
+
+For tree-based `github_json` runs, `snapshot_policy` defaults to `temporary` to prevent thousands of cached JSON files. Use `snapshot_policy: "cache"` only when deliberately retaining per-record snapshots for audit/debugging.
+
 ### Config: targeted PUIDs
 
-Use this for fast tests or small checks. Targeted runs intentionally snapshot only the requested records.
+Use this for fast tests or small checks. Targeted runs default to retained cache snapshots because they usually involve only a few records.
 
 ```json
 {
@@ -278,9 +298,7 @@ Use this for fast tests or small checks. Targeted runs intentionally snapshot on
 }
 ```
 
-### Config: legacy full GitHub tree mode
-
-This is retained for compatibility, but it creates one source snapshot per JSON record and should not be used for normal full PRONOM acquisition.
+Targeted runs can also use temporary snapshots:
 
 ```json
 {
@@ -289,9 +307,8 @@ This is retained for compatibility, but it creates one source snapshot per JSON 
   "enabled": true,
   "required": false,
   "retrieval_mode": "github_json",
-  "github_tree_url": "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1",
-  "raw_base_url": "https://raw.githubusercontent.com/nationalarchives/pronom/develop",
-  "include_paths": ["signatures/fmt/", "signatures/x-fmt/"]
+  "puids": ["fmt/18", "x-fmt/111"],
+  "snapshot_policy": "temporary"
 }
 ```
 
@@ -301,10 +318,28 @@ Can acquire:
 
 ```text
 one GitHub archive ZIP for full PRONOM runs
-explicit raw JSON URIs for small tests
+explicit raw JSON URIs
 configured PUIDs converted to raw JSON URLs
-a recursive GitHub tree for legacy compatibility
+a recursive GitHub tree with temporary or retained per-record snapshots
 ```
+
+### Snapshot policy
+
+`github_archive` mode retains one archive snapshot.
+
+`github_json` mode supports:
+
+```text
+snapshot_policy: cache
+  retain individual source JSON snapshots in work/snapshots/<source_id>/
+
+snapshot_policy: temporary
+  write individual source JSON files to work/temporary_snapshots/<source_id>/
+  extract records
+  delete the temporary JSON files after extraction
+```
+
+The snapshot metadata and evidence payload record whether a snapshot was retained.
 
 ### Extraction
 
@@ -322,6 +357,8 @@ raw PRONOM record
 ```
 
 For archive acquisition, one source snapshot may produce many PRONOM raw records. Each extracted record records the archive URI and internal JSON filename in its evidence payload.
+
+For temporary JSON acquisition, individual JSON files are not kept in the snapshot cache. The raw PRONOM record payload is still carried in the emitted source record and persisted by the configured storage backend.
 
 ### Identifier authority
 
