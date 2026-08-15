@@ -22,6 +22,21 @@ def _answer_for_question(question: Question, supplied_id: str | None, unknown_id
     return question.answer_by_id(supplied_id), False
 
 
+def _band_suppressed_reason(
+    *,
+    analysis_status: str,
+    evidence_completeness: float,
+    min_completeness_for_band: float,
+) -> str | None:
+    if analysis_status == "Not Assessed":
+        return "not_assessed"
+    if analysis_status == "Needs Assessment":
+        return "critical_abstention"
+    if evidence_completeness < min_completeness_for_band:
+        return "insufficient_evidence_completeness"
+    return None
+
+
 def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str, Any]:
     """Score supplied answer IDs against a validated framework.
 
@@ -80,14 +95,21 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
         abstention_count=abstention_count,
         critical_abstention_count=critical_abstention_count,
     )
-    analysed_band = None if analysis_status in {"Not Assessed", "Needs Assessment"} else framework.band_for_score(total_score)
+    band_suppressed_reason = _band_suppressed_reason(
+        analysis_status=analysis_status,
+        evidence_completeness=evidence_completeness,
+        min_completeness_for_band=framework.min_completeness_for_band,
+    )
+    analysed_band = None if band_suppressed_reason else framework.band_for_score(total_score)
 
     return {
         "framework_id": framework.framework_id,
         "framework_version": framework.version,
+        "scale_direction": framework.scale_direction,
         "score": total_score,
         "max_score": framework.max_score,
         "analysed_band": analysed_band,
+        "band_suppressed_reason": band_suppressed_reason,
         "analysis_status": analysis_status,
         "total_questions": total_questions,
         "answered_questions": answered_questions,
@@ -95,6 +117,7 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
         "abstention_count": abstention_count,
         "critical_abstention_count": critical_abstention_count,
         "evidence_completeness": evidence_completeness,
+        "min_completeness_for_band": framework.min_completeness_for_band,
         "question_results": question_results,
     }
 
