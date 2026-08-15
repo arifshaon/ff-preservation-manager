@@ -87,6 +87,36 @@ def test_loc_fdd_xml_does_not_extract_extensions_from_free_text(tmp_path):
     assert "loc" not in record.extensions
 
 
+def test_loc_fdd_xml_never_uses_dot_regex_over_free_text(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    xml = """<?xml version='1.0' encoding='UTF-8'?>
+    <fdd>
+      <fddID>fdd000032</fddID>
+      <title>Format with dotted free text only</title>
+      <category>Text</category>
+      <note>Free text mentions .0, .gov, .loc, .jpg, and https://www.loc.gov/path.</note>
+    </fdd>
+    """
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fdd000032.xml", xml)
+
+    snapshot = SourceSnapshot(
+        source_id="loc_fdd_xml",
+        source_type="loc_fdd_xml",
+        uri="https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+        acquired_at="2026-08-15T00:00:00+00:00",
+        sha256="abc123",
+        local_path=str(archive),
+        content_type="application/zip",
+        metadata={"snapshot_policy": "cache", "snapshot_retained": True},
+    )
+
+    adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
+    record = normalize_record(adapter.extract([snapshot])[0])
+
+    assert record.extensions == []
+
+
 def test_loc_fdd_xml_acquires_local_zip_uri(tmp_path):
     archive = tmp_path / "fddXML.zip"
     with zipfile.ZipFile(archive, "w") as zf:
