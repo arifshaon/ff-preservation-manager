@@ -9,8 +9,10 @@ action recommendations.
 __all__ = [
     "actions",
     "currency",
+    "data_access",
     "errors",
     "evidence_packs",
+    "format_resolver",
     "frameworks",
     "posture",
     "responses",
