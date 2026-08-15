@@ -247,9 +247,40 @@ Reads PRONOM registry records from the public GitHub JSON dataset.
 
 Use this to verify PUIDs and strengthen canonical matching.
 
-### Config: full GitHub tree
+### Config: full GitHub archive
 
-The default sample config enables this source as optional enrichment:
+Use archive mode for full PRONOM runs. This snapshots one repository ZIP and extracts PRONOM JSON records from it. It avoids creating thousands of per-record snapshot files.
+
+```json
+{
+  "id": "pronom_registry",
+  "type": "pronom_registry",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "github_archive",
+  "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+  "include_paths": ["signatures/fmt/", "signatures/x-fmt/"]
+}
+```
+
+### Config: targeted PUIDs
+
+Use this for fast tests or small checks. Targeted runs intentionally snapshot only the requested records.
+
+```json
+{
+  "id": "pronom_registry",
+  "type": "pronom_registry",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "github_json",
+  "puids": ["fmt/18", "x-fmt/111"]
+}
+```
+
+### Config: legacy full GitHub tree mode
+
+This is retained for compatibility, but it creates one source snapshot per JSON record and should not be used for normal full PRONOM acquisition.
 
 ```json
 {
@@ -264,32 +295,16 @@ The default sample config enables this source as optional enrichment:
 }
 ```
 
-### Config: targeted PUIDs
-
-Use this for fast tests or small checks:
-
-```json
-{
-  "id": "pronom_registry",
-  "type": "pronom_registry",
-  "enabled": true,
-  "required": false,
-  "retrieval_mode": "github_json",
-  "puids": ["fmt/18", "x-fmt/111"]
-}
-```
-
 ### Acquisition
 
 Can acquire:
 
 ```text
-explicit raw JSON URIs
+one GitHub archive ZIP for full PRONOM runs
+explicit raw JSON URIs for small tests
 configured PUIDs converted to raw JSON URLs
-a recursive GitHub tree filtered to PRONOM JSON signature paths
+a recursive GitHub tree for legacy compatibility
 ```
-
-For scheduled full-tree runs, set `GITHUB_TOKEN` to reduce GitHub API rate-limit risk.
 
 ### Extraction
 
@@ -305,6 +320,8 @@ puids
 urls
 raw PRONOM record
 ```
+
+For archive acquisition, one source snapshot may produce many PRONOM raw records. Each extracted record records the archive URI and internal JSON filename in its evidence payload.
 
 ### Identifier authority
 
