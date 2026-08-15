@@ -68,7 +68,7 @@ def _extension_tokens(value: str) -> list[str]:
     out: list[str] = []
     for token in re.split(r"[\s,;|]+", value or ""):
         candidate = token.strip().strip('"\'`()[]{}<>')
-        candidate = candidate.lstrip(".").rstrip(".:)"]}")
+        candidate = candidate.lstrip(".").rstrip(".:)]}")
         candidate = candidate.lower()
         if not re.fullmatch(r"[a-z][a-z0-9]{0,11}", candidate):
             continue
