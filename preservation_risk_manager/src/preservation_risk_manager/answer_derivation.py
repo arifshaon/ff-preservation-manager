@@ -168,6 +168,15 @@ def _derive_question_answer(question: Question, claims: list[dict[str, Any]], *,
     }
 
 
+def _scoring_answer(result: dict[str, Any]) -> dict[str, Any]:
+    status = str(result.get("status") or "")
+    return {
+        "answer_id": result.get("answer_id"),
+        "derivation_status": status,
+        "missing": status == "missing_evidence",
+    }
+
+
 def derive_answers(framework: RiskFramework, evidence_pack: dict[str, Any]) -> dict[str, Any]:
     """Derive controlled framework answer IDs from explicit registry evidence.
 
@@ -177,6 +186,7 @@ def derive_answers(framework: RiskFramework, evidence_pack: dict[str, Any]) -> d
     """
     claims = evidence_items(evidence_pack)
     answers: dict[str, str] = {}
+    scoring_answers: dict[str, dict[str, Any]] = {}
     derivation: dict[str, dict[str, Any]] = {}
     for question in framework.questions:
         result = _derive_question_answer(
@@ -185,9 +195,11 @@ def derive_answers(framework: RiskFramework, evidence_pack: dict[str, Any]) -> d
             unknown_answer_id=framework.unknown_answer_id,
         )
         answers[question.id] = result["answer_id"]
+        scoring_answers[question.id] = _scoring_answer(result)
         derivation[question.id] = result
     return {
         "answers": answers,
+        "scoring_answers": scoring_answers,
         "derivation": derivation,
         "derivation_method": "explicit_criterion_evidence",
     }
