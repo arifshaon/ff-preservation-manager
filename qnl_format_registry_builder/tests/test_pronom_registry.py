@@ -1,6 +1,9 @@
 import json
 import zipfile
+from pathlib import Path
 
+import registry_builder.adapters.base as adapter_base
+import registry_builder.adapters.pronom_registry as pronom_module
 from registry_builder.adapters.pronom_registry import PronomRegistryAdapter, _puid_to_raw_url
 from registry_builder.models import SourceSnapshot
 from registry_builder.normalize import normalize_record
@@ -86,6 +89,79 @@ def test_pronom_registry_extracts_records_from_one_archive_snapshot(tmp_path):
     assert record.evidence[0]["type"] == "pronom_registry_github_archive"
     assert record.evidence[0]["source_archive"] == snapshot.uri
     assert record.evidence[0]["source_file"] == "pronom-develop/signatures/fmt/18.json"
+
+
+def test_pronom_github_json_tree_uses_temporary_snapshots_by_default(monkeypatch, tmp_path):
+    tree_url = "https://api.github.test/pronom/tree"
+    raw_url = "https://raw.example/pronom/develop/signatures/fmt/18.json"
+    tree_payload = {
+        "tree": [
+            {"path": "signatures/fmt/18.json", "type": "blob"},
+            {"path": "signatures/fmt/readme.txt", "type": "blob"},
+            {"path": "other/ignored.json", "type": "blob"},
+        ]
+    }
+
+    def fake_read_uri(uri: str):
+        if uri == tree_url:
+            return json.dumps(tree_payload).encode("utf-8"), {"content-type": "application/json"}
+        if uri == raw_url:
+            return json.dumps(PRONOM_RECORD).encode("utf-8"), {"content-type": "application/json"}
+        raise AssertionError(f"unexpected URI: {uri}")
+
+    monkeypatch.setattr(adapter_base, "read_uri", fake_read_uri)
+    monkeypatch.setattr(pronom_module, "read_uri", fake_read_uri)
+
+    adapter = PronomRegistryAdapter(
+        {
+            "id": "pronom_registry",
+            "retrieval_mode": "github_json",
+            "github_tree_url": tree_url,
+            "raw_base_url": "https://raw.example/pronom/develop",
+            "include_paths": ["signatures/fmt/"],
+            "progress": False,
+        },
+        tmp_path,
+    )
+
+    snapshots = adapter.acquire()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].metadata["snapshot_policy"] == "temporary"
+    assert snapshots[0].metadata["delete_after_extract"] is True
+    assert Path(snapshots[0].local_path).exists()
+
+    records = [normalize_record(r) for r in adapter.extract(snapshots)]
+
+    assert len(records) == 1
+    assert records[0].source_record_id == "fmt/18"
+    assert records[0].raw["record"]["formatName"] == PRONOM_RECORD["formatName"]
+    assert records[0].evidence[0]["snapshot_policy"] == "temporary"
+    assert records[0].evidence[0]["snapshot_retained"] is False
+    assert not Path(snapshots[0].local_path).exists()
+
+
+def test_pronom_targeted_puid_keeps_cache_snapshots_by_default(monkeypatch, tmp_path):
+    raw_url = "https://raw.githubusercontent.com/nationalarchives/pronom/develop/signatures/fmt/18.json"
+
+    def fake_read_uri(uri: str):
+        assert uri == raw_url
+        return json.dumps(PRONOM_RECORD).encode("utf-8"), {"content-type": "application/json"}
+
+    monkeypatch.setattr(adapter_base, "read_uri", fake_read_uri)
+
+    adapter = PronomRegistryAdapter(
+        {"id": "pronom_registry", "retrieval_mode": "github_json", "puids": ["fmt/18"], "progress": False},
+        tmp_path,
+    )
+
+    snapshots = adapter.acquire()
+    records = [normalize_record(r) for r in adapter.extract(snapshots)]
+
+    assert len(records) == 1
+    assert snapshots[0].metadata["snapshot_policy"] == "cache"
+    assert snapshots[0].metadata["snapshot_retained"] is True
+    assert Path(snapshots[0].local_path).exists()
 
 
 def test_pronom_puid_to_raw_url_supports_fmt_and_xfmt():
