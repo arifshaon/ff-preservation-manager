@@ -1,3 +1,4 @@
+from pathlib import Path
 import zipfile
 
 from registry_builder.adapters.loc_fdd_xml import LocFddXmlAdapter
@@ -10,7 +11,8 @@ LOC_XML = """<?xml version='1.0' encoding='UTF-8'?>
   <fddID>fdd000030</fddID>
   <title>PDF, Portable Document Format</title>
   <category>Text</category>
-  <note>PRONOM identifier fmt/18; Wikidata Q42332; file extension .pdf.</note>
+  <fileExtension>.pdf</fileExtension>
+  <note>PRONOM identifier fmt/18; Wikidata Q42332; see https://www.loc.gov/0.4/path.</note>
 </fdd>
 """
 
@@ -48,6 +50,41 @@ def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
     assert record.evidence[0]["snapshot_policy"] == "cache"
     assert record.evidence[0]["snapshot_retained"] is True
     assert "xml_text" not in record.raw
+
+
+def test_loc_fdd_xml_does_not_extract_extensions_from_free_text(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    xml = """<?xml version='1.0' encoding='UTF-8'?>
+    <fdd>
+      <fddID>fdd000031</fddID>
+      <title>Format with URL and decimal references</title>
+      <category>Text</category>
+      <fileExtension>pdf; xml; .jp2</fileExtension>
+      <note>Do not extract junk from https://www.loc.gov, version 1.0, or PDF 1.4 text.</note>
+    </fdd>
+    """
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fdd000031.xml", xml)
+
+    snapshot = SourceSnapshot(
+        source_id="loc_fdd_xml",
+        source_type="loc_fdd_xml",
+        uri="https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+        acquired_at="2026-08-15T00:00:00+00:00",
+        sha256="abc123",
+        local_path=str(archive),
+        content_type="application/zip",
+        metadata={"snapshot_policy": "cache", "snapshot_retained": True},
+    )
+
+    adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
+    record = normalize_record(adapter.extract([snapshot])[0])
+
+    assert record.extensions == ["jp2", "pdf", "xml"]
+    assert "0" not in record.extensions
+    assert "4" not in record.extensions
+    assert "gov" not in record.extensions
+    assert "loc" not in record.extensions
 
 
 def test_loc_fdd_xml_acquires_local_zip_uri(tmp_path):
@@ -90,7 +127,7 @@ def test_loc_fdd_xml_temporary_uri_snapshot_is_deleted_after_extract(tmp_path):
     assert snapshots[0].metadata["delete_after_extract"] is True
     assert snapshots[0].local_path != str(xml_path)
     assert xml_path.exists()
-    assert __import__("pathlib").Path(snapshots[0].local_path).exists()
+    assert Path(snapshots[0].local_path).exists()
 
     records = [normalize_record(r) for r in adapter.extract(snapshots)]
 
@@ -100,4 +137,4 @@ def test_loc_fdd_xml_temporary_uri_snapshot_is_deleted_after_extract(tmp_path):
     assert records[0].evidence[0]["snapshot_retained"] is False
     assert "xml_text" in records[0].raw
     assert xml_path.exists()
-    assert not __import__("pathlib").Path(snapshots[0].local_path).exists()
+    assert not Path(snapshots[0].local_path).exists()
