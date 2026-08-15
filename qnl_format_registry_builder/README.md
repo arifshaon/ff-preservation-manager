@@ -38,6 +38,7 @@ Key documents:
 
 | Need | Read |
 | --- | --- |
+| Add or run a data source, including downloaded files, JSON, CSV, archives, and individual NARA/PRONOM/LOC runs | [`docs/ADDING_AND_RUNNING_DATA_SOURCES.md`](docs/ADDING_AND_RUNNING_DATA_SOURCES.md) |
 | Interpret generated registry outputs | [`docs/READING_THE_REGISTRY.md`](docs/READING_THE_REGISTRY.md) |
 | Understand architecture and adapter boundaries | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Understand source-by-source augmentation | [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md) |
@@ -97,6 +98,12 @@ Read the outputs with:
 
 ```text
 docs/READING_THE_REGISTRY.md
+```
+
+For source-specific examples, including MongoDB configs for NARA-only, PRONOM-only, LOC-only, downloaded files, JSON, CSV, archives, and temporary many-file acquisition, read:
+
+```text
+docs/ADDING_AND_RUNNING_DATA_SOURCES.md
 ```
 
 ## What `--workdir` and `--out` mean
