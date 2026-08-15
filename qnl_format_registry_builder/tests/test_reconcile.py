@@ -43,6 +43,22 @@ def test_unverified_spreadsheet_puid_does_not_force_merge_with_pronom():
     assert any(c["kind"] == "puid" and not c["verified"] for c in qnl.identifier_claims)
 
 
+def test_unverified_spreadsheet_puid_bridges_to_pronom_when_names_do_not_version_conflict():
+    records = [
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="PDF", puids=["fmt/18"], extensions=["pdf"]),
+        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="Portable Document Format", puids=["fmt/18"], extensions=["pdf"]),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 1
+    fmt = registry[0]
+    assert fmt.canonical_id == "puid-fmt-18"
+    assert fmt.preferred_name == "PDF"
+    assert any(c["kind"] == "puid" and c["value"] == "fmt/18" and c["verified"] for c in fmt.identifier_claims)
+    assert any(c["kind"] == "puid" and c["value"] == "fmt/18" and not c["verified"] for c in fmt.identifier_claims)
+
+
 def test_unverified_strong_identifier_blocks_weak_bridge_to_authority():
     records = [
         RawFormatRecord(
