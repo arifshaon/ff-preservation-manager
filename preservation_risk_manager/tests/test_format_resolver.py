@@ -59,6 +59,58 @@ def test_resolves_authority_identifier_from_typed_fields_and_identifier_list():
     assert wikidata.resolved and wikidata.format_doc["canonical_id"] == "fmt/netcdf"
 
 
+def test_verified_authority_identifier_beats_unverified_copied_identifier():
+    formats = [
+        {
+            "canonical_id": "puid-fmt-18",
+            "preferred_name": "Acrobat PDF 1.4 - Portable Document Format",
+            "identifiers": {"puid": ["fmt/18"], "extension": ["pdf"]},
+            "identifier_claims": [
+                {"kind": "puid", "value": "fmt/18", "source": "pronom", "verified": True}
+            ],
+        },
+        {
+            "canonical_id": "fmt-pdf",
+            "preferred_name": "PDF",
+            "identifiers": {"puid": ["fmt/18"], "extension": ["pdf"]},
+            "identifier_claims": [
+                {"kind": "puid", "value": "fmt/18", "source": "qnl", "verified": False}
+            ],
+        },
+    ]
+
+    result = resolve_format("fmt/18", formats)
+
+    assert result.resolved
+    assert result.match_type == "verified_authority_identifier"
+    assert result.format_doc["canonical_id"] == "puid-fmt-18"
+
+
+def test_reports_ambiguous_when_two_verified_authority_records_share_identifier():
+    formats = [
+        {
+            "canonical_id": "puid-fmt-18-a",
+            "preferred_name": "PDF A",
+            "identifier_claims": [
+                {"kind": "puid", "value": "fmt/18", "source": "pronom-a", "verified": True}
+            ],
+        },
+        {
+            "canonical_id": "puid-fmt-18-b",
+            "preferred_name": "PDF B",
+            "identifier_claims": [
+                {"kind": "puid", "value": "fmt/18", "source": "pronom-b", "verified": True}
+            ],
+        },
+    ]
+
+    result = resolve_format("fmt/18", formats)
+
+    assert result.ambiguous
+    assert result.match_type == "verified_authority_identifier"
+    assert {match["canonical_id"] for match in result.matches} == {"puid-fmt-18-a", "puid-fmt-18-b"}
+
+
 def test_resolves_unique_mime_extension_and_name_values():
     mime = resolve_format("application/pdf", [FORMATS[0]])
     extension = resolve_format(".nc", FORMATS)
