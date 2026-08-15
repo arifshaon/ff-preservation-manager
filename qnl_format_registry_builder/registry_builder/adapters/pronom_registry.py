@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import re
 import zipfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
 
 DEFAULT_PRONOM_TREE_URL = "https://api.github.com/repos/nationalarchives/pronom/git/trees/develop?recursive=1"
 DEFAULT_PRONOM_RAW_BASE = "https://raw.githubusercontent.com/nationalarchives/pronom/develop"
@@ -100,6 +102,8 @@ def _record_from_pronom_json(
         "snapshot_sha256": snapshot.sha256,
         "snapshot_changed": snapshot.changed,
         "snapshot_from_cache": snapshot.from_cache,
+        "snapshot_policy": snapshot.metadata.get("snapshot_policy"),
+        "snapshot_retained": snapshot.metadata.get("snapshot_retained", True),
         "last_updated_date": record.get("lastUpdatedDate"),
         "format_disclosure": record.get("formatDisclosure"),
         "format_risk": record.get("formatRisk"),
@@ -124,9 +128,10 @@ def _record_from_pronom_json(
 class PronomRegistryAdapter(SourceAdapter):
     """Acquire and parse PRONOM registry data from its GitHub JSON dataset.
 
-    Full PRONOM runs should use `github_archive`, which snapshots one repository
-    archive and extracts JSON records from it. Targeted PUID or explicit-URI runs
-    still acquire individual JSON snapshots for small tests.
+    Full PRONOM runs can use `github_archive`, which snapshots one repository
+    archive and extracts JSON records from it. Individual JSON mode remains
+    supported and can use temporary per-record snapshots that are deleted after
+    extraction while normalized source records are persisted through storage.
     """
 
     type_name = "pronom_registry"
@@ -154,6 +159,29 @@ class PronomRegistryAdapter(SourceAdapter):
         if self.config.get("puids") or self.config.get("uris") or self.config.get("github_tree_url") or self.config.get("tree_url"):
             return "github_json"
         return "github_archive"
+
+    def _snapshot_policy(self) -> str:
+        """Return cache policy for individual JSON acquisition.
+
+        `cache` keeps per-record snapshots in the content-addressed cache. This is
+        useful for targeted PUID tests. `temporary` writes each downloaded JSON to
+        a temporary file, extracts it, and deletes it after extraction. Tree-based
+        full JSON runs default to `temporary` so they do not fill the cache with
+        thousands of files.
+        """
+        if self.config.get("delete_after_extract") is True:
+            return "temporary"
+        configured = self.config.get("snapshot_policy") or self.config.get("cache_strategy")
+        if configured:
+            policy = str(configured).strip().lower()
+            if policy in {"temporary", "transient", "delete", "delete_after_extract", "stream"}:
+                return "temporary"
+            if policy in {"cache", "cached", "retain", "retained"}:
+                return "cache"
+            raise ValueError(f"Unsupported PRONOM snapshot_policy/cache_strategy: {configured}")
+        if self.config.get("github_tree_url") or self.config.get("tree_url"):
+            return "temporary"
+        return "cache"
 
     def _uris_from_tree(self) -> list[str]:
         tree_url = self.config.get("github_tree_url") or self.config.get("tree_url")
@@ -196,7 +224,7 @@ class PronomRegistryAdapter(SourceAdapter):
         if not uris:
             raise ValueError(
                 "pronom_registry github_json mode requires one of: uris, puids, or github_tree_url. "
-                "Use github_archive for the full PRONOM dataset without thousands of snapshot files."
+                "For full runs, prefer github_archive when available or github_json with snapshot_policy:temporary."
             )
         max_records = self.config.get("max_records")
         deduped = list(dict.fromkeys(uris))
@@ -206,6 +234,40 @@ class PronomRegistryAdapter(SourceAdapter):
             return limited
         return deduped
 
+    def _temporary_snapshot_dir(self) -> Path:
+        return ensure_dir(self.workdir / "temporary_snapshots" / self.source_id)
+
+    def _acquire_temporary_uri_snapshot(self, uri: str, *, suffix: str, note: str | None = None) -> SourceSnapshot:
+        data, headers = read_uri(uri)
+        digest = sha256_bytes(data)
+        suffix = suffix if suffix.startswith(".") else f".{suffix}"
+        local_path = self._temporary_snapshot_dir() / f"{digest}{suffix}"
+        local_path.write_bytes(data)
+        return SourceSnapshot(
+            source_id=self.source_id,
+            source_type=self.type_name,
+            uri=uri,
+            acquired_at=utc_now_iso(),
+            sha256=digest,
+            local_path=str(local_path),
+            content_type=headers.get("content-type"),
+            note="; ".join(x for x in [note, "snapshot_policy=temporary", "delete_after_extract=true"] if x),
+            changed=None,
+            from_cache=False,
+            metadata={
+                "snapshot_policy": "temporary",
+                "snapshot_retained": False,
+                "delete_after_extract": True,
+                "source_location": "remote_uri",
+            },
+        )
+
+    def _delete_temporary_snapshot(self, snapshot: SourceSnapshot) -> None:
+        if not snapshot.metadata.get("delete_after_extract"):
+            return
+        with suppress(FileNotFoundError):
+            Path(snapshot.local_path).unlink()
+
     def _acquire_archive(self) -> list[SourceSnapshot]:
         archive_url = self.config.get("archive_url") or DEFAULT_PRONOM_ARCHIVE_URL
         self._progress(f"Acquiring PRONOM repository archive: {archive_url}")
@@ -213,7 +275,7 @@ class PronomRegistryAdapter(SourceAdapter):
             archive_url,
             suffix=".zip",
             note="retrieval_mode=github_archive",
-            metadata={"source_location": "pronom_github_archive"},
+            metadata={"source_location": "pronom_github_archive", "snapshot_policy": "cache", "snapshot_retained": True},
         )
         status = "changed" if snapshot.changed else "unchanged"
         self._progress(f"PRONOM archive snapshot acquired ({status})")
@@ -223,10 +285,23 @@ class PronomRegistryAdapter(SourceAdapter):
         uris = self._uris()
         total = len(uris)
         interval = self._progress_interval()
-        self._progress(f"Acquiring {total} PRONOM JSON records")
+        policy = self._snapshot_policy()
+        if policy == "temporary":
+            self._progress(f"Acquiring {total} PRONOM JSON records with temporary snapshots")
+        else:
+            self._progress(f"Acquiring {total} PRONOM JSON records with retained cache snapshots")
         snapshots: list[SourceSnapshot] = []
         for index, uri in enumerate(uris, start=1):
-            snapshots.append(self.acquire_uri_snapshot(uri, suffix=".json", note="retrieval_mode=github_json"))
+            if policy == "temporary":
+                snapshot = self._acquire_temporary_uri_snapshot(uri, suffix=".json", note="retrieval_mode=github_json")
+            else:
+                snapshot = self.acquire_uri_snapshot(
+                    uri,
+                    suffix=".json",
+                    note="retrieval_mode=github_json; snapshot_policy=cache",
+                    metadata={"snapshot_policy": "cache", "snapshot_retained": True},
+                )
+            snapshots.append(snapshot)
             if index == 1 or index % interval == 0 or index == total:
                 self._progress(f"Acquired {index}/{total} PRONOM JSON records")
         return snapshots
@@ -273,17 +348,20 @@ class PronomRegistryAdapter(SourceAdapter):
         if total:
             self._progress(f"Extracting {total} PRONOM snapshots")
         for index, snap in enumerate(snapshots, start=1):
-            record = json.loads(Path(snap.local_path).read_text(encoding="utf-8"))
-            raw_record = _record_from_pronom_json(
-                source_id=self.source_id,
-                source_type=self.type_name,
-                snapshot=snap,
-                record=record,
-                source_file=snap.uri,
-                evidence_type="pronom_registry_github_json",
-            )
-            if raw_record:
-                records.append(raw_record)
+            try:
+                record = json.loads(Path(snap.local_path).read_text(encoding="utf-8"))
+                raw_record = _record_from_pronom_json(
+                    source_id=self.source_id,
+                    source_type=self.type_name,
+                    snapshot=snap,
+                    record=record,
+                    source_file=snap.uri,
+                    evidence_type="pronom_registry_github_json",
+                )
+                if raw_record:
+                    records.append(raw_record)
+            finally:
+                self._delete_temporary_snapshot(snap)
             if index == 1 or index % interval == 0 or index == total:
                 self._progress(f"Extracted {index}/{total} PRONOM snapshots")
         return records
