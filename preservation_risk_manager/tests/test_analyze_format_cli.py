@@ -10,11 +10,15 @@ FRAMEWORK = {
     "framework_id": "example",
     "version": "1",
     "unknown_answer_id": "unknown",
-    "score_bands": [
-        {"band": "Low", "min_score": 0, "max_score": 5},
-        {"band": "Moderate", "min_score": 6, "max_score": 12},
-        {"band": "High", "min_score": 13, "max_score": 30},
-    ],
+    "scale": {
+        "direction": "higher_is_risk",
+        "min_completeness_for_band": 0.67,
+        "bands": [
+            {"band": "Low", "min_score": 0, "max_score": 5},
+            {"band": "Moderate", "min_score": 6, "max_score": 12},
+            {"band": "High", "min_score": 13, "max_score": 30},
+        ],
+    },
     "questions": [
         {
             "id": "q_disclosure",
@@ -68,10 +72,10 @@ def _write_framework(tmp_path):
     return framework_path
 
 
-def _pdf_record():
+def _pdf_record(canonical_id="puid-fmt-18", name="Portable Document Format"):
     return {
-        "canonical_id": "puid-fmt-18",
-        "preferred_name": "Portable Document Format",
+        "canonical_id": canonical_id,
+        "preferred_name": name,
         "identifiers": {
             "puid": ["fmt/18"],
             "extension": ["pdf"],
@@ -102,12 +106,14 @@ def test_analyze_format_resolves_registry_json_and_derives_answers(tmp_path, cap
 
     assert rc == 0
     output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "ok"
     assert output["resolution"]["status"] == "resolved"
     assert output["resolution"]["match_type"] == "authority_identifier"
     assert output["format"]["format_id"] == "puid-fmt-18"
     assert output["format"]["puids"] == ["fmt/18"]
     assert output["analysis"]["analysed_band"] == "Low"
     assert output["analysis"]["analysis_status"] == "Assessed"
+    assert output["analysis"]["min_completeness_for_band"] == 0.67
     assert output["local_risk_posture"] == "Low"
     assert output["derived_answers"]["answers"]["q_disclosure"] == "public_specification"
 
@@ -142,9 +148,46 @@ def test_analyze_format_can_read_registry_builder_storage_config(tmp_path, monke
     assert rc == 0
     assert created == [{"type": "file", "path": "registry_store"}]
     output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "ok"
     assert output["resolution"]["status"] == "resolved"
     assert output["analysis"]["analysis_status"] == "Assessed"
     assert output["local_risk_posture"] == "Low"
+
+
+def test_analyze_format_returns_explicit_nonzero_ambiguous_status(tmp_path, capsys):
+    framework_path = _write_framework(tmp_path)
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps([
+            _pdf_record("puid-fmt-18", "Portable Document Format"),
+            _pdf_record("puid-fmt-19", "PDF/A"),
+        ]),
+        encoding="utf-8",
+    )
+
+    rc = main([
+        "analyze-format",
+        "--framework", str(framework_path),
+        "--registry-json", str(registry_path),
+        "--format", "pdf",
+    ])
+
+    assert rc == 2
+    output = json.loads(capsys.readouterr().out)
+    assert output == {
+        "resolution": {
+            "match_count": 2,
+            "match_type": "extension",
+            "matches": [
+                {"canonical_id": "puid-fmt-18", "preferred_name": "Portable Document Format"},
+                {"canonical_id": "puid-fmt-19", "preferred_name": "PDF/A"},
+            ],
+            "message": "Extension 'pdf' matches 2 formats; specify a canonical ID or PUID.",
+            "query": "pdf",
+            "status": "ambiguous",
+        },
+        "status": "ambiguous",
+    }
 
 
 def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, capsys):
@@ -171,8 +214,10 @@ def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, cap
 
     assert rc == 0
     output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "ok"
     assert output["analysis"]["analysis_status"] == "Not Assessed"
     assert output["analysis"]["analysed_band"] is None
+    assert output["analysis"]["band_suppressed_reason"] == "not_assessed"
     assert output["local_risk_posture"] == "Needs Assessment"
     assert output["derived_answers"]["derivation"]["q_disclosure"]["status"] == "missing_evidence"
 
