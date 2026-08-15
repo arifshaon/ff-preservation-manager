@@ -45,6 +45,13 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _identifier_bucket(format_record: dict[str, Any], kind: str) -> list[Any]:
+    identifiers = format_record.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        return deepcopy(_as_list(identifiers.get(kind)))
+    return []
+
+
 def _collect(record: dict[str, Any], keys: tuple[str, ...]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for key in keys:
@@ -95,15 +102,16 @@ def format_identity(format_record: dict[str, Any]) -> dict[str, Any]:
         ),
         "label": (
             format_record.get("format_name")
+            or format_record.get("preferred_name")
             or format_record.get("name")
             or format_record.get("label")
         ),
         "identifiers": deepcopy(format_record.get("identifiers") or []),
-        "puids": deepcopy(format_record.get("puids") or []),
-        "loc_ids": deepcopy(format_record.get("loc_ids") or []),
-        "nara_ids": deepcopy(format_record.get("nara_ids") or []),
-        "extensions": deepcopy(format_record.get("extensions") or []),
-        "mime_types": deepcopy(format_record.get("mime_types") or []),
+        "puids": deepcopy(format_record.get("puids") or _identifier_bucket(format_record, "puid")),
+        "loc_ids": deepcopy(format_record.get("loc_ids") or _identifier_bucket(format_record, "loc")),
+        "nara_ids": deepcopy(format_record.get("nara_ids") or _identifier_bucket(format_record, "nara")),
+        "extensions": deepcopy(format_record.get("extensions") or _identifier_bucket(format_record, "extension")),
+        "mime_types": deepcopy(format_record.get("mime_types") or _identifier_bucket(format_record, "mime")),
     }
 
 
