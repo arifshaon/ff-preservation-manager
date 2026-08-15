@@ -10,6 +10,7 @@ __all__ = [
     "actions",
     "currency",
     "errors",
+    "evidence_packs",
     "frameworks",
     "posture",
     "responses",
