@@ -1,0 +1,293 @@
+{
+  "schema_version": "0.1.0",
+  "criterion_set": "qnl_preservation_sustainability_criteria_0.1",
+  "institution_id": "qnl",
+  "institution_name": "Qatar National Library",
+  "default_evidence_owner": "QNL Digital Curation, Preservation, and Access",
+  "default_source": "QNL institutional preservation evidence seed data",
+  "notes": "Seed data and template for QNL-specific format evidence. Add future formats by copying a record, updating the format identifiers, and adding criterion-level claims. This is evidence for preservation-risk analysis, not a final risk decision or preservation action.",
+  "records": [
+    {
+      "source_record_id": "qnl-evidence-pdf",
+      "format": {
+        "name": "PDF",
+        "category": "Document",
+        "puids": ["fmt/18"],
+        "loc_ids": ["fdd000030"],
+        "extensions": ["pdf"],
+        "mime_types": ["application/pdf"]
+      },
+      "description": "QNL treats standard PDF/PDF-A workflows as locally well-supported and low operational risk when files are not encrypted or DRM-protected.",
+      "claims": [
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.disclosure",
+          "evidence_value": "publicly_documented_and_well_understood",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF is treated at QNL as a documented and well-understood preservation/access format with broad tooling support.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.adoption",
+          "evidence_value": "high_adoption",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF is widely encountered in QNL digital collections and user access workflows, making institutional handling routine.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.transparency_readability",
+          "evidence_value": "well_characterized_by_tools",
+          "risk_direction": "lowers_risk",
+          "statement": "Although PDF is not plain text, QNL has standard tools and workflows to characterize, inspect, render, and validate PDF files.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.self_documentation",
+          "evidence_value": "supports_embedded_metadata",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF can carry embedded descriptive and technical metadata, supporting preservation context when metadata is present and maintained.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.external_dependencies",
+          "evidence_value": "low_dependency_in_qnl_environment",
+          "risk_direction": "lowers_risk",
+          "statement": "QNL maintains tools capable of opening, validating, and normalizing ordinary PDF files without depending on a single proprietary workstation environment.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.ip_licensing",
+          "evidence_value": "no_known_local_licensing_barrier",
+          "risk_direction": "lowers_risk",
+          "statement": "QNL has no known local licensing barrier that prevents preservation processing or access handling for ordinary PDF files.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.tpm_encryption",
+          "evidence_value": "acceptable_when_unencrypted",
+          "risk_direction": "lowers_risk",
+          "statement": "Unencrypted PDF files are suitable for QNL ingest, validation, indexing, and migration workflows. Encrypted or DRM-protected PDF files should be treated as a separate risk case.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.container_complexity",
+          "evidence_value": "manageable_complexity",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF can be structurally complex, but QNL has routine tooling and staff familiarity for managing that complexity in normal preservation workflows.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.compression",
+          "evidence_value": "tool_supported",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF compression and embedded resources are handled by QNL's standard validation and rendering toolchain for ordinary PDF files.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.accessibility_features",
+          "evidence_value": "supports_accessibility_features",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF can support text layers, tagging, bookmarks, and other accessibility-related features, although individual files still require quality assessment.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "media.document",
+          "criterion_id": "media.document.text_and_layout_preservation",
+          "evidence_value": "strong_for_document_access",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF is locally suitable for preserving and delivering document layout and page-level access copies in QNL services.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.software_hardware_availability",
+          "evidence_value": "available_and_supported",
+          "risk_direction": "lowers_risk",
+          "statement": "QNL currently maintains software capable of rendering, validating, and processing PDF files.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.staff_expertise",
+          "evidence_value": "strong_internal_expertise",
+          "risk_direction": "lowers_risk",
+          "statement": "QNL digital preservation and curation staff have routine operational experience with PDF preservation and access workflows.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.workflow_integration",
+          "evidence_value": "integrated",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF is integrated into QNL ingest, characterization, preservation, and access workflows.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.scale_storage_cost",
+          "evidence_value": "manageable",
+          "risk_direction": "lowers_risk",
+          "statement": "PDF storage and bandwidth demands are considered manageable within QNL's current preservation and access infrastructure.",
+          "date_observed": "2026-08-15"
+        }
+      ]
+    },
+    {
+      "source_record_id": "qnl-evidence-netcdf",
+      "format": {
+        "name": "netCDF",
+        "category": "Dataset",
+        "extensions": ["nc", "cdf"],
+        "mime_types": ["application/x-netcdf"]
+      },
+      "description": "QNL has no established institutional expertise or routine preservation workflow for netCDF; it should be treated as domain-specific scientific data requiring specialist review.",
+      "claims": [
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.disclosure",
+          "evidence_value": "requires_specialist_review",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL has not yet documented a local assessment of netCDF specifications and preservation implications; specialist review is required before treating it as locally supported.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.adoption",
+          "evidence_value": "domain_specific_adoption",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "netCDF is domain-specific scientific data. QNL does not currently treat it as a routine high-volume institutional preservation format.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.transparency_readability",
+          "evidence_value": "requires_domain_tools",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL staff cannot reliably inspect or interpret netCDF content without specialist scientific data tools and domain knowledge.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.self_documentation",
+          "evidence_value": "potentially_self_describing_but_domain_specific",
+          "risk_direction": "mixed",
+          "statement": "netCDF may include scientific metadata and structure, but QNL requires domain expertise to evaluate whether that metadata is sufficient for long-term understanding and reuse.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.external_dependencies",
+          "evidence_value": "specialist_software_dependency",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "Opening, validating, and interpreting netCDF at QNL would require specialist scientific data libraries or tools that are not part of the current routine preservation workflow.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.ip_licensing",
+          "evidence_value": "not_locally_assessed",
+          "risk_direction": "uncertain",
+          "statement": "QNL has not completed a local licensing/IP assessment for netCDF preservation handling. This is not currently the main risk, but it remains unverified locally.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "sustainability",
+          "criterion_id": "sustainability.tpm_encryption",
+          "evidence_value": "no_local_tpm_evidence",
+          "risk_direction": "uncertain",
+          "statement": "QNL has no current evidence that TPM or encryption is the main preservation issue for netCDF, but this has not been tested through a QNL ingest workflow.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.container_complexity",
+          "evidence_value": "complex_scientific_dataset_structure",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "netCDF should be treated as a structured scientific dataset format rather than a simple single-file access format; QNL needs specialist validation of structure and semantics.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.compression",
+          "evidence_value": "not_locally_tested",
+          "risk_direction": "uncertain",
+          "statement": "QNL has not tested netCDF compression/chunking behavior or migration safety in local preservation workflows.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "technical",
+          "criterion_id": "technical.accessibility_features",
+          "evidence_value": "requires_data_specific_access_strategy",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "netCDF access is not a standard document/media accessibility problem; QNL would need a data-specific access and interpretation strategy.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "media.dataset",
+          "criterion_id": "media.dataset.data_type_preservation",
+          "evidence_value": "requires_specialist_validation",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL lacks local validation procedures to confirm that netCDF variables, dimensions, attributes, and data types are preserved and interpretable over time.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "media.dataset",
+          "criterion_id": "media.dataset.schema_definition",
+          "evidence_value": "domain_schema_review_required",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL would need domain review to understand whether netCDF conventions, metadata, and schemas are sufficient for preservation and reuse.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.software_hardware_availability",
+          "evidence_value": "not_currently_supported",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL does not currently maintain routine preservation software workflows for netCDF ingest, validation, rendering, or access.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.staff_expertise",
+          "evidence_value": "no_current_institutional_expertise",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL does not currently have established institutional expertise for preserving and assessing netCDF scientific datasets.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.workflow_integration",
+          "evidence_value": "not_integrated",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "netCDF is not currently integrated into QNL's routine ingest, characterization, preservation, or access workflows.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.validation_tooling",
+          "evidence_value": "not_integrated",
+          "risk_direction": "raises_risk_for_qnl",
+          "statement": "QNL has not integrated netCDF-specific validation tooling into its preservation pipeline.",
+          "date_observed": "2026-08-15"
+        },
+        {
+          "criterion_group": "institution",
+          "criterion_id": "institution.scale_storage_cost",
+          "evidence_value": "unknown_until_collection_profiled",
+          "risk_direction": "uncertain",
+          "statement": "QNL cannot assess netCDF scale, storage, or bandwidth impact until candidate collections are profiled.",
+          "date_observed": "2026-08-15"
+        }
+      ]
+    }
+  ]
+}
