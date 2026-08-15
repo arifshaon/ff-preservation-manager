@@ -17,7 +17,7 @@ All source adapters share these common fields:
 | `retrieval_mode` | no | Human-readable mode; adapter-specific. |
 | `notes` | no | Operational guidance for maintainers. |
 
-All source adapters should return `SourceSnapshot` objects from `acquire()` and `RawFormatRecord` objects from `extract()`.
+All source adapters return `SourceSnapshot` objects from `acquire()` and `RawFormatRecord` objects from `extract()`.
 
 ---
 
@@ -25,11 +25,7 @@ All source adapters should return `SourceSnapshot` objects from `acquire()` and 
 
 ### Purpose
 
-Reads a simple curated JSON source package. This is useful for tests, small hand-curated sources, and demonstration runs.
-
-### When to use
-
-Use this when a source is already represented in the internal-style JSON structure or when you need a lightweight fixture.
+Reads a simple curated JSON source package. This is useful for tests, small hand-curated sources, and offline demonstrations.
 
 ### Config
 
@@ -43,25 +39,13 @@ Use this when a source is already represented in the internal-style JSON structu
 }
 ```
 
-### Acquisition
+### Acquisition and extraction
 
-Reads configured `uris`. A URI may be a local file path or an HTTP/HTTPS URL, depending on the base read helper.
-
-### Extraction
-
-Emits one `RawFormatRecord` per JSON record.
+Reads configured `uris`. A URI may be a local file path or HTTP/HTTPS URL. Emits one `RawFormatRecord` per JSON record.
 
 ### Identifier authority
 
-Only mark identifiers as verified if the JSON record explicitly represents an authority source and the adapter logic supports that. In normal curated examples, identifiers should be treated as claims, not authority verification.
-
-### Failure handling
-
-Use `required:true` for demo runs where the sample must exist. Use `required:false` only if the source is optional enrichment.
-
-### Tests
-
-Covered by exporter, pipeline, and storage smoke tests that use the sample source.
+Only mark identifiers as verified if the JSON record explicitly represents an authority source and the adapter logic supports that. In normal curated examples, identifiers are claims, not authority verification.
 
 ---
 
@@ -72,10 +56,6 @@ Covered by exporter, pipeline, and storage smoke tests that use the sample sourc
 Reads an institution-specific file-format policy workbook and imports it as institutional policy overlays.
 
 QNL is one configuration of this generic adapter. The adapter itself is not QNL-specific.
-
-### When to use
-
-Use this when an institution maintains its own preservation risk/action spreadsheet and the registry should compare it with external sources.
 
 ### Config
 
@@ -102,13 +82,9 @@ Use this when an institution maintains its own preservation risk/action spreadsh
 }
 ```
 
-### Acquisition
+### Acquisition and extraction
 
-Reads configured workbook paths/URIs and snapshots each workbook.
-
-### Extraction
-
-Emits one `RawFormatRecord` per substantive workbook row.
+Reads configured workbook paths/URIs and snapshots each workbook. Emits one `RawFormatRecord` per substantive workbook row.
 
 Important fields:
 
@@ -127,23 +103,13 @@ The `institution_policy` object carries local risk/action/plan/tool fields.
 
 ### Field mapping behavior
 
-The adapter resolves configured workbook column names using the `field_map`.
-
-Configured fields fail loudly if the requested columns are missing. This prevents silent wrong-column matching.
+The adapter resolves configured workbook column names using `field_map`. Configured fields fail loudly if requested columns are missing. This prevents silent wrong-column matching.
 
 Rows with non-substantive names such as blank, `?`, `n/a`, or `todo` are skipped.
 
 ### Identifier authority
 
 Institutional workbook identifiers are local claims. A PUID copied into the workbook is not a verified PRONOM identifier until PRONOM confirms it.
-
-### Failure handling
-
-For a QNL production registry run, this should normally be `required:true`.
-
-### Tests
-
-Covered by `tests/test_qnl_policy_xlsx.py`.
 
 ---
 
@@ -168,7 +134,7 @@ Use `pinned` for reproducible audit runs.
   "id": "nara_digital_preservation_framework",
   "type": "nara_digital_preservation_framework",
   "enabled": true,
-  "required": false,
+  "required": true,
   "retrieval_mode": "published_csv",
   "release_mode": "pinned",
   "release_date": "20260320",
@@ -228,35 +194,6 @@ Use `local_files` when an administrator downloaded the NARA CSVs manually.
 }
 ```
 
-### Latest fallback order
-
-When `release_mode` is `latest`, the adapter tries:
-
-```text
-1. online latest discovery through GitHub contents API
-2. cached .nara_release_index.json
-3. fallback_local_files / manual_fallback_files / fallback_files
-4. pinned fallback_release_date
-```
-
-### Acquisition
-
-The adapter snapshots the NARA action-plan CSV and the numbered risk-matrix CSV.
-
-Snapshot metadata records:
-
-```text
-release_mode
-release_date
-kind
-github_ref
-github_path
-github_blob_sha, when available
-source_location, online or local_file
-admin_supplied, when local files are used
-release_resolution_error, when fallback is used
-```
-
 ### Extraction
 
 Emits NARA records with:
@@ -290,33 +227,13 @@ nara_total
 
 ### Identifier authority
 
-NARA Format IDs are verified NARA identifiers.
-
-PUIDs found in NARA PRONOM URLs are useful claims but are not verified PRONOM identifiers.
-
-### Failure handling
-
-Usually set `required:false`. NARA enriches the registry, but a temporary GitHub or NARA issue should not prevent a QNL-only registry build unless the run explicitly requires external hazard reconciliation.
-
-### Tests
-
-Covered by `tests/test_nara_preservation_csv.py` and reconciliation tests.
+NARA Format IDs are verified NARA identifiers. PUIDs found in NARA PRONOM URLs are useful claims but are not verified PRONOM identifiers.
 
 ---
 
 ## `nara_preservation_csv`
 
-### Purpose
-
-Deprecated compatibility alias for NARA CSV-based configurations.
-
-### When to use
-
-Do not use for new configs. Use `nara_digital_preservation_framework`.
-
-### Behavior
-
-Delegates to the NARA Digital Preservation Framework logic but keeps the old adapter type name for backward compatibility.
+Deprecated compatibility alias for NARA CSV-based configurations. Do not use for new configs. Use `nara_digital_preservation_framework`.
 
 ---
 
@@ -330,20 +247,9 @@ Reads PRONOM registry records from the public GitHub JSON dataset.
 
 Use this to verify PUIDs and strengthen canonical matching.
 
-### Config: targeted PUIDs
-
-```json
-{
-  "id": "pronom_registry",
-  "type": "pronom_registry",
-  "enabled": true,
-  "required": false,
-  "retrieval_mode": "github_json",
-  "puids": ["fmt/18", "x-fmt/111"]
-}
-```
-
 ### Config: full GitHub tree
+
+The default sample config enables this source as optional enrichment:
 
 ```json
 {
@@ -358,6 +264,21 @@ Use this to verify PUIDs and strengthen canonical matching.
 }
 ```
 
+### Config: targeted PUIDs
+
+Use this for fast tests or small checks:
+
+```json
+{
+  "id": "pronom_registry",
+  "type": "pronom_registry",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "github_json",
+  "puids": ["fmt/18", "x-fmt/111"]
+}
+```
+
 ### Acquisition
 
 Can acquire:
@@ -367,6 +288,8 @@ explicit raw JSON URIs
 configured PUIDs converted to raw JSON URLs
 a recursive GitHub tree filtered to PRONOM JSON signature paths
 ```
+
+For scheduled full-tree runs, set `GITHUB_TOKEN` to reduce GitHub API rate-limit risk.
 
 ### Extraction
 
@@ -389,7 +312,7 @@ PUIDs emitted by this adapter are verified PRONOM identifiers.
 
 ### Failure handling
 
-Often `required:false` in early registry runs. Consider `required:true` for identity-quality runs where verified PUIDs are mandatory.
+Usually `required:false` in multi-source registry runs so a temporary GitHub issue does not destroy a NARA/LOC baseline run. Consider `required:true` for identity-quality runs where verified PUIDs are mandatory.
 
 ### Tests
 
@@ -421,10 +344,6 @@ For source-level PRONOM data, prefer `pronom_registry`.
 }
 ```
 
-### Acquisition
-
-Snapshots configured XML files or URIs.
-
 ### Extraction
 
 Emits one record per `FileFormat` element, including:
@@ -442,23 +361,36 @@ raw XML attributes
 
 PUIDs from PRONOM/DROID XML are verified PRONOM identifiers.
 
-### Failure handling
-
-Usually `required:false` unless this is the main PRONOM source for the run.
-
 ---
 
 ## `loc_fdd_xml`
 
 ### Purpose
 
-Parses Library of Congress FDD XML records.
+Parses Library of Congress Format Description Document XML records.
 
 ### When to use
 
 Use this to add LOC FDD identifiers and sustainability evidence.
 
-### Config
+### Config: official FDD XML ZIP
+
+The default sample config enables this source as optional enrichment:
+
+```json
+{
+  "id": "loc_fdd_xml",
+  "type": "loc_fdd_xml",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "fdd_xml_zip",
+  "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
+}
+```
+
+### Config: local XML directory
+
+Use this when an administrator has staged individual FDD XML files locally:
 
 ```json
 {
@@ -471,9 +403,27 @@ Use this to add LOC FDD identifiers and sustainability evidence.
 }
 ```
 
+### Config: explicit XML URI
+
+```json
+{
+  "id": "loc_fdd_xml",
+  "type": "loc_fdd_xml",
+  "enabled": true,
+  "required": false,
+  "uris": ["https://www.loc.gov/preservation/digital/formats/fddXML/fdd000030.xml"]
+}
+```
+
 ### Acquisition
 
-Reads configured XML URIs and/or all `.xml` files in a configured directory.
+Can acquire:
+
+```text
+the official FDD XML ZIP
+explicit XML or ZIP URIs
+all .xml files in a configured local directory
+```
 
 ### Extraction
 
@@ -487,10 +437,12 @@ puids
 loc_ids
 wikidata_ids
 urls
-raw snapshot reference
+raw snapshot/source-file reference
 ```
 
-The parser is intentionally conservative and extracts a limited subset.
+For ZIP acquisition, one source snapshot may produce many LOC raw records. Each extracted record records the ZIP URI and internal XML filename in its evidence payload.
+
+The parser is intentionally conservative and extracts a limited subset. Detailed sustainability-claim extraction should be added in the later preservation-risk analysis layer.
 
 ### Identifier authority
 
@@ -502,18 +454,12 @@ PUIDs found inside LOC XML are useful claims but should be treated according to 
 
 Usually `required:false` because it is enrichment evidence.
 
+### Tests
+
+Covered by `tests/test_loc_fdd_xml.py`.
+
 ---
 
 ## `qnl_policy_xlsx`
 
-### Purpose
-
-Deprecated compatibility alias for old QNL-specific configuration.
-
-### When to use
-
-Do not use in new configs. Use `institution_policy_xlsx` with `institution_id: "qnl"`.
-
-### Behavior
-
-Delegates to the generic institution policy workbook logic while preserving the old adapter type name.
+Deprecated compatibility alias for old QNL-specific configuration. Do not use in new configs. Use `institution_policy_xlsx` with `institution_id: "qnl"`.
