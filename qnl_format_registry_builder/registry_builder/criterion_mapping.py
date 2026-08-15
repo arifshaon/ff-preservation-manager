@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from registry_builder.criteria import CriteriaError, CriteriaVocabulary, derive_confidence
+from registry_builder.criteria import CriteriaError, CriteriaVocabulary
 from registry_builder.models import utc_now_iso
 from registry_builder.storage import create_store
 from registry_builder.storage.base import RegistryStore
@@ -60,10 +60,7 @@ def load_mappings(path: str | Path) -> list[dict[str, Any]]:
     root = Path(path)
     if root.is_file():
         return [load_mapping(root)]
-    mappings: list[dict[str, Any]] = []
-    for item in sorted(root.glob("*.json")):
-        mappings.append(load_mapping(item))
-    return mappings
+    return [load_mapping(item) for item in sorted(root.glob("*.json"))]
 
 
 def create_store_from_storage_config(path: str | Path) -> RegistryStore:
@@ -166,7 +163,6 @@ def _get_path(data: Any, path: str | None) -> Any:
             if part in current:
                 current = current[part]
                 continue
-            # Mongo-safe fullwidth dot or case-insensitive fallback.
             alt_part = part.replace(".", "\uff0e")
             if alt_part in current:
                 current = current[alt_part]
@@ -320,7 +316,6 @@ def build_criterion_claims(
                             "directness": directness,
                             "covers": rule.get("covers", "full"),
                             "source_independence": source_independence,
-                            "confidence": derive_confidence(directness=directness, source_independence=source_independence),
                             "criteria_version": mapping.get("criteria_version") or criteria.criteria_version,
                             "mapping_version": mapping.get("mapping_version"),
                             "mapping_rule_id": rule_id,
