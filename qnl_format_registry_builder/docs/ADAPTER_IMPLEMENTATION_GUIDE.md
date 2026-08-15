@@ -12,6 +12,14 @@ Exporter        -> writes optional review/interchange files
 
 The most common extension is a new `SourceAdapter`.
 
+For the practical operator/developer runbook that shows how to plug in and run a source today, including downloaded files, JSON, CSV, archives, MongoDB configs, and individual NARA/PRONOM/LOC runs, read:
+
+```text
+docs/ADDING_AND_RUNNING_DATA_SOURCES.md
+```
+
+Use this guide for implementation details. Use `ADDING_AND_RUNNING_DATA_SOURCES.md` when deciding how a source should be acquired and run.
+
 ## Mental model
 
 A source adapter does not create the final registry. It only turns one source into normalized input material for the pipeline.
@@ -29,6 +37,19 @@ source material
 
 The adapter should know how to retrieve and parse its source. It should not know about MongoDB, file storage, change detection, or exports.
 
+## Acquisition patterns
+
+Most source adapters use one of these acquisition patterns:
+
+| Pattern | Use when | Snapshot policy |
+| --- | --- | --- |
+| Downloaded/admin file | An operator has staged a CSV, JSON, XML, XLSX, or ZIP locally. | Retain source snapshot. |
+| One remote CSV/JSON/XML file | The source publishes one stable file. | Retain source snapshot. |
+| One archive/bundle | The source publishes many records in one ZIP or bundle. | Retain one archive snapshot. |
+| Many individual JSON/XML files | No archive exists and retaining thousands of files would waste disk. | Use temporary snapshots and delete after extraction. |
+
+Large source adapters should avoid retaining thousands of tiny files by default. Prefer one bundle/archive snapshot when available. If the source exposes only individual JSON/XML files, support a temporary snapshot policy: read/download the file, extract a `RawFormatRecord`, preserve the useful raw payload in `RawFormatRecord.raw`, then delete the temporary file.
+
 ## Loading adapters without editing core
 
 Built-in adapters still have short names such as:
@@ -38,6 +59,7 @@ standard_json
 institution_policy_xlsx
 nara_digital_preservation_framework
 pronom_registry
+loc_fdd_xml
 ```
 
 Third-party adapters can be loaded directly from config with an explicit `module:ClassName` plugin path:
@@ -100,7 +122,7 @@ def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
 
 ### `acquire()`
 
-`acquire()` retrieves source material and records immutable source snapshots.
+`acquire()` retrieves source material and records source snapshots.
 
 Use the base helper methods where possible:
 
@@ -121,13 +143,17 @@ They also update:
 work/snapshots/<source_id>/.snapshot_index.json
 ```
 
+For large many-file sources, do not blindly call `acquire_uri_snapshot()` thousands of times unless the source policy deliberately requires retaining every file. Use a temporary snapshot policy instead and preserve the raw source payload in the emitted record.
+
 ### `extract()`
 
-`extract()` parses the cached snapshots and returns `RawFormatRecord` objects.
+`extract()` parses snapshots and returns `RawFormatRecord` objects.
 
 It should not fetch network resources. It should only parse `snapshot.local_path`.
 
 This is important because offline replay must be able to rebuild the registry from cached snapshots.
+
+Temporary snapshots are an exception to retention, not to the acquisition/extraction boundary. The file is still acquired first, extracted second, and deleted after extraction.
 
 ## Minimal source adapter skeleton
 
@@ -178,6 +204,8 @@ You can either add this adapter to the built-in registry, or use the `module:Cla
 }
 ```
 
+For fuller JSON and CSV adapter skeletons, including downloaded/local files and MongoDB run configs, see `docs/ADDING_AND_RUNNING_DATA_SOURCES.md`.
+
 ## Config convention
 
 A source config block should use this common shape:
@@ -205,6 +233,8 @@ Common fields:
 | `retrieval_mode` | Human-readable source retrieval mode. |
 | `uris` | Online or local URI inputs, depending on adapter. |
 | `local_files` | Admin-supplied source files, when supported. |
+| `snapshot_policy` | `cache` or `temporary` for adapters that support many-file acquisition. |
+| `progress` / `progress_interval` | Operator feedback for long-running sources. |
 | `notes` | Operational guidance for config maintainers. |
 
 ## Required vs optional sources
@@ -256,6 +286,7 @@ source_location
 github_ref / git_ref where applicable
 github_path / source_path where applicable
 github_blob_sha or equivalent source identifier where available
+snapshot_policy / snapshot_retained where applicable
 ```
 
 ## Identifier authority rules
@@ -335,6 +366,8 @@ evidence=[{
 }]
 ```
 
+When using temporary snapshots, include enough raw payload in `raw` to make the persisted source record useful after the temporary file is deleted.
+
 ## Storage adapter contract
 
 Storage adapters implement:
@@ -378,9 +411,10 @@ Every new adapter should have tests for:
 3. Identifier verification behavior.
 4. Snapshot metadata and SHA handling.
 5. Offline/cache behavior if supported.
-6. Failure behavior for missing required config.
-7. `module:ClassName` plugin loading if it ships outside this repo.
-8. A pipeline-level smoke test if the adapter is expected to be used in production.
+6. Temporary snapshot cleanup if many-file acquisition is supported.
+7. Failure behavior for missing required config.
+8. `module:ClassName` plugin loading if it ships outside this repo.
+9. A pipeline-level smoke test if the adapter is expected to be used in production.
 
 Every new storage backend should have tests for:
 
@@ -401,6 +435,7 @@ Do not build an adapter that writes an export and then imports it into MongoDB. 
 When adding an adapter, update:
 
 1. `docs/ADAPTER_REFERENCE.md`
-2. `config/sources.example.json`, if useful
-3. `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`, if it introduces a new retrieval pattern
-4. `README.md`, only if it changes common operator workflow
+2. `docs/ADDING_AND_RUNNING_DATA_SOURCES.md`, if it introduces a useful run pattern
+3. `config/sources.example.json`, if useful
+4. `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md`, if it introduces a new retrieval pattern
+5. `README.md`, only if it changes common operator workflow
