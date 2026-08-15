@@ -11,6 +11,7 @@ from registry_builder.utils import slugify
 
 _NATIVE_GAP_SCALE = "nara_file_format_risk_matrix"
 _NATIVE_GAP_DIRECTION = "higher_is_safer"
+_VERSION_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])(?:v(?:ersion)?\s*)?(\d+(?:\.\d+)+[a-z]?)\b", re.I)
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -30,16 +31,43 @@ def _all_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[I
 def _has_unverified_strong_identifier(record: RawFormatRecord, *, strong_kinds: set[str]) -> bool:
     """Return True when a record carries a strong namespace claim that is not verified.
 
-    A copied workbook PUID/LOC/NARA ID is useful evidence, but it is not safe as
-    an identity bridge. If such a claim is present, weak name/extension matching
-    must not silently merge the row into an authority record because that recreates
-    the JPEG 1.00 / JFIF 1.02 class of false-positive merge by another route.
+    Copied workbook PUID/LOC/NARA IDs are useful evidence, but they require a
+    safer bridge than ordinary weak name/extension matching. They may attach to a
+    single verified authority group through the copied identifier only when names
+    do not carry conflicting version discriminators.
     """
     return any(identifier.kind in strong_kinds and not identifier.verified for identifier in record.identifiers)
 
 
 def _group_has_unverified_strong_identifier(items: list[RawFormatRecord], *, strong_kinds: set[str]) -> bool:
     return any(_has_unverified_strong_identifier(record, strong_kinds=strong_kinds) for record in items)
+
+
+def version_tokens(name: str | None) -> frozenset[str]:
+    """Return explicit version-like tokens from a format name.
+
+    This intentionally captures decimal version discriminators such as 1.00 and
+    1.02. Plain class numbers are ignored, so names such as PDF and Portable
+    Document Format do not conflict merely because one is abbreviated.
+    """
+    if not name:
+        return frozenset()
+    return frozenset(match.group(1).lower() for match in _VERSION_TOKEN_RE.finditer(name))
+
+
+def _names_conflict(a: str | None, b: str | None) -> bool:
+    """Return True when both names carry different explicit version tokens."""
+    left = version_tokens(a)
+    right = version_tokens(b)
+    return bool(left and right and left != right)
+
+
+def _groups_name_conflict(left: list[RawFormatRecord], right: list[RawFormatRecord]) -> bool:
+    for left_record in left:
+        for right_record in right:
+            if _names_conflict(left_record.name, right_record.name):
+                return True
+    return False
 
 
 def _institution_policy(record: RawFormatRecord) -> dict:
@@ -300,15 +328,40 @@ def _safe_claimed_strong_identifier_aliases(
     *,
     strong_kinds: set[str],
 ) -> dict[tuple[str, str], tuple[str, str]]:
-    """Return no aliases for copied strong identifiers.
+    """Alias copied strong identifiers to a single verified group when names agree.
 
-    Unverified strong identifiers from non-authority sources are retained as
-    evidence claims, but they are not identity bridges. A copied workbook PUID
-    must not collapse a local row into PRONOM unless a verified authority source
-    supplied that identifier on the same record group through normal verified
-    identifier reconciliation.
+    Institutional evidence often carries copied PUID/LOC/NARA identifiers so it
+    can point at an authority format. The copied identifier is not verified by
+    that institutional source, so it may bridge only to one verified authority
+    group, and only when explicit version tokens in the names do not conflict.
     """
-    return {}
+    verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
+    for group_key, items in groups.items():
+        for record in items:
+            for identifier in _verified_identifiers(record):
+                if identifier.kind in strong_kinds:
+                    verified_targets[(identifier.kind, identifier.value)].add(group_key)
+
+    aliases: dict[tuple[str, str], tuple[str, str]] = {}
+    for group_key, items in groups.items():
+        if group_key[0] in strong_kinds:
+            continue
+        candidates: set[tuple[str, str]] = set()
+        for record in items:
+            for identifier in _all_identifiers(record):
+                if identifier.kind not in strong_kinds or identifier.verified:
+                    continue
+                targets = verified_targets.get((identifier.kind, identifier.value), set())
+                if len(targets) == 1:
+                    candidates.update(targets)
+        candidates.discard(group_key)
+        if len(candidates) != 1:
+            continue
+        target = next(iter(candidates))
+        if _groups_name_conflict(items, groups[target]):
+            continue
+        aliases[group_key] = target
+    return aliases
 
 
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
