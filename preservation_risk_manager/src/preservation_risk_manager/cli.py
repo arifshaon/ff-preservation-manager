@@ -14,8 +14,20 @@ from preservation_risk_manager.posture import compute_local_risk_posture
 from preservation_risk_manager.scoring import score_answers
 
 
+def _require_file(path: str | Path, *, label: str) -> Path:
+    candidate = Path(path).expanduser()
+    if candidate.is_file():
+        return candidate
+    attempted = candidate.resolve(strict=False)
+    raise FileNotFoundError(
+        f"{label} not found: {attempted}. Pass an existing file path. "
+        "If you need a registry export, run registry_builder first with exports enabled."
+    )
+
+
 def _load_json(path: str | Path) -> dict[str, Any]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    path = _require_file(path, label="JSON input")
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"Expected JSON object in {path}")
     return data
@@ -42,7 +54,7 @@ def _analysis_result(
     readiness_status: str = "Unknown",
     exposure_level: str = "Unknown",
 ) -> dict[str, Any]:
-    framework = load_framework(framework_path)
+    framework = load_framework(_require_file(framework_path, label="Framework file"))
     analysis = score_answers(framework, _answer_map(answer_document))
     result: dict[str, Any] = {
         "format": evidence_pack.get("format"),
@@ -96,14 +108,14 @@ def _resolution_summary(resolution) -> dict[str, Any]:
 
 
 def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
-    framework = load_framework(args.framework)
-    store = JsonRegistryStore.from_registry_json(args.registry_json)
+    framework_path = _require_file(args.framework, label="Framework file")
+    registry_path = _require_file(args.registry_json, label="Registry JSON file")
+    framework = load_framework(framework_path)
+    store = JsonRegistryStore.from_registry_json(registry_path)
     reader = RegistryReader(store=store)
     resolution = FormatResolver(reader).resolve(args.format)
     if not resolution.resolved or not resolution.format_doc:
         result = {"resolution": _resolution_summary(resolution)}
-        if resolution.ambiguous:
-            raise SystemExit(json.dumps(result, indent=2, sort_keys=True))
         raise SystemExit(json.dumps(result, indent=2, sort_keys=True))
 
     evidence_pack = build_evidence_pack(
@@ -168,6 +180,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    result = args.func(args)
+    try:
+        result = args.func(args)
+    except FileNotFoundError as exc:
+        parser.exit(2, f"error: {exc}\n")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
