@@ -31,6 +31,23 @@ def _institution_policy(record: RawFormatRecord) -> dict:
     return record.institution_policy or record.qnl or {}
 
 
+def _institution_evidence_claims(record: RawFormatRecord) -> list[dict[str, Any]]:
+    claims: list[dict[str, Any]] = []
+    for sequence, claim in enumerate(record.institution_evidence or [], start=1):
+        stored = dict(claim)
+        stored.setdefault("source_id", record.source_id)
+        stored.setdefault("source_type", record.source_type)
+        stored.setdefault("source_record_id", record.source_record_id)
+        stored.setdefault("derived_by", "human")
+        stored.setdefault("review_status", "approved")
+        stored.setdefault("claim_sequence", sequence)
+        if not stored.get("claim_id"):
+            criterion = stored.get("criterion_id") or f"claim-{sequence}"
+            stored["claim_id"] = "|".join(str(x or "") for x in (record.source_id, record.source_record_id, criterion, sequence))
+        claims.append(stored)
+    return claims
+
+
 def _weak_match_key(record: RawFormatRecord) -> tuple[str, str] | None:
     """Return a conservative weak match key.
 
@@ -309,6 +326,9 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
             policy = _institution_policy(r)
             if policy:
                 cf.institution_policy_overlays.append(policy)
+            for claim in _institution_evidence_claims(r):
+                if claim not in cf.institution_evidence_claims:
+                    cf.institution_evidence_claims.append(claim)
             if r.hazard:
                 cf.external_hazard.append(r.hazard | {"source_id": r.source_id})
             if r.readiness:
