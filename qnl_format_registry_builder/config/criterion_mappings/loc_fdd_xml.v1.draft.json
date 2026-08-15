@@ -1,0 +1,117 @@
+{
+  "source_type": "loc_fdd_xml",
+  "mapping_version": "2026-08-15-draft",
+  "criteria_version": "v1",
+  "native_vocabulary": "loc_fdd_xml",
+  "mapping_mode": "manual_draft",
+  "review_status": "draft",
+  "notes": "Draft mapping for LOC FDD sustainability factors. Current adapter mostly extracts identity; audit should report raw XML sustainability factors as an adapter gap until native_fields.sustainability_factors is populated.",
+  "excluded_from_criteria": [],
+  "maps": [
+    {
+      "id": "loc.disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "native_fields.sustainability_factors.disclosure",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "Full": "public_specification",
+        "Partial": "partial_specification",
+        "Minimal": "proprietary_documented",
+        "No": "undocumented"
+      }
+    },
+    {
+      "id": "loc.adoption.v1",
+      "criterion": "sustainability.adoption",
+      "from_field": "native_fields.sustainability_factors.adoption",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "Very High": "very_high",
+        "High": "high",
+        "Moderate": "moderate",
+        "Low": "low",
+        "Negligible": "negligible"
+      }
+    },
+    {
+      "id": "loc.transparency.v1",
+      "criterion": "sustainability.transparency_readability",
+      "from_field": "native_fields.sustainability_factors.transparency",
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "Transparent": "transparent",
+        "Partially Transparent": "partially_transparent",
+        "Opaque": "opaque"
+      }
+    },
+    {
+      "id": "loc.self_documentation.v1",
+      "criterion": "sustainability.self_documentation",
+      "from_field": "native_fields.sustainability_factors.self_documentation",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "Self-documenting": "self_describing",
+        "Partial": "partially_self_describing",
+        "External": "externally_documented",
+        "None": "not_self_describing"
+      }
+    },
+    {
+      "id": "loc.external_dependencies.v1",
+      "criterion": "sustainability.external_dependencies",
+      "from_field": "native_fields.sustainability_factors.external_dependencies",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "None": "none",
+        "Low": "low",
+        "Moderate": "moderate",
+        "High": "high"
+      }
+    },
+    {
+      "id": "loc.patents.v1",
+      "criterion": "sustainability.ip_licensing",
+      "from_field": "native_fields.sustainability_factors.impact_of_patents",
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "None": "no_known_barrier",
+        "Low": "limited_or_unclear",
+        "Moderate": "limited_or_unclear",
+        "High": "known_constraint"
+      }
+    },
+    {
+      "id": "loc.technical_protection.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "native_fields.sustainability_factors.technical_protection_mechanisms",
+      "directness": "explicit",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "draft",
+      "values": {
+        "None": "none_or_not_applicable",
+        "Low": "possible",
+        "Moderate": "possible",
+        "High": "known_constraint"
+      }
+    }
+  ]
+}
