@@ -150,11 +150,6 @@ def _registry_reader_from_args(args: argparse.Namespace) -> RegistryReader:
     return RegistryReader(storage_config=load_storage_config(storage_path))
 
 
-def _canonical_id(format_doc: dict[str, Any]) -> str | None:
-    value = format_doc.get("canonical_id") or format_doc.get("format_id") or format_doc.get("id")
-    return str(value) if value is not None else None
-
-
 def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     framework_path = _require_file(args.framework, label="Framework file")
     framework = load_framework(framework_path)
@@ -164,11 +159,10 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
         result = {"status": resolution.status, "resolution": _resolution_summary(resolution)}
         raise CliFailure(result, exit_code=2)
 
-    canonical_id = _canonical_id(resolution.format_doc)
-    criterion_claims = (
-        reader.get_criterion_claims(canonical_id=canonical_id, institution_id=args.institution)
-        if canonical_id
-        else []
+    criterion_claim_canonical_ids = reader.criterion_claim_canonical_ids(resolution.format_doc)
+    criterion_claims = reader.get_criterion_claims_for_format(
+        resolution.format_doc,
+        institution_id=args.institution,
     )
     evidence_pack = build_evidence_pack(
         resolution.format_doc,
@@ -184,6 +178,7 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
         "format": evidence_pack.get("format"),
         "scope": evidence_pack.get("scope", "global"),
         "evidence_hash": evidence_hash(evidence_pack),
+        "criterion_claim_canonical_ids": criterion_claim_canonical_ids,
         "criterion_claims_used": len(criterion_claims),
         "derived_answers": answer_document,
         "analysis": analysis,
