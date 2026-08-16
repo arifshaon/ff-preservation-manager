@@ -107,3 +107,58 @@ def test_registry_reader_scopes_format_evidence_claims_to_institution():
     assert reader.get_format_evidence_claims(canonical_id="fmt/18", institution_id="qnl") == [
         {"canonical_id": "fmt/18", "institution_id": "qnl", "criterion_id": "institution.staff_expertise"}
     ]
+
+
+def test_registry_reader_reads_global_criterion_claims_only_for_global_scope():
+    store = FakeStore({
+        "criterion_claims": [
+            {"canonical_id": "fmt-pdf", "source_id": "loc_fdd_xml", "criterion_id": "sustainability.disclosure"},
+            {
+                "canonical_id": "fmt-pdf",
+                "source_id": "qnl_seed",
+                "institution_id": "qnl",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+            },
+            {"canonical_id": "fmt-netcdf", "source_id": "loc_fdd_xml", "criterion_id": "sustainability.disclosure"},
+        ]
+    })
+    reader = RegistryReader(store=store)
+
+    assert reader.get_criterion_claims(canonical_id="fmt-pdf") == [
+        {"canonical_id": "fmt-pdf", "source_id": "loc_fdd_xml", "criterion_id": "sustainability.disclosure"}
+    ]
+
+
+def test_registry_reader_reads_global_and_matching_institution_criterion_claims():
+    store = FakeStore({
+        "criterion_claims": [
+            {"canonical_id": "fmt-pdf", "source_id": "loc_fdd_xml", "criterion_id": "sustainability.disclosure"},
+            {
+                "canonical_id": "fmt-pdf",
+                "source_id": "qnl_seed",
+                "institution_id": "qnl",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+            },
+            {
+                "canonical_id": "fmt-pdf",
+                "source_id": "other_seed",
+                "institution_id": "other",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+            },
+        ]
+    })
+    reader = RegistryReader(store=store)
+
+    assert reader.get_criterion_claims(canonical_id="fmt-pdf", institution_id="qnl") == [
+        {"canonical_id": "fmt-pdf", "source_id": "loc_fdd_xml", "criterion_id": "sustainability.disclosure"},
+        {
+            "canonical_id": "fmt-pdf",
+            "source_id": "qnl_seed",
+            "institution_id": "qnl",
+            "source_independence": "institution_scoped",
+            "criterion_id": "sustainability.disclosure",
+        },
+    ]
