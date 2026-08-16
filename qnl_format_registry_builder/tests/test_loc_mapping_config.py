@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from registry_builder.criteria import load_criteria
-from registry_builder.criterion_mapping import load_mapping, validate_mapping
+from registry_builder.criterion_mapping import build_criterion_claims, load_mapping, validate_mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,3 +58,39 @@ def test_loc_mapping_keeps_identity_fields_out_of_criterion_rules():
         assert "loc_ids" not in mapped_fields
         assert "puids" not in mapped_fields
         assert "wikidata_ids" not in mapped_fields
+
+
+def test_loc_pdf_embedded_font_dependency_maps_to_low_external_dependency():
+    criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
+    _, approved = _load_loc_pair()
+    canonical = {
+        "canonical_id": "loc-fdd000030",
+        "current": True,
+        "source_records": [
+            {
+                "source_id": "loc_fdd_xml",
+                "source_type": "loc_fdd_xml",
+                "source_record_id": "fdd000030",
+            }
+        ],
+    }
+    source_record = {
+        "source_id": "loc_fdd_xml",
+        "source_type": "loc_fdd_xml",
+        "source_record_id": "fdd000030",
+        "native_fields": {
+            "sustainability_factors": {
+                "external_dependencies": (
+                    "Faithful rendering requires that fonts be embedded. "
+                    "PDF/A, PDF/X, and PDF/E-1 require that fonts be embedded."
+                )
+            }
+        },
+    }
+
+    claims = build_criterion_claims([canonical], [source_record], [approved], criteria)
+
+    assert [claim["criterion_id"] for claim in claims] == ["sustainability.external_dependencies"]
+    assert claims[0]["mapping_rule_id"] == "loc.external_dependencies.from_sustainability_factor.v1"
+    assert claims[0]["value"] == "low"
+    assert claims[0]["review_status"] == "approved"
