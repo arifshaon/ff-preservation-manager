@@ -53,6 +53,28 @@ _EXTENSION_STOPWORDS = {
     "version",
     "www",
 }
+_SUSTAINABILITY_FACTOR_ALIASES = {
+    "disclosure": {"disclosure"},
+    "adoption": {"adoption"},
+    "transparency": {"transparency"},
+    "self_documentation": {"selfdocumentation", "selfdocumenting", "selfdoc"},
+    "external_dependencies": {"externaldependencies", "externaldependency"},
+    "impact_of_patents": {
+        "impactofpatents",
+        "impactofpatent",
+        "licensingandpatents",
+        "licensingpatents",
+        "patents",
+        "patentclaims",
+    },
+    "technical_protection_mechanisms": {
+        "technicalprotectionmechanisms",
+        "technicalprotectionconsiderations",
+        "technicalprotection",
+        "technicalprotectionmechanism",
+    },
+}
+_SUSTAINABILITY_SECTION_NAMES = {"sustainabilityfactors", "sustainabilityfactor", "sustainability"}
 
 
 def _local_name(tag: str) -> str:
@@ -61,6 +83,14 @@ def _local_name(tag: str) -> str:
 
 def _normalized_local_name(tag: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", _local_name(tag))
+
+
+def _normalize_label(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _text_content(elem: ET.Element) -> str:
+    return re.sub(r"\s+", " ", " ".join(text.strip() for text in elem.itertext() if text and text.strip())).strip()
 
 
 def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
@@ -104,6 +134,69 @@ def _declared_extensions(root: ET.Element) -> list[str]:
             if _normalized_local_name(attr_name) in _DECLARED_EXTENSION_ELEMENT_NAMES or attr_name.lower() in {"value", "name"}:
                 extensions.update(_extension_tokens(attr_value))
     return sorted(extensions)
+
+
+def _factor_key_from_label(value: str) -> str | None:
+    normalized = _normalize_label(value)
+    if not normalized:
+        return None
+    for factor_key, aliases in _SUSTAINABILITY_FACTOR_ALIASES.items():
+        if normalized in aliases or any(alias in normalized for alias in aliases):
+            return factor_key
+    return None
+
+
+def _strip_leading_label(text: str, label: str) -> str:
+    if not text:
+        return ""
+    if not label:
+        return text
+    pattern = re.compile(rf"^\s*{re.escape(label)}\s*[:|–—-]?\s*", flags=re.I)
+    return pattern.sub("", text, count=1).strip()
+
+
+def _extract_sustainability_factors(root: ET.Element) -> dict[str, str]:
+    """Extract LOC FDD sustainability factor prose as source-native fields.
+
+    The adapter stores upstream LOC factor text only; it does not decide risk
+    bands or criterion values. Declarative mapping configs decide whether a
+    phrase is strong enough to become a normalized criterion claim.
+    """
+    factors: dict[str, str] = {}
+
+    # Direct element form: <disclosure>...</disclosure>,
+    # <externalDependencies>...</externalDependencies>, etc.
+    for elem in root.iter():
+        factor_key = _factor_key_from_label(_local_name(elem.tag))
+        if factor_key:
+            text = _text_content(elem)
+            if text:
+                factors.setdefault(factor_key, text)
+
+    # Attribute/labelled table form: <factor name="Disclosure">...</factor> or
+    # <row><label>Disclosure</label><value>...</value></row>.
+    for elem in root.iter():
+        factor_key = None
+        label_text = ""
+        for attr_name, attr_value in elem.attrib.items():
+            possible = _factor_key_from_label(attr_value) or _factor_key_from_label(attr_name)
+            if possible:
+                factor_key = possible
+                label_text = str(attr_value)
+                break
+        if factor_key is None:
+            for child in list(elem):
+                possible = _factor_key_from_label(_text_content(child))
+                if possible:
+                    factor_key = possible
+                    label_text = _text_content(child)
+                    break
+        if factor_key:
+            text = _strip_leading_label(_text_content(elem), label_text)
+            if text:
+                factors.setdefault(factor_key, text)
+
+    return factors
 
 
 def _snapshot_is_zip(snapshot: SourceSnapshot) -> bool:
@@ -150,6 +243,7 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
     wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
     extensions = _declared_extensions(root)
+    sustainability_factors = _extract_sustainability_factors(root)
     name = titles[0] if titles else None
     if not loc_id and not name:
         return None
@@ -165,6 +259,19 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     if not snapshot_retained:
         raw["xml_text"] = text
 
+    evidence = {
+        "type": evidence_type,
+        "source_file": source_file,
+        "source_archive": snapshot.uri if _snapshot_is_zip(snapshot) else None,
+        "snapshot_sha256": snapshot.sha256,
+        "snapshot_changed": snapshot.changed,
+        "snapshot_from_cache": snapshot.from_cache,
+        "snapshot_policy": snapshot.metadata.get("snapshot_policy"),
+        "snapshot_retained": snapshot_retained,
+    }
+    if sustainability_factors:
+        evidence["sustainability_factor_count"] = len(sustainability_factors)
+
     return RawFormatRecord(
         source_id=snapshot.source_id,
         source_type=snapshot.source_type,
@@ -176,16 +283,8 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
         loc_ids=[loc_id] if loc_id else [],
         wikidata_ids=wikidata,
         urls={"loc": loc_url, "loc_source": snapshot.uri},
-        evidence=[{
-            "type": evidence_type,
-            "source_file": source_file,
-            "source_archive": snapshot.uri if _snapshot_is_zip(snapshot) else None,
-            "snapshot_sha256": snapshot.sha256,
-            "snapshot_changed": snapshot.changed,
-            "snapshot_from_cache": snapshot.from_cache,
-            "snapshot_policy": snapshot.metadata.get("snapshot_policy"),
-            "snapshot_retained": snapshot_retained,
-        }],
+        evidence=[evidence],
+        native_fields={"sustainability_factors": sustainability_factors} if sustainability_factors else {},
         raw=raw,
     )
 
