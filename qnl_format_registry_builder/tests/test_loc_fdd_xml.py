@@ -56,6 +56,35 @@ def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
     assert "xml_text" not in record.raw
 
 
+def test_loc_fdd_xml_uses_filename_not_referenced_fdd_id(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    webp_xml = """<?xml version='1.0' encoding='UTF-8'?>
+    <fdd>
+      <title>WebP</title>
+      <category>file-format</category>
+      <relatedFormat><id>fdd000025</id><name>RIFF</name></relatedFormat>
+      <sustainabilityFactors>
+        <disclosure>Open source, anyone can work with the WebP format.</disclosure>
+        <externalDependencies>None beyond availability of supporting software/hardware.</externalDependencies>
+      </sustainabilityFactors>
+    </fdd>
+    """
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fddXML/fdd000577.xml", webp_xml)
+
+    snapshot = _zip_snapshot(archive)
+
+    adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
+    record = normalize_record(adapter.extract([snapshot])[0])
+
+    assert record.source_record_id == "fdd000577"
+    assert record.loc_ids == ["fdd000577"]
+    assert record.urls["loc"] == "https://www.loc.gov/preservation/digital/formats/fddXML/fdd000577.xml"
+    assert record.evidence[0]["source_file"] == "fddXML/fdd000577.xml"
+    assert record.native_fields["sustainability_factors"]["disclosure"].startswith("Open source")
+    assert "fdd000025" not in record.loc_ids
+
+
 def test_loc_fdd_xml_skips_auxiliary_xml_files_in_zip(tmp_path):
     archive = tmp_path / "fddXML.zip"
     dwsync_xml = """<?xml version='1.0' encoding='UTF-8'?>
