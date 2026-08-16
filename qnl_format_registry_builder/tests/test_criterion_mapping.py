@@ -132,6 +132,53 @@ def test_build_criterion_claims_from_institution_evidence_claims():
     assert claim["review_status"] == "unreviewed"
 
 
+def test_build_criterion_claims_from_source_key_containing_dots():
+    canonical = {
+        "canonical_id": "nara-nf00001",
+        "current": True,
+        "source_records": [
+            {
+                "source_id": "nara_digital_preservation_framework",
+                "source_type": "nara_digital_preservation_framework",
+                "source_record_id": "NF00001",
+            }
+        ],
+    }
+    source_record = {
+        "source_id": "nara_digital_preservation_framework",
+        "source_type": "nara_digital_preservation_framework",
+        "source_record_id": "NF00001",
+        "raw": {
+            "row": {
+                "1.1: Is the format proprietary?": "2",
+            }
+        },
+    }
+    mapping = {
+        "source_type": "nara_digital_preservation_framework",
+        "mapping_version": "2026-08-16-draft",
+        "criteria_version": "v1",
+        "maps": [
+            {
+                "id": "nara.rubric.1_1.proprietary.v1",
+                "criterion": "sustainability.disclosure",
+                "from_field": "raw.row.1.1: Is the format proprietary?",
+                "directness": "derived",
+                "covers": "partial",
+                "source_independence": "source_derived",
+                "mapping_status": "needs_review",
+                "values": {"2": "public_specification"},
+            }
+        ],
+    }
+
+    claims = build_criterion_claims([canonical], [source_record], [mapping], CRITERIA, include_drafts=True)
+
+    assert len(claims) == 1
+    assert claims[0]["source_value"] == "2"
+    assert claims[0]["value"] == "public_specification"
+
+
 def test_backfill_writes_criterion_claims_to_store():
     store = MemoryRegistryStore()
     store.upsert_canonical_format(_canonical_pdf())
