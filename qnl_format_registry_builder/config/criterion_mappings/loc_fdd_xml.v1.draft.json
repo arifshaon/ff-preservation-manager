@@ -193,10 +193,10 @@
         },
         {
           "value": "low",
-          "contains_any": ["some dependency", "minor dependency", "limited dependency"]
+          "contains_any": ["some dependency", "minor dependency", "limited dependency", "fonts be embedded", "fonts are embedded", "font embedding"]
         }
       ],
-      "rationale": "LOC External dependencies prose describes need for external software or hardware."
+      "rationale": "LOC External dependencies prose describes need for external software or hardware. Embedded-font dependencies are mapped as low because the dependency is conditional and can be internalized in the file/profile, not a standing requirement for proprietary software or specific hardware."
     },
     {
       "id": "loc.patents.from_sustainability_factor.v1",
