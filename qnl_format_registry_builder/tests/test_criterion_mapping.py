@@ -28,6 +28,11 @@ CRITERIA = CriteriaVocabulary({
             "values": ["cross_platform", "limited_platform_support"],
             "null_value": "unknown",
         },
+        "source.currency": {
+            "kind": "temporal",
+            "unit": "days_since_update",
+            "null_value": "unknown",
+        },
     },
 })
 
@@ -225,6 +230,63 @@ def test_build_criterion_claims_from_source_key_containing_dots():
     assert claims[0]["source_value"] == "2"
     assert claims[0]["value"] == "public_specification"
     assert claims[0]["review_status"] == "unreviewed"
+
+
+def test_build_criterion_claims_transforms_pronom_last_updated_date():
+    canonical = {
+        "canonical_id": "puid-fmt-18",
+        "current": True,
+        "source_records": [
+            {
+                "source_id": "pronom_registry",
+                "source_type": "pronom_registry",
+                "source_record_id": "fmt/18",
+            }
+        ],
+    }
+    source_record = {
+        "source_id": "pronom_registry",
+        "source_type": "pronom_registry",
+        "source_record_id": "fmt/18",
+        "evidence": [
+            {
+                "last_updated_date": "22 Oct 2009",
+            }
+        ],
+    }
+    mapping = {
+        "source_type": "pronom_registry",
+        "mapping_version": "2026-08-16-approved",
+        "criteria_version": "v1",
+        "claim_review_status": "approved",
+        "maps": [
+            {
+                "id": "pronom.currency.from_last_updated_date.v1",
+                "criterion": "source.currency",
+                "from_collection": "evidence",
+                "from_field": "last_updated_date",
+                "directness": "explicit",
+                "covers": "full",
+                "source_independence": "independent",
+                "mapping_status": "accepted",
+                "transform": "days_since_date",
+            }
+        ],
+    }
+
+    claims = build_criterion_claims(
+        [canonical],
+        [source_record],
+        [mapping],
+        CRITERIA,
+        observed_at="2026-08-16T00:00:00+00:00",
+    )
+
+    assert len(claims) == 1
+    assert claims[0]["criterion_id"] == "source.currency"
+    assert claims[0]["source_value"] == "22 Oct 2009"
+    assert claims[0]["value"] == 6142
+    assert claims[0]["review_status"] == "approved"
 
 
 def test_backfill_writes_criterion_claims_to_store():
