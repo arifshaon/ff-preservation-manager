@@ -74,6 +74,16 @@ _SUSTAINABILITY_FACTOR_ALIASES = {
         "technicalprotectionmechanism",
     },
 }
+_EXCLUDED_RECORD_METADATA_ANCESTORS = {
+    "relatedformat",
+    "relatedformats",
+    "relationship",
+    "relationships",
+    "reference",
+    "references",
+    "seealso",
+    "seealsosection",
+}
 
 
 def _local_name(tag: str) -> str:
@@ -94,33 +104,92 @@ def _text_content(elem: ET.Element) -> str:
 
 def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
     out: list[str] = []
+    normalized_names = {_normalize_label(name) for name in names}
     for elem in root.iter():
-        if _local_name(elem.tag) in names and elem.text and elem.text.strip():
+        if _normalize_label(_local_name(elem.tag)) in normalized_names and elem.text and elem.text.strip():
             out.append(elem.text.strip())
     return out
 
 
-def _direct_text_by_name(root: ET.Element, name: str) -> str | None:
+def _direct_text_by_names(root: ET.Element, names: set[str]) -> list[str]:
+    out: list[str] = []
+    normalized_names = {_normalize_label(name) for name in names}
     for elem in list(root):
-        if _local_name(elem.tag) == name and elem.text and elem.text.strip():
-            return elem.text.strip()
+        if _normalize_label(_local_name(elem.tag)) in normalized_names and elem.text and elem.text.strip():
+            out.append(elem.text.strip())
+    return out
+
+
+def _root_attribute_text(root: ET.Element, names: set[str]) -> str | None:
+    normalized_names = {_normalize_label(name) for name in names}
+    for attr_name, attr_value in root.attrib.items():
+        if _normalize_label(attr_name) in normalized_names and str(attr_value).strip():
+            return str(attr_value).strip()
     return None
 
 
-def _record_primary_text(root: ET.Element, names: tuple[str, ...]) -> str | None:
-    """Return top-level LOC FDD record metadata using explicit field priority.
+def _parent_map(root: ET.Element) -> dict[ET.Element, ET.Element]:
+    return {child: parent for parent in root.iter() for child in list(parent)}
 
-    FDD records can cite related formats with nested `<title>`, `<name>`, `<id>`,
-    or `<type>` elements. Those nested labels describe related records, not the
-    current record. Within direct record fields, prefer the more specific title
-    over generic name fields so a relation/container label such as RIFF does not
-    overwrite WAVE/WebP.
+
+def _has_excluded_ancestor(elem: ET.Element, parents: dict[ET.Element, ET.Element]) -> bool:
+    current = parents.get(elem)
+    while current is not None:
+        if _normalize_label(_local_name(current.tag)) in _EXCLUDED_RECORD_METADATA_ANCESTORS:
+            return True
+        current = parents.get(current)
+    return False
+
+
+def _descendant_text_by_names_excluding_related(root: ET.Element, names: set[str]) -> str | None:
+    normalized_names = {_normalize_label(name) for name in names}
+    parents = _parent_map(root)
+    for elem in root.iter():
+        if elem is root:
+            continue
+        if _normalize_label(_local_name(elem.tag)) not in normalized_names:
+            continue
+        if _has_excluded_ancestor(elem, parents):
+            continue
+        text = _text_content(elem)
+        if text:
+            return text
+    return None
+
+
+def _record_primary_text(root: ET.Element, names: set[str]) -> str | None:
+    """Return direct LOC FDD record metadata only."""
+    values = _direct_text_by_names(root, names)
+    return values[0] if values else None
+
+
+def _record_name(root: ET.Element) -> str | None:
+    """Return the current LOC FDD record name, not related-format names.
+
+    Current LOC FDD XML commonly stores the record identity on root attributes
+    such as titleName and shortName, and stores categories below properties /
+    formatCategories. Related formats can also contain nested name/title values,
+    so titleName and title-like fields must be preferred over generic name.
     """
-    for name in names:
-        value = _direct_text_by_name(root, name)
-        if value:
-            return value
-    return None
+    return (
+        _root_attribute_text(root, {"titleName", "title_name", "title"})
+        or _record_primary_text(root, {"title", "fullName", "full_name"})
+        or _descendant_text_by_names_excluding_related(root, {"fullName", "full_name", "title"})
+        or _root_attribute_text(root, {"shortName", "short_name"})
+        or _record_primary_text(root, {"shortName", "short_name"})
+        or _descendant_text_by_names_excluding_related(root, {"shortName", "short_name"})
+        or _root_attribute_text(root, {"name"})
+        or _record_primary_text(root, {"name"})
+    )
+
+
+def _record_category(root: ET.Element) -> str | None:
+    return (
+        _record_primary_text(root, {"category"})
+        or _descendant_text_by_names_excluding_related(root, {"category"})
+        or _record_primary_text(root, {"type"})
+        or _descendant_text_by_names_excluding_related(root, {"type"})
+    )
 
 
 def _extension_tokens(value: str) -> list[str]:
@@ -291,8 +360,8 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     text = data.decode("utf-8", errors="replace")
     root = ET.fromstring(text)
     loc_id = _first_loc_id(root, text, source_file)
-    name = _record_primary_text(root, ("title", "shortname", "short_name", "name"))
-    category = _record_primary_text(root, ("category", "type"))
+    name = _record_name(root)
+    category = _record_category(root)
 
     # Conservative regex fallbacks for common identifiers embedded in FDD text.
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
