@@ -210,6 +210,15 @@ def _snapshot_is_zip(snapshot: SourceSnapshot) -> bool:
     )
 
 
+def _is_fdd_xml_payload_name(name: str) -> bool:
+    """Return true only for real LOC FDD XML files inside the LOC ZIP.
+
+    The LOC FDD archive can contain auxiliary XML such as `_notes/dwsync.xml`.
+    Those are not format descriptions and must not become source records.
+    """
+    return bool(re.fullmatch(r"fdd\d{6}\.xml", Path(str(name)).name.lower()))
+
+
 def _xml_payloads(snapshot: SourceSnapshot) -> list[tuple[str, bytes]]:
     path = Path(snapshot.local_path)
     if _snapshot_is_zip(snapshot):
@@ -217,6 +226,8 @@ def _xml_payloads(snapshot: SourceSnapshot) -> list[tuple[str, bytes]]:
         with zipfile.ZipFile(path) as zf:
             for name in sorted(zf.namelist()):
                 if name.endswith("/") or not name.lower().endswith(".xml"):
+                    continue
+                if not _is_fdd_xml_payload_name(name):
                     continue
                 payloads.append((name, zf.read(name)))
         return payloads
