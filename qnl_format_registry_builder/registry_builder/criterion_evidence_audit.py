@@ -8,7 +8,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from registry_builder.criteria import CriteriaVocabulary
-from registry_builder.criterion_mapping import build_criterion_claims, load_mappings, projected_coverage
+from registry_builder.criterion_mapping import build_criterion_claims, load_mappings
 from registry_builder.storage.base import RegistryStore
 
 
@@ -18,6 +18,10 @@ def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
+
+
+def _string_values(value: Any) -> list[str]:
+    return [str(item).strip() for item in _as_list(value) if str(item).strip()]
 
 
 def _flatten_fields(value: Any, *, prefix: str = "", limit: int = 3) -> set[str]:
@@ -90,11 +94,13 @@ def _source_inventory(source_records: list[dict[str, Any]], *, source: str | Non
 
 
 def _criterion_claim_inventory(store: RegistryStore) -> dict[str, Any]:
-    existing = store.query("criterion_claims")
+    all_claims = store.query("criterion_claims")
+    existing = [claim for claim in all_claims if claim.get("current", True) is not False]
     by_criterion = Counter(str(claim.get("criterion_id") or "unknown") for claim in existing)
     by_source = Counter(str(claim.get("source_id") or claim.get("source_type") or "unknown") for claim in existing)
     return {
         "existing_claims": len(existing),
+        "inactive_claims": len(all_claims) - len(existing),
         "by_criterion": dict(sorted(by_criterion.items())),
         "by_source": dict(sorted(by_source.items())),
     }
@@ -127,6 +133,167 @@ def _excluded_fields_from_mappings(mappings: list[dict[str, Any]]) -> dict[str, 
         if excluded:
             out[source] = excluded
     return out
+
+
+def _puid_alias(value: str) -> str | None:
+    normalized = value.strip().lower().replace("/", "-")
+    if not normalized:
+        return None
+    if normalized.startswith("puid-"):
+        return normalized
+    return f"puid-{normalized}"
+
+
+def _loc_alias(value: str) -> str | None:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized.startswith("loc-"):
+        return normalized
+    return f"loc-{normalized}"
+
+
+def _nara_alias(value: str) -> str | None:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized.startswith("nara-"):
+        return normalized
+    return f"nara-{normalized}"
+
+
+def _identifier_values(format_doc: dict[str, Any], kind: str) -> list[str]:
+    values: list[str] = []
+    direct_key = {"puid": "puids", "loc": "loc_ids", "nara": "nara_ids"}.get(kind)
+    if direct_key:
+        values.extend(_string_values(format_doc.get(direct_key)))
+    identifiers = format_doc.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        values.extend(_string_values(identifiers.get(kind)))
+    elif isinstance(identifiers, list):
+        for item in identifiers:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or item.get("type") or "") == kind:
+                values.extend(_string_values(item.get("value")))
+    out: list[str] = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
+
+
+def _strong_aliases(format_doc: dict[str, Any]) -> set[str]:
+    aliases: set[str] = set()
+    for field in ("canonical_id", "format_id", "id"):
+        value = format_doc.get(field)
+        if value is not None and str(value).strip():
+            aliases.add(str(value).strip())
+    for value in _identifier_values(format_doc, "puid"):
+        alias = _puid_alias(value)
+        if alias:
+            aliases.add(alias)
+    for value in _identifier_values(format_doc, "loc"):
+        alias = _loc_alias(value)
+        if alias:
+            aliases.add(alias)
+    for value in _identifier_values(format_doc, "nara"):
+        alias = _nara_alias(value)
+        if alias:
+            aliases.add(alias)
+    return aliases
+
+
+class _UnionFind:
+    def __init__(self) -> None:
+        self.parent: dict[str, str] = {}
+
+    def find(self, item: str) -> str:
+        self.parent.setdefault(item, item)
+        if self.parent[item] != item:
+            self.parent[item] = self.find(self.parent[item])
+        return self.parent[item]
+
+    def union(self, left: str, right: str) -> None:
+        left_root = self.find(left)
+        right_root = self.find(right)
+        if left_root != right_root:
+            self.parent[right_root] = left_root
+
+
+def _alias_group_index(canonical_formats: list[dict[str, Any]]) -> dict[str, str]:
+    uf = _UnionFind()
+    for record in canonical_formats:
+        aliases = sorted(_strong_aliases(record))
+        if not aliases:
+            continue
+        first = aliases[0]
+        uf.find(first)
+        for alias in aliases[1:]:
+            uf.union(first, alias)
+    grouped: dict[str, set[str]] = defaultdict(set)
+    for alias in list(uf.parent):
+        grouped[uf.find(alias)].add(alias)
+    representatives: dict[str, str] = {}
+    for aliases in grouped.values():
+        fmt_candidates = sorted(alias for alias in aliases if alias.startswith("fmt-"))
+        representative = fmt_candidates[0] if fmt_candidates else sorted(aliases)[0]
+        for alias in aliases:
+            representatives[alias] = representative
+    return representatives
+
+
+def _claim_format_group(claim: dict[str, Any], alias_index: dict[str, str]) -> str:
+    canonical_id = str(claim.get("canonical_id") or claim.get("format_id") or "")
+    return alias_index.get(canonical_id, canonical_id)
+
+
+def _claim_source_id(claim: dict[str, Any]) -> str:
+    return str(claim.get("source_id") or claim.get("source_type") or "")
+
+
+def _is_institution_scoped_claim(claim: dict[str, Any]) -> bool:
+    if claim.get("institution_id"):
+        return True
+    return str(claim.get("source_independence") or "").lower() == "institution_scoped"
+
+
+def _alias_aware_projected_coverage(
+    claims: list[dict[str, Any]],
+    canonical_formats: list[dict[str, Any]],
+) -> dict[str, Any]:
+    alias_index = _alias_group_index(canonical_formats)
+    by_criterion: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for claim in claims:
+        by_criterion[str(claim["criterion_id"])].append(claim)
+    projection: dict[str, Any] = {}
+    for criterion_id, items in sorted(by_criterion.items()):
+        formats = {
+            _claim_format_group(item, alias_index)
+            for item in items
+            if item.get("canonical_id") or item.get("format_id")
+        }
+        explicit_formats = {
+            _claim_format_group(item, alias_index)
+            for item in items
+            if (item.get("canonical_id") or item.get("format_id")) and item.get("directness") == "explicit"
+        }
+        sources_by_format: dict[str, set[str]] = defaultdict(set)
+        for item in items:
+            if _is_institution_scoped_claim(item):
+                continue
+            format_group = _claim_format_group(item, alias_index)
+            source = _claim_source_id(item)
+            if format_group and source:
+                sources_by_format[format_group].add(source)
+        projection[criterion_id] = {
+            "formats_with_any_claim": len(formats),
+            "formats_with_explicit_claim": len(explicit_formats),
+            "formats_with_2plus_independent_sources": sum(1 for sources in sources_by_format.values() if len(sources) >= 2),
+            "contributing_sources": sorted({_claim_source_id(item) for item in items if _claim_source_id(item)}),
+            "identity_normalization": "strong_identifier_aliases",
+        }
+    return projection
 
 
 def _local_name(tag: str) -> str:
@@ -188,7 +355,7 @@ def _loc_raw_xml_probe(store: RegistryStore) -> dict[str, Any]:
         "raw_xml_files_checked": files_checked,
         "factor_terms_found": dict(sorted(found_terms.items())),
         "adapter_gap": (
-            "LOC source records currently expose identity fields; sustainability factors require raw XML inspection or adapter extraction."
+            "LOC sustainability factors are checked from available snapshots so audit can reveal whether mapping coverage is blocked by acquisition, extraction, or mapping."
         ),
     }
 
@@ -228,8 +395,9 @@ def run_criterion_evidence_audit(
             criteria,
             include_drafts=False,
         )
-        report["projected_coverage"] = projected_coverage(projected_claims)
-        report["accepted_mapping_coverage"] = projected_coverage(accepted_claims)
+        report["projected_coverage"] = _alias_aware_projected_coverage(projected_claims, canonical_formats)
+        report["accepted_mapping_coverage"] = _alias_aware_projected_coverage(accepted_claims, canonical_formats)
+        report["coverage_identity_normalization"] = "strong_identifier_aliases"
         report["projected_claims"] = len(projected_claims)
         report["accepted_claims"] = len(accepted_claims)
         report["projected_sample_claims"] = projected_claims[:10]
