@@ -534,12 +534,14 @@ def backfill_criterion_claims(
     else:
         store_criterion_claims(store, claims, progress=progress, progress_every=progress_every)
     by_criterion = Counter(claim["criterion_id"] for claim in claims)
+    by_rule = Counter(str(claim.get("mapping_rule_id") or "unknown") for claim in claims)
     by_source = Counter(str(claim.get("source_id") or claim.get("source_type") or "unknown") for claim in claims)
     result = {
         "status": "dry_run" if dry_run else "completed",
         "claims_generated": len(claims),
         "criteria_version": criteria.criteria_version,
         "criteria": dict(sorted(by_criterion.items())),
+        "mapping_rules": dict(sorted(by_rule.items())),
         "sources": dict(sorted(by_source.items())),
         "validation_warnings": warnings,
         "sample_claims": claims[:10],
