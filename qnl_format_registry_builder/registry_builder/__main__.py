@@ -272,3 +272,7 @@ def main() -> None:
             progress_every=progress_every,
         )
         _write_or_print(result, out)
+
+
+if __name__ == "__main__":
+    main()
