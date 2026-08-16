@@ -1,15 +1,32 @@
 {
   "source_type": "pronom_registry",
-  "mapping_version": "2026-08-15-draft",
+  "mapping_version": "2026-08-16-draft",
   "criteria_version": "v1",
   "native_vocabulary": "pronom_github_json",
   "mapping_mode": "manual_draft",
   "review_status": "draft",
-  "notes": "Draft mapping scaffold. Validate against audit output before approving. formatRisk is intentionally excluded until its meaning and coverage are profiled.",
+  "claim_review_status": "unreviewed",
+  "notes": "Full PRONOM draft mapping for neutral criterion claims available from the current PRONOM adapter. formatRisk remains excluded because it is a risk-like field and must not be treated as neutral criterion evidence without separate profiling.",
   "excluded_from_criteria": [
     {
       "field": "formatRisk",
-      "reason": "Field name suggests risk, but PRONOM is primarily an identification registry. Profile distinct values and coverage before mapping. Do not treat as a hazard criterion."
+      "reason": "Risk-like source field; excluded from criterion_claims unless separately profiled and proven to be a neutral observation rather than a risk conclusion."
+    },
+    {
+      "field": "raw.record.formatRisk",
+      "reason": "Risk-like source field; hazard/profiling candidate only, not neutral criterion evidence."
+    },
+    {
+      "field": "fileFormatID",
+      "reason": "PRONOM database identifier; identity evidence, not preservation-risk criterion evidence."
+    },
+    {
+      "field": "identifiers.PUID",
+      "reason": "Format identity evidence. PUID presence alone does not prove file-level internal signature availability."
+    },
+    {
+      "field": "externalSignatures",
+      "reason": "Filename extension or other external signature evidence; useful for identity/recognition, but not enough to assert authoritative internal identifiability."
     }
   ],
   "maps": [
@@ -19,9 +36,9 @@
       "from_collection": "evidence",
       "from_field": "format_disclosure",
       "directness": "explicit",
-      "covers": "partial",
+      "covers": "full",
       "source_independence": "independent",
-      "mapping_status": "draft",
+      "mapping_status": "needs_review",
       "values": {
         "Full": "public_specification",
         "full": "public_specification",
@@ -32,7 +49,7 @@
         "Unknown": "unknown",
         "unknown": "unknown"
       },
-      "rationale": "Use only after audit confirms PRONOM formatDisclosure value semantics and coverage."
+      "rationale": "PRONOM formatDisclosure is the strongest PRONOM disclosure observation exposed by the current adapter. It remains source evidence, not a final risk score."
     },
     {
       "id": "pronom.currency.from_last_updated_date.v1",
@@ -42,20 +59,32 @@
       "directness": "explicit",
       "covers": "full",
       "source_independence": "independent",
-      "mapping_status": "draft",
+      "mapping_status": "needs_review",
       "transform": "days_since_date",
-      "rationale": "Last updated date is source currency evidence, not sustainability risk scoring."
+      "rationale": "PRONOM lastUpdatedDate is source-record currency evidence. It should be stored as days since update, not interpreted directly as sustainability risk."
     },
     {
-      "id": "pronom.disclosure.from_specification_identifier_presence.v1",
+      "id": "pronom.identifiability.from_internal_signatures.v1",
+      "criterion": "technical.identifiability",
+      "from_field": "raw.record.internalSignatures",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "needs_review",
+      "when_present": "authoritative_signature",
+      "rationale": "Presence of PRONOM internalSignatures is direct evidence that PRONOM records an authoritative internal signature for file-level identification."
+    },
+    {
+      "id": "pronom.disclosure.from_pronom_url_presence.v1",
       "criterion": "sustainability.disclosure",
       "from_field": "urls.pronom",
       "directness": "inferred",
       "covers": "partial",
       "source_independence": "independent",
-      "mapping_status": "draft",
+      "mapping_status": "needs_review",
       "when_present": "partial_specification",
-      "confidence_reason": "A PRONOM URL indicates registry documentation exists, but does not prove open public specification."
+      "confidence_reason": "A PRONOM landing page indicates registry documentation exists, but does not prove an open public specification. It must not assert public_specification.",
+      "rationale": "Fallback documentation-presence signal for records where formatDisclosure is unavailable or unknown."
     }
   ]
 }
