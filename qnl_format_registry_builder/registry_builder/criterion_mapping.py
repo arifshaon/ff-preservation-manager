@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from copy import deepcopy
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 from pathlib import Path
 import re
@@ -15,6 +17,7 @@ from registry_builder.storage.base import RegistryStore
 _ALLOWED_DIRECTNESS = {"explicit", "derived", "inferred"}
 _ALLOWED_COVERS = {"full", "partial"}
 _ALLOWED_CLAIM_REVIEW_STATUSES = {"unreviewed", "approved", "rejected", "superseded"}
+_ALLOWED_TRANSFORMS = {"days_since_date"}
 _HAZARD_CONCLUSION_TOKENS = (
     "risk level",
     "numeric risk rating",
@@ -121,6 +124,45 @@ def _claim_review_status(mapping: dict[str, Any], rule: dict[str, Any] | None = 
     return str(status)
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        normalized = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(normalized)
+        except ValueError:
+            dt = None
+        if dt is None:
+            for fmt in ("%d %b %Y", "%d %B %Y", "%Y-%m-%d", "%Y/%m/%d"):
+                try:
+                    dt = datetime.strptime(text, fmt)
+                    break
+                except ValueError:
+                    pass
+        if dt is None:
+            try:
+                dt = parsedate_to_datetime(text)
+            except (TypeError, ValueError, IndexError, OverflowError):
+                return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _days_since_date(source_value: Any, observed_at: str | None) -> int | None:
+    source_dt = _parse_datetime(source_value)
+    observed_dt = _parse_datetime(observed_at) or datetime.now(timezone.utc)
+    if source_dt is None:
+        return None
+    return max(0, (observed_dt.date() - source_dt.date()).days)
+
+
 def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -150,6 +192,9 @@ def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> t
             errors.append(
                 f"{rule_id}: claim_review_status must be one of {sorted(_ALLOWED_CLAIM_REVIEW_STATUSES)}"
             )
+        transform = rule.get("transform")
+        if transform is not None and str(transform) not in _ALLOWED_TRANSFORMS:
+            errors.append(f"{rule_id}: transform must be one of {sorted(_ALLOWED_TRANSFORMS)}")
         if not criterion_id:
             errors.append(f"{rule_id}: criterion is required")
             continue
@@ -311,9 +356,12 @@ def _source_value_from_item(item: dict[str, Any], rule: dict[str, Any]) -> Any:
     return value
 
 
-def _claim_value(rule: dict[str, Any], source_value: Any) -> Any | None:
+def _claim_value(rule: dict[str, Any], source_value: Any, *, observed_at: str | None = None) -> Any | None:
     if source_value in (None, "", [], {}):
         return None
+    transform = rule.get("transform")
+    if transform == "days_since_date":
+        return _days_since_date(source_value, observed_at)
     if rule.get("when_present") is not None:
         return rule.get("when_present")
     values = rule.get("values") or {}
@@ -379,7 +427,7 @@ def build_criterion_claims(
                         if not _matches_where(item, rule.get("where")):
                             continue
                         source_value = _source_value_from_item(item, rule)
-                        value = _claim_value(rule, source_value)
+                        value = _claim_value(rule, source_value, observed_at=observed_at)
                         if value is None:
                             continue
                         criteria.validate_value(criterion_id, value)
