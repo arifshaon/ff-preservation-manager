@@ -154,26 +154,48 @@ def validate_mappings(mappings: list[dict[str, Any]], criteria: CriteriaVocabula
     return errors, warnings
 
 
+def _lookup_key(data: dict[str, Any], key: str) -> tuple[bool, Any]:
+    """Return a mapping value using exact, Mongo-safe, or case-insensitive key lookup."""
+    if key in data:
+        return True, data[key]
+    mongo_safe = key.replace(".", "\uff0e")
+    if mongo_safe in data:
+        return True, data[mongo_safe]
+    mongo_unsafe = key.replace("\uff0e", ".")
+    if mongo_unsafe in data:
+        return True, data[mongo_unsafe]
+    lowered = {str(k).lower(): k for k in data.keys()}
+    found = lowered.get(key.lower()) or lowered.get(mongo_safe.lower()) or lowered.get(mongo_unsafe.lower())
+    if found is not None:
+        return True, data[found]
+    return False, None
+
+
 def _get_path(data: Any, path: str | None) -> Any:
+    """Resolve a dotted path while allowing source-native keys that contain dots.
+
+    Source rows often contain literal dotted labels, such as NARA question IDs
+    (`1.1: ...`) or Mongo-normalized fullwidth dots (`1．1: ...`). At each level,
+    the resolver first tries the whole remaining path as an exact dictionary key
+    before consuming only the next dotted segment.
+    """
     if not path:
         return None
+    parts = str(path).split(".")
     current = data
-    for part in str(path).split("."):
-        if isinstance(current, dict):
-            if part in current:
-                current = current[part]
-                continue
-            alt_part = part.replace(".", "\uff0e")
-            if alt_part in current:
-                current = current[alt_part]
-                continue
-            lowered = {str(k).lower(): k for k in current.keys()}
-            key = lowered.get(part.lower())
-            if key is not None:
-                current = current[key]
-                continue
+    index = 0
+    while index < len(parts):
+        if not isinstance(current, dict):
             return None
-        return None
+        remaining = ".".join(parts[index:])
+        found, value = _lookup_key(current, remaining)
+        if found:
+            return value
+        found, value = _lookup_key(current, parts[index])
+        if not found:
+            return None
+        current = value
+        index += 1
     return current
 
 
