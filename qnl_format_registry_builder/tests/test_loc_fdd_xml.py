@@ -85,6 +85,30 @@ def test_loc_fdd_xml_uses_filename_not_referenced_fdd_id(tmp_path):
     assert "fdd000025" not in record.loc_ids
 
 
+def test_loc_fdd_xml_uses_top_level_title_not_related_format_title(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    xml = """<?xml version='1.0' encoding='UTF-8'?>
+    <fdd>
+      <relatedFormat><title>RIFF</title><id>fdd000025</id></relatedFormat>
+      <title>WAVE Audio File Format</title>
+      <category>file-format</category>
+      <fileExtension>wav</fileExtension>
+    </fdd>
+    """
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fddXML/fdd000001.xml", xml)
+
+    snapshot = _zip_snapshot(archive)
+
+    adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
+    record = normalize_record(adapter.extract([snapshot])[0])
+
+    assert record.source_record_id == "fdd000001"
+    assert record.name == "WAVE Audio File Format"
+    assert record.category == "file-format"
+    assert record.loc_ids == ["fdd000001"]
+
+
 def test_loc_fdd_xml_skips_auxiliary_xml_files_in_zip(tmp_path):
     archive = tmp_path / "fddXML.zip"
     dwsync_xml = """<?xml version='1.0' encoding='UTF-8'?>
