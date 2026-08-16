@@ -147,3 +147,53 @@ def test_include_unapproved_allows_draft_evidence_when_requested():
 
     claim_ids = {claim["claim_id"] for claim in pack["global_evidence"]}
     assert "draft-claim" in claim_ids
+
+
+def test_global_pack_adds_only_global_criterion_claims():
+    pack = build_evidence_pack(
+        FORMAT_RECORD,
+        criterion_claims=[
+            {"claim_id": "loc-claim", "criterion_id": "sustainability.disclosure", "value": "public_specification"},
+            {
+                "claim_id": "qnl-claim",
+                "institution_id": "qnl",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+                "value": "public_specification",
+            },
+        ],
+    )
+
+    claim_ids = {claim.get("claim_id") for claim in pack["global_evidence"]}
+    assert "loc-claim" in claim_ids
+    assert "qnl-claim" not in claim_ids
+
+
+def test_institution_pack_adds_global_and_matching_institution_criterion_claims():
+    pack = build_evidence_pack(
+        FORMAT_RECORD,
+        institution_id="qnl",
+        criterion_claims=[
+            {"claim_id": "loc-claim", "criterion_id": "sustainability.disclosure", "value": "public_specification"},
+            {
+                "claim_id": "qnl-claim",
+                "institution_id": "qnl",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+                "value": "public_specification",
+            },
+            {
+                "claim_id": "other-claim",
+                "institution_id": "other",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+                "value": "public_specification",
+            },
+        ],
+    )
+
+    global_claim_ids = {claim.get("claim_id") for claim in pack["global_evidence"]}
+    institution_claim_ids = {claim.get("claim_id") for claim in pack["institution_evidence"]}
+    assert "loc-claim" in global_claim_ids
+    assert "qnl-claim" in institution_claim_ids
+    assert "other-claim" not in global_claim_ids | institution_claim_ids
