@@ -224,6 +224,28 @@ def test_backfill_writes_criterion_claims_to_store():
     assert stored[0]["mapping_rule_id"] == "qnl.disclosure.v1"
 
 
+def test_backfill_emits_progress_events():
+    store = MemoryRegistryStore()
+    store.upsert_canonical_format(_canonical_pdf())
+    events = []
+
+    result = backfill_criterion_claims(
+        store=store,
+        criteria=CRITERIA,
+        mappings=[QNL_MAPPING],
+        progress=events.append,
+        progress_every=1,
+    )
+
+    event_names = [event["event"] for event in events]
+    assert result["claims_generated"] == 1
+    assert "validate_mappings_started" in event_names
+    assert "load_canonical_formats_completed" in event_names
+    assert "build_claims_progress" in event_names
+    assert "write_claims_progress" in event_names
+    assert event_names[-1] == "backfill_completed"
+
+
 def test_backfill_rejects_invalid_mappings_before_writing():
     store = MemoryRegistryStore()
     bad = {
