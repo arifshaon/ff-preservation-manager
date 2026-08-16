@@ -33,6 +33,20 @@ def _is_current(row: dict[str, Any]) -> bool:
     return row.get("current") is not False
 
 
+def _claim_is_institution_scoped(row: dict[str, Any]) -> bool:
+    if row.get("institution_id"):
+        return True
+    return str(row.get("source_independence") or "").lower() == "institution_scoped"
+
+
+def _claim_matches_scope(row: dict[str, Any], *, institution_id: str | None) -> bool:
+    if not institution_id:
+        return not _claim_is_institution_scoped(row)
+    if not _claim_is_institution_scoped(row):
+        return True
+    return str(row.get("institution_id") or "") == institution_id
+
+
 def load_storage_config(path: str | Path) -> dict[str, Any]:
     """Load a registry-builder storage config from JSON.
 
@@ -66,14 +80,20 @@ class JsonRegistryStore:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if isinstance(data, list):
             canonical_formats = [item for item in data if isinstance(item, dict)]
+            collections = {"canonical_formats": canonical_formats}
         elif isinstance(data, dict):
             rows = data.get("canonical_formats") or data.get("formats") or data.get("registry") or []
             if not isinstance(rows, list):
                 raise RegistryAccessError(f"Registry JSON {path} does not contain a canonical format list")
             canonical_formats = [item for item in rows if isinstance(item, dict)]
+            collections = {"canonical_formats": canonical_formats}
+            for collection_name in ("criterion_claims", "format_evidence_claims"):
+                collection_rows = data.get(collection_name)
+                if isinstance(collection_rows, list):
+                    collections[collection_name] = [item for item in collection_rows if isinstance(item, dict)]
         else:
             raise RegistryAccessError(f"Registry JSON {path} must be a list or object")
-        return cls({"canonical_formats": canonical_formats})
+        return cls(collections)
 
     def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         rows = self.collections.get(collection, [])
@@ -128,18 +148,27 @@ class RegistryReader:
                 return rows[0]
         return None
 
+    def get_criterion_claims(
+        self,
+        *,
+        canonical_id: str,
+        institution_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return criterion claims for a format in the requested scope.
+
+        Global analysis must not consume institution-scoped claims. Institution
+        analysis gets global claims plus matching claims for that institution.
+        """
+        rows = self.query("criterion_claims", {"canonical_id": canonical_id})
+        return [row for row in rows if _claim_matches_scope(row, institution_id=institution_id)]
+
     def get_format_evidence_claims(
         self,
         *,
         canonical_id: str,
         institution_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Read format evidence claims, optionally scoped to an institution.
-
-        This anticipates the optimized collection, but does not require it. If a
-        store has no matching collection/index, it should simply return an empty
-        list according to the generic query contract.
-        """
+        """Read legacy format evidence claims, optionally scoped to an institution."""
         query: dict[str, Any] = {"canonical_id": canonical_id}
         if institution_id:
             query["institution_id"] = institution_id
