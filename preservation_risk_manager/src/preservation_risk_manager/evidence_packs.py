@@ -104,6 +104,46 @@ def _split_criterion_claims(
     return global_claims, institution_claims
 
 
+def _claim_identity_key(item: dict[str, Any]) -> tuple[str, str, str, str] | None:
+    """Return the source/criterion identity used to suppress legacy duplicates.
+
+    Criterion claims are the normalized representation. If a legacy evidence item
+    has the same source, source record, criterion, and institution scope as a
+    normalized criterion claim, keep the criterion claim and drop the legacy item
+    from derivation evidence to avoid double-presenting the same observation.
+    """
+    source_id = item.get("source_id")
+    criterion_id = item.get("criterion_id")
+    if source_id is None or criterion_id is None:
+        return None
+    return (
+        str(source_id),
+        str(item.get("source_record_id") or ""),
+        str(criterion_id),
+        str(item.get("institution_id") or ""),
+    )
+
+
+def _without_shadowed_legacy_evidence(
+    legacy_items: list[dict[str, Any]],
+    criterion_claims: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    criterion_keys = {
+        key
+        for item in criterion_claims
+        if (key := _claim_identity_key(item)) is not None
+    }
+    if not criterion_keys:
+        return legacy_items
+    filtered: list[dict[str, Any]] = []
+    for item in legacy_items:
+        key = _claim_identity_key(item)
+        if key is not None and key in criterion_keys:
+            continue
+        filtered.append(item)
+    return filtered
+
+
 def _institution_items(
     items: list[dict[str, Any]],
     *,
@@ -163,11 +203,15 @@ def build_evidence_pack(
         institution_id=institution_id,
         include_unapproved=include_unapproved,
     )
+    global_legacy_evidence = _without_shadowed_legacy_evidence(
+        _collect(format_record, GLOBAL_EVIDENCE_KEYS),
+        global_criterion_claims,
+    )
     pack: dict[str, Any] = {
         "scope": "institution" if institution_id else "global",
         "format": format_identity(format_record),
         "global_evidence": _usable_items(
-            _collect(format_record, GLOBAL_EVIDENCE_KEYS) + global_criterion_claims,
+            global_legacy_evidence + global_criterion_claims,
             include_unapproved=include_unapproved,
         ),
         "migration_pathway_evidence": _usable_items(
@@ -179,13 +223,17 @@ def build_evidence_pack(
     if institution_id:
         readiness_from_record = _collect(format_record, LOCAL_MIGRATION_READINESS_KEYS)
         readiness_from_argument = [deepcopy(item) for item in (local_migration_readiness or [])]
-        pack.update({
-            "institution_id": institution_id,
-            "institution_evidence": _institution_items(
+        institution_legacy_evidence = _without_shadowed_legacy_evidence(
+            _institution_items(
                 _collect(format_record, INSTITUTION_EVIDENCE_KEYS),
                 institution_id=institution_id,
                 include_unapproved=include_unapproved,
-            ) + institution_criterion_claims,
+            ),
+            institution_criterion_claims,
+        )
+        pack.update({
+            "institution_id": institution_id,
+            "institution_evidence": institution_legacy_evidence + institution_criterion_claims,
             "local_migration_readiness": _institution_items(
                 readiness_from_record + readiness_from_argument,
                 institution_id=institution_id,
