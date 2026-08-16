@@ -8,7 +8,7 @@
   "claim_review_status": "approved",
   "decided_by": "QNL DCPA",
   "decided_at": "2026-08-16",
-  "notes": "Approved PRONOM mapping for production-style criterion-claim testing. The rule set intentionally matches the PRONOM draft mapping; the difference is approval metadata and accepted rule status.",
+  "notes": "Approved PRONOM mapping for production-style criterion-claim testing. The rule set intentionally matches the PRONOM draft mapping; the difference is approval metadata and accepted rule status. PUID and PRONOM URL presence are identity/registry-location evidence only; they must not be used to infer disclosure or specification quality.",
   "excluded_from_criteria": [
     {
       "field": "formatRisk",
@@ -24,7 +24,11 @@
     },
     {
       "field": "identifiers.PUID",
-      "reason": "Format identity evidence. PUID presence alone does not prove file-level internal signature availability."
+      "reason": "Format identity evidence. PUID presence alone does not prove disclosure, documentation quality, or file-level internal signature availability."
+    },
+    {
+      "field": "urls.pronom",
+      "reason": "PRONOM landing-page URL is equivalent to registry presence/PUID resolution. It does not prove that proper documentation or a public specification exists."
     },
     {
       "field": "externalSignatures",
@@ -51,7 +55,7 @@
         "Unknown": "unknown",
         "unknown": "unknown"
       },
-      "rationale": "PRONOM formatDisclosure is the strongest PRONOM disclosure observation exposed by the current adapter. It remains source evidence, not a final risk score."
+      "rationale": "PRONOM formatDisclosure is the only current PRONOM field mapped to disclosure evidence. It remains source evidence, not a final risk score."
     },
     {
       "id": "pronom.currency.from_last_updated_date.v1",
@@ -75,18 +79,6 @@
       "mapping_status": "accepted",
       "when_present": "authoritative_signature",
       "rationale": "Presence of PRONOM internalSignatures is direct evidence that PRONOM records an authoritative internal signature for file-level identification."
-    },
-    {
-      "id": "pronom.disclosure.from_pronom_url_presence.v1",
-      "criterion": "sustainability.disclosure",
-      "from_field": "urls.pronom",
-      "directness": "inferred",
-      "covers": "partial",
-      "source_independence": "independent",
-      "mapping_status": "accepted",
-      "when_present": "partial_specification",
-      "confidence_reason": "A PRONOM landing page indicates registry documentation exists, but does not prove an open public specification. It must not assert public_specification.",
-      "rationale": "Fallback documentation-presence signal for records where formatDisclosure is unavailable or unknown."
     }
   ]
 }
