@@ -100,6 +100,26 @@ def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
     return out
 
 
+def _direct_text_by_names(root: ET.Element, names: set[str]) -> list[str]:
+    out: list[str] = []
+    for elem in list(root):
+        if _local_name(elem.tag) in names and elem.text and elem.text.strip():
+            out.append(elem.text.strip())
+    return out
+
+
+def _record_primary_text(root: ET.Element, names: set[str]) -> str | None:
+    """Return top-level LOC FDD record metadata only.
+
+    FDD records can cite related formats with nested `<title>`, `<name>`, `<id>`,
+    or `<type>` elements. Those nested labels describe related records, not the
+    current record. For record name/category, use only direct children of the FDD
+    record so a relation like RIFF does not overwrite WAVE/WebP.
+    """
+    values = _direct_text_by_names(root, names)
+    return values[0] if values else None
+
+
 def _extension_tokens(value: str) -> list[str]:
     out: list[str] = []
     for token in re.split(r"[\s,;|/]+", value or ""):
@@ -268,15 +288,14 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     text = data.decode("utf-8", errors="replace")
     root = ET.fromstring(text)
     loc_id = _first_loc_id(root, text, source_file)
-    titles = _text_by_names(root, {"title", "shortname", "short_name", "name"})
-    categories = _text_by_names(root, {"category", "type"})
+    name = _record_primary_text(root, {"title", "shortname", "short_name", "name"})
+    category = _record_primary_text(root, {"category", "type"})
 
     # Conservative regex fallbacks for common identifiers embedded in FDD text.
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
     wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
     extensions = _declared_extensions(root)
     sustainability_factors = _extract_sustainability_factors(root)
-    name = titles[0] if titles else None
     if not loc_id and not name:
         return None
 
@@ -309,7 +328,7 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
         source_type=snapshot.source_type,
         source_record_id=loc_id or f"{snapshot.uri}#{source_file}",
         name=name,
-        category=categories[0] if categories else None,
+        category=category,
         extensions=extensions,
         puids=puids,
         loc_ids=[loc_id] if loc_id else [],
