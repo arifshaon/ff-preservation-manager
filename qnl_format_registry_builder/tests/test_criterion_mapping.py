@@ -37,6 +37,7 @@ QNL_MAPPING = {
     "mapping_version": "2026-08-15",
     "criteria_version": "v1",
     "native_vocabulary": "qnl_seed",
+    "claim_review_status": "approved",
     "decided_by": "QNL DCPA",
     "maps": [
         {
@@ -78,11 +79,25 @@ def _canonical_pdf():
     }
 
 
+def test_validate_mapping_requires_claim_review_status():
+    mapping = {
+        "source_type": "nara_digital_preservation_framework",
+        "mapping_version": "2026-08-15",
+        "criteria_version": "v1",
+        "maps": [],
+    }
+
+    errors, _warnings = validate_mapping(mapping, CRITERIA)
+
+    assert any("claim_review_status is required" in error for error in errors)
+
+
 def test_validate_mapping_rejects_hazard_conclusion_as_criterion():
     mapping = {
         "source_type": "nara_digital_preservation_framework",
         "mapping_version": "2026-08-15",
         "criteria_version": "v1",
+        "claim_review_status": "approved",
         "decided_by": "reviewer",
         "maps": [
             {
@@ -106,6 +121,7 @@ def test_validate_mapping_rejects_url_presence_as_public_specification():
         "source_type": "pronom_registry",
         "mapping_version": "2026-08-15",
         "criteria_version": "v1",
+        "claim_review_status": "unreviewed",
         "maps": [
             {
                 "criterion": "sustainability.disclosure",
@@ -128,6 +144,7 @@ def test_validate_mapping_does_not_treat_operating_as_rating():
         "source_type": "nara_digital_preservation_framework",
         "mapping_version": "2026-08-16-draft",
         "criteria_version": "v1",
+        "claim_review_status": "unreviewed",
         "maps": [
             {
                 "id": "nara.rubric.6_4.technical_operating_system_support.v1",
@@ -158,7 +175,7 @@ def test_build_criterion_claims_from_institution_evidence_claims():
     assert claim["source_type"] == "qnl_institution_format_evidence"
     assert claim["institution_id"] == "qnl"
     assert "confidence" not in claim
-    assert claim["review_status"] == "unreviewed"
+    assert claim["review_status"] == "approved"
 
 
 def test_build_criterion_claims_from_source_key_containing_dots():
@@ -187,6 +204,7 @@ def test_build_criterion_claims_from_source_key_containing_dots():
         "source_type": "nara_digital_preservation_framework",
         "mapping_version": "2026-08-16-draft",
         "criteria_version": "v1",
+        "claim_review_status": "unreviewed",
         "maps": [
             {
                 "id": "nara.rubric.1_1.proprietary.v1",
@@ -206,6 +224,7 @@ def test_build_criterion_claims_from_source_key_containing_dots():
     assert len(claims) == 1
     assert claims[0]["source_value"] == "2"
     assert claims[0]["value"] == "public_specification"
+    assert claims[0]["review_status"] == "unreviewed"
 
 
 def test_backfill_writes_criterion_claims_to_store():
@@ -222,6 +241,7 @@ def test_backfill_writes_criterion_claims_to_store():
     stored = store.query("criterion_claims")
     assert len(stored) == 1
     assert stored[0]["mapping_rule_id"] == "qnl.disclosure.v1"
+    assert stored[0]["review_status"] == "approved"
 
 
 def test_backfill_emits_progress_events():
@@ -252,6 +272,7 @@ def test_backfill_rejects_invalid_mappings_before_writing():
         "source_type": "nara",
         "mapping_version": "2026-08-15",
         "criteria_version": "v1",
+        "claim_review_status": "unreviewed",
         "maps": [
             {
                 "criterion": "sustainability.external_dependencies",
