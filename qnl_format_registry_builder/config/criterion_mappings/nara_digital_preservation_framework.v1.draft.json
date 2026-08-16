@@ -1,11 +1,11 @@
 {
   "source_type": "nara_digital_preservation_framework",
-  "mapping_version": "2026-08-15-draft",
+  "mapping_version": "2026-08-16-draft",
   "criteria_version": "v1",
   "native_vocabulary": "nara_file_format_risk_matrix",
   "mapping_mode": "manual_draft",
   "review_status": "draft",
-  "notes": "NARA Risk Level, Numeric Risk Rating, TOTAL Numeric Risk Rating and preservation actions remain hazard/readiness/action inputs, not scored criterion evidence. Only individually reviewed NARA rubric answers may become criterion claims.",
+  "notes": "NARA Risk Level, Numeric Risk Rating, TOTAL Numeric Risk Rating and preservation actions remain hazard/readiness/action inputs, not scored criterion evidence. Only individually reviewed NARA rubric answers may become criterion claims. Current NARA ingests store rubric columns under raw.row; Mongo storage replaces dots in source field names with the fullwidth dot character.",
   "excluded_from_criteria": [
     {
       "field": "NARA Risk Level",
@@ -38,24 +38,63 @@
     {
       "field": "NARA Preferred Processing and Transformation Tool(s)",
       "reason": "Readiness/tooling evidence, not sustainability or hazard criterion."
+    },
+    {
+      "field": "1: TOTAL Disclosure Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "2: TOTAL Adoption Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "3: TOTAL Transparency Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "4: TOTAL Self-Documentation Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "5: TOTAL External Hardware Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "6: TOTAL External Software Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "7: TOTAL Impact of Patents Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "8: TOTAL Technical Protection Mechanisms Score",
+      "reason": "Composite section score; not a criterion observation."
     }
   ],
   "maps": [
     {
       "id": "nara.rubric.1_1.proprietary.v1",
       "criterion": "sustainability.disclosure",
-      "from_field": "native_fields.rubric_answers.1.1",
+      "from_field": "raw.row.1．1: Is the format proprietary?",
+      "alternate_fields": [
+        "raw.row.1.1: Is the format proprietary?",
+        "native_fields.rubric_answers.1．1",
+        "native_fields.rubric_answers.1.1"
+      ],
       "nara_question_id": "1.1",
-      "directness": "explicit",
+      "directness": "derived",
       "covers": "partial",
       "source_independence": "source_derived",
       "mapping_status": "needs_review",
       "values": {
-        "No": "public_specification",
-        "Yes": "proprietary_documented",
+        "2": "public_specification",
+        "-1": "proprietary_documented",
+        "0": "unknown",
+        "FALSE": "unknown",
         "Unknown": "unknown"
       },
-      "rationale": "Candidate only. Proprietary status overlaps with disclosure but is not identical; e.g. a vendor-proprietary format can still have a public specification."
+      "rationale": "Candidate only. The stored NARA CSV value is the rubric score for question 1.1, not a literal Yes/No answer. Positive values are treated as evidence against proprietary status; negative values are treated as evidence of proprietary documentation. This remains partial evidence because proprietary status and public disclosure are related but not identical."
     }
   ]
 }
