@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from registry_builder.criteria import CriteriaError, CriteriaVocabulary
@@ -75,6 +76,22 @@ def _path_text(mapping: dict[str, Any]) -> str:
     return _normalise_text(mapping.get("from_field") or mapping.get("source_field") or "")
 
 
+def _contains_guard_token(text: Any, tokens: tuple[str, ...]) -> bool:
+    """Return true when a guard token occurs as a word/phrase.
+
+    Guard tokens intentionally catch fields such as "Risk Level" and "Numeric
+    Risk Rating". They must not catch unrelated words that merely contain the
+    same letters, for example "operating" containing "rating".
+    """
+    normalized = _normalise_text(text)
+    for token in tokens:
+        normalized_token = _normalise_text(token)
+        pattern = rf"(?<![a-z0-9]){re.escape(normalized_token)}(?![a-z0-9])"
+        if re.search(pattern, normalized):
+            return True
+    return False
+
+
 def _mapping_rule_id(source: dict[str, Any], rule: dict[str, Any]) -> str:
     if rule.get("id"):
         return str(rule["id"])
@@ -121,9 +138,9 @@ def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> t
         if covers not in _ALLOWED_COVERS:
             errors.append(f"{rule_id}: covers must be one of {sorted(_ALLOWED_COVERS)}")
         path_text = _path_text(rule)
-        if any(token in path_text for token in _HAZARD_CONCLUSION_TOKENS):
+        if _contains_guard_token(path_text, _HAZARD_CONCLUSION_TOKENS):
             errors.append(f"{rule_id}: hazard/risk conclusion fields cannot map to criterion_claims")
-        if any(token in path_text for token in _ACTION_DECISION_TOKENS) and criterion_id.startswith(("sustainability.", "technical.")):
+        if _contains_guard_token(path_text, _ACTION_DECISION_TOKENS) and criterion_id.startswith(("sustainability.", "technical.")):
             errors.append(f"{rule_id}: action/tooling fields cannot map to sustainability or technical criteria")
         if rule.get("when_present") is not None:
             try:
