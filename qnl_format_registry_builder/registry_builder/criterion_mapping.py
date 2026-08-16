@@ -14,6 +14,7 @@ from registry_builder.storage.base import RegistryStore
 
 _ALLOWED_DIRECTNESS = {"explicit", "derived", "inferred"}
 _ALLOWED_COVERS = {"full", "partial"}
+_ALLOWED_CLAIM_REVIEW_STATUSES = {"unreviewed", "approved", "rejected", "superseded"}
 _HAZARD_CONCLUSION_TOKENS = (
     "risk level",
     "numeric risk rating",
@@ -107,6 +108,19 @@ def _mapping_rule_id(source: dict[str, Any], rule: dict[str, Any]) -> str:
     return f"{source_name}.{criterion}.{field}.{source.get('criteria_version', 'v1')}"
 
 
+def _claim_review_status(mapping: dict[str, Any], rule: dict[str, Any] | None = None) -> str:
+    """Return the claim review status declared by mapping config.
+
+    A mapping file must declare a root-level claim_review_status. Individual
+    rules may override it, but the code must not silently invent a default.
+    """
+    status = (rule or {}).get("claim_review_status") or mapping.get("claim_review_status")
+    if not status:
+        source_label = mapping.get("source_id") or mapping.get("source_type") or "<unknown source>"
+        raise MappingError(f"{source_label}: claim_review_status is required")
+    return str(status)
+
+
 def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -115,6 +129,13 @@ def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> t
         errors.append("Mapping must declare source_id or source_type")
     if not mapping.get("mapping_version"):
         errors.append(f"{source_label}: mapping_version is required")
+    claim_review_status = str(mapping.get("claim_review_status") or "")
+    if not claim_review_status:
+        errors.append(f"{source_label}: claim_review_status is required")
+    elif claim_review_status not in _ALLOWED_CLAIM_REVIEW_STATUSES:
+        errors.append(
+            f"{source_label}: claim_review_status must be one of {sorted(_ALLOWED_CLAIM_REVIEW_STATUSES)}"
+        )
     if str(mapping.get("criteria_version") or "") != criteria.criteria_version:
         errors.append(
             f"{source_label}: criteria_version must be {criteria.criteria_version!r}, got {mapping.get('criteria_version')!r}"
@@ -124,6 +145,11 @@ def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> t
         rule_id = _mapping_rule_id(mapping, rule)
         status = str(rule.get("mapping_status") or mapping.get("review_status") or "").lower()
         criterion_id = str(rule.get("criterion") or "")
+        rule_claim_review_status = rule.get("claim_review_status")
+        if rule_claim_review_status is not None and str(rule_claim_review_status) not in _ALLOWED_CLAIM_REVIEW_STATUSES:
+            errors.append(
+                f"{rule_id}: claim_review_status must be one of {sorted(_ALLOWED_CLAIM_REVIEW_STATUSES)}"
+            )
         if not criterion_id:
             errors.append(f"{rule_id}: criterion is required")
             continue
@@ -377,7 +403,7 @@ def build_criterion_claims(
                             "criteria_version": mapping.get("criteria_version") or criteria.criteria_version,
                             "mapping_version": mapping.get("mapping_version"),
                             "mapping_rule_id": rule_id,
-                            "review_status": rule.get("claim_review_status") or mapping.get("claim_review_status") or "unreviewed",
+                            "review_status": _claim_review_status(mapping, rule),
                             "observed_at": observed_at,
                         }
                         for optional_key in ("confidence_reason", "covers_note", "rationale"):
