@@ -19,6 +19,7 @@ MAPPING = {
     "source_type": "qnl_institution_format_evidence",
     "mapping_version": "2026-08-15",
     "criteria_version": "v1",
+    "claim_review_status": "approved",
     "decided_by": "QNL",
     "excluded_from_criteria": [{"field": "risk_direction", "reason": "not a value"}],
     "maps": [
