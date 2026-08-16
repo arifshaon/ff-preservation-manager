@@ -37,6 +37,11 @@ def test_pronom_approved_mapping_uses_same_rule_set_as_draft():
     approved_rules = {rule["id"]: rule for rule in approved["maps"]}
 
     assert set(draft_rules) == set(approved_rules)
+    assert set(draft_rules) == {
+        "pronom.disclosure.from_format_disclosure.v1",
+        "pronom.currency.from_last_updated_date.v1",
+        "pronom.identifiability.from_internal_signatures.v1",
+    }
     assert {rule["mapping_status"] for rule in draft_rules.values()} == {"needs_review"}
     assert {rule["mapping_status"] for rule in approved_rules.values()} == {"accepted"}
     assert draft["claim_review_status"] == "unreviewed"
@@ -51,12 +56,16 @@ def test_pronom_approved_mapping_uses_same_rule_set_as_draft():
         assert draft_rule.get("transform") == approved_rule.get("transform")
 
 
-def test_pronom_mapping_keeps_risk_like_fields_out_of_criterion_rules():
+def test_pronom_mapping_keeps_risk_identity_and_url_fields_out_of_criterion_rules():
     draft, approved = _load_pronom_pair()
     for mapping in (draft, approved):
         mapped_fields = {rule["from_field"] for rule in mapping["maps"]}
         excluded_fields = {item["field"] for item in mapping.get("excluded_from_criteria", [])}
         assert "formatRisk" in excluded_fields
         assert "raw.record.formatRisk" in excluded_fields
+        assert "identifiers.PUID" in excluded_fields
+        assert "urls.pronom" in excluded_fields
         assert "formatRisk" not in mapped_fields
         assert "raw.record.formatRisk" not in mapped_fields
+        assert "identifiers.PUID" not in mapped_fields
+        assert "urls.pronom" not in mapped_fields
