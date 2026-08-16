@@ -97,6 +97,12 @@ def _format_progress(event: dict[str, Any]) -> str:
         return f"[criterion-claims] claim build complete; claims={event.get('claims_generated', 0)}"
     if name == "dry_run_skipping_write":
         return f"[criterion-claims] dry run; skipping write of {event.get('claims', 0)} claim(s)"
+    if name == "supersede_claims_started":
+        return f"[criterion-claims] superseding {event.get('claims', 0)} old current claim(s)..."
+    if name == "supersede_claims_progress":
+        return f"[criterion-claims] superseded {event.get('claims_superseded', 0)}/{event.get('claims', 0)} old claim(s)"
+    if name == "supersede_claims_completed":
+        return f"[criterion-claims] supersede complete; claims_superseded={event.get('claims_superseded', 0)}"
     if name == "write_claims_started":
         return f"[criterion-claims] writing {event.get('claims', 0)} claim(s)..."
     if name == "write_claims_progress":
@@ -118,7 +124,7 @@ def _progress_reporter(enabled: bool):
     return report
 
 
-def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, bool, bool, bool, int]:
+def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, bool, bool, bool, bool, int]:
     if not args.config:
         missing = [
             name
@@ -138,6 +144,7 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
             args.out,
             args.dry_run,
             args.include_drafts,
+            args.replace_source_claims,
             _progress_enabled(args),
             _progress_every(args),
         )
@@ -155,6 +162,7 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
     out = args.out if args.out is not None else cfg.get("out")
     dry_run = bool(args.dry_run or cfg.get("dry_run", False))
     include_drafts = bool(args.include_drafts or cfg.get("include_drafts", False))
+    replace_source_claims = bool(args.replace_source_claims or cfg.get("replace_source_claims", False))
     return (
         create_store(storage_config),
         load_criteria(_resolve_relative(args.config, criteria_path)),
@@ -162,6 +170,7 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
         _resolve_relative(args.config, out) if out else None,
         dry_run,
         include_drafts,
+        replace_source_claims,
         _progress_enabled(args, cfg),
         _progress_every(args, cfg),
     )
@@ -206,6 +215,11 @@ def main() -> None:
     claims_backfill.add_argument("--mappings")
     claims_backfill.add_argument("--dry-run", action="store_true")
     claims_backfill.add_argument("--include-drafts", action="store_true", help="Apply draft mappings too; intended for projection/debug only")
+    claims_backfill.add_argument(
+        "--replace-source-claims",
+        action="store_true",
+        help="Mark old current criterion claims from the mapped source(s) as superseded when this backfill no longer produces them.",
+    )
     claims_backfill.add_argument("--out", help="Optional JSON output file")
     claims_backfill.add_argument("--progress-every", type=int, default=500, help="Report progress after this many canonical formats/claims")
     claims_backfill.add_argument("--no-progress", action="store_true", help="Suppress progress messages on stderr")
@@ -246,18 +260,15 @@ def main() -> None:
         if errors:
             raise SystemExit(1)
     elif args.command == "criterion-claims" and args.claims_command == "backfill":
-        store, criteria, mappings, out, dry_run, include_drafts, progress_enabled, progress_every = _backfill_inputs(args)
+        store, criteria, mappings, out, dry_run, include_drafts, replace_source_claims, progress_enabled, progress_every = _backfill_inputs(args)
         result = backfill_criterion_claims(
             store=store,
             criteria=criteria,
             mappings=mappings,
             dry_run=dry_run,
             include_drafts=include_drafts,
+            replace_source_claims=replace_source_claims,
             progress=_progress_reporter(progress_enabled),
             progress_every=progress_every,
         )
         _write_or_print(result, out)
-
-
-if __name__ == "__main__":
-    main()
