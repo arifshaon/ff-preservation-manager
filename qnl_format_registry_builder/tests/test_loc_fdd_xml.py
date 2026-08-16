@@ -17,13 +17,8 @@ LOC_XML = """<?xml version='1.0' encoding='UTF-8'?>
 """
 
 
-def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
-    archive = tmp_path / "fddXML.zip"
-    with zipfile.ZipFile(archive, "w") as zf:
-        zf.writestr("fdd000030.xml", LOC_XML)
-        zf.writestr("README.txt", "not xml")
-
-    snapshot = SourceSnapshot(
+def _zip_snapshot(archive: Path) -> SourceSnapshot:
+    return SourceSnapshot(
         source_id="loc_fdd_xml",
         source_type="loc_fdd_xml",
         uri="https://www.loc.gov/preservation/digital/formats/fddXML.zip",
@@ -33,6 +28,15 @@ def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
         content_type="application/zip",
         metadata={"snapshot_policy": "cache", "snapshot_retained": True},
     )
+
+
+def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fdd000030.xml", LOC_XML)
+        zf.writestr("README.txt", "not xml")
+
+    snapshot = _zip_snapshot(archive)
 
     adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
     record = normalize_record(adapter.extract([snapshot])[0])
@@ -52,6 +56,32 @@ def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
     assert "xml_text" not in record.raw
 
 
+def test_loc_fdd_xml_skips_auxiliary_xml_files_in_zip(tmp_path):
+    archive = tmp_path / "fddXML.zip"
+    dwsync_xml = """<?xml version='1.0' encoding='UTF-8'?>
+    <dwsync>
+      <file name="fdd000033.xml" />
+      <url>https://www.loc.gov/preservation/digital/formats/fddXML/fdd000033.xml</url>
+      <note>Mentions .0, .gov, .loc, .txt and .xml but is not an FDD record.</note>
+    </dwsync>
+    """
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("fddXML/fdd000030.xml", LOC_XML)
+        zf.writestr("fddXML/_notes/dwsync.xml", dwsync_xml)
+
+    snapshot = _zip_snapshot(archive)
+
+    adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
+    records = [normalize_record(record) for record in adapter.extract([snapshot])]
+
+    assert len(records) == 1
+    assert records[0].source_record_id == "fdd000030"
+    assert records[0].evidence[0]["source_file"] == "fddXML/fdd000030.xml"
+    assert "0" not in records[0].extensions
+    assert "gov" not in records[0].extensions
+    assert "loc" not in records[0].extensions
+
+
 def test_loc_fdd_xml_does_not_extract_extensions_from_free_text(tmp_path):
     archive = tmp_path / "fddXML.zip"
     xml = """<?xml version='1.0' encoding='UTF-8'?>
@@ -66,16 +96,7 @@ def test_loc_fdd_xml_does_not_extract_extensions_from_free_text(tmp_path):
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("fdd000031.xml", xml)
 
-    snapshot = SourceSnapshot(
-        source_id="loc_fdd_xml",
-        source_type="loc_fdd_xml",
-        uri="https://www.loc.gov/preservation/digital/formats/fddXML.zip",
-        acquired_at="2026-08-15T00:00:00+00:00",
-        sha256="abc123",
-        local_path=str(archive),
-        content_type="application/zip",
-        metadata={"snapshot_policy": "cache", "snapshot_retained": True},
-    )
+    snapshot = _zip_snapshot(archive)
 
     adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
     record = normalize_record(adapter.extract([snapshot])[0])
@@ -100,16 +121,7 @@ def test_loc_fdd_xml_never_uses_dot_regex_over_free_text(tmp_path):
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("fdd000032.xml", xml)
 
-    snapshot = SourceSnapshot(
-        source_id="loc_fdd_xml",
-        source_type="loc_fdd_xml",
-        uri="https://www.loc.gov/preservation/digital/formats/fddXML.zip",
-        acquired_at="2026-08-15T00:00:00+00:00",
-        sha256="abc123",
-        local_path=str(archive),
-        content_type="application/zip",
-        metadata={"snapshot_policy": "cache", "snapshot_retained": True},
-    )
+    snapshot = _zip_snapshot(archive)
 
     adapter = LocFddXmlAdapter({"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path)
     record = normalize_record(adapter.extract([snapshot])[0])
