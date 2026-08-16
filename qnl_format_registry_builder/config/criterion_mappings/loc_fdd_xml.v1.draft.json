@@ -5,6 +5,7 @@
   "native_vocabulary": "loc_fdd_xml",
   "mapping_mode": "manual_draft",
   "review_status": "draft",
+  "claim_review_status": "unreviewed",
   "notes": "Draft mapping for LOC FDD sustainability factors. Current adapter mostly extracts identity; audit should report raw XML sustainability factors as an adapter gap until native_fields.sustainability_factors is populated.",
   "excluded_from_criteria": [],
   "maps": [
