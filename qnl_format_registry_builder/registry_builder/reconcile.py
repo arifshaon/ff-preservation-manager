@@ -356,12 +356,13 @@ def _safe_claimed_strong_identifier_aliases(
 ) -> tuple[dict[tuple[str, str], tuple[str, str]], dict[tuple[str, str], dict[str, str]]]:
     """Alias copied strong identifiers to a single verified group when names do not conflict.
 
-    Institutional evidence often carries copied PUID/LOC/NARA identifiers so it
-    can point at an authority format. The copied identifier is not verified by
-    that institutional source, so it may bridge only to one verified authority
-    group, and only when explicit version tokens in the names do not conflict.
-    If only one side has a version discriminator, the bridge is allowed but the
-    copied identifier claim is marked as heuristic for collision review.
+    Institutional evidence and source authorities such as NARA/LOC may carry
+    copied PUID/LOC/NARA identifiers so they can point at another authority
+    format. The copied identifier is not verified by that source, so it may
+    bridge only to one verified authority group, and only when explicit version
+    tokens in the names do not conflict. If only one side has a version
+    discriminator, the bridge is allowed but the copied identifier claim is
+    marked as heuristic for collision review.
     """
     verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
     for group_key, items in groups.items():
@@ -373,8 +374,6 @@ def _safe_claimed_strong_identifier_aliases(
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
     alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
     for group_key, items in groups.items():
-        if group_key[0] in strong_kinds:
-            continue
         candidates: set[tuple[str, str]] = set()
         for record in items:
             for identifier in _all_identifiers(record):
@@ -420,7 +419,8 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
 
     claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds)
     for claimed_key, target_key in claimed_aliases.items():
-        if claimed_key not in alias_keys:
+        existing_target = alias_keys.get(claimed_key)
+        if existing_target is None or existing_target == claimed_key:
             alias_keys[claimed_key] = target_key
             if claimed_key in claimed_alias_confidence:
                 alias_confidence[claimed_key] = claimed_alias_confidence[claimed_key]
