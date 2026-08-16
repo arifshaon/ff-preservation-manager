@@ -1,0 +1,180 @@
+{
+  "source_type": "nara_digital_preservation_framework",
+  "mapping_version": "2026-08-16-approved-example",
+  "criteria_version": "v1",
+  "native_vocabulary": "nara_file_format_risk_matrix",
+  "mapping_mode": "manual_approved_example",
+  "review_status": "approved",
+  "claim_review_status": "approved",
+  "decided_by": "QNL DCPA",
+  "decided_at": "2026-08-16",
+  "notes": "Short approved example showing how a reviewed NARA mapping should be represented. This is intentionally not the full 27-rule NARA mapping; use the draft file as the complete rule scaffold and promote reviewed rules into an operational approved mapping when ready.",
+  "excluded_from_criteria": [
+    {
+      "field": "NARA Risk Level",
+      "reason": "Composite conclusion; already consumed as external hazard estimator."
+    },
+    {
+      "field": "Risk Level",
+      "reason": "Composite conclusion; already consumed as external hazard estimator."
+    },
+    {
+      "field": "Numeric Risk Rating",
+      "reason": "Composite NARA native rating; hazard estimator only."
+    },
+    {
+      "field": "TOTAL Numeric Risk Rating",
+      "reason": "Composite NARA native rating; hazard estimator only."
+    },
+    {
+      "field": "NARA TOTAL",
+      "reason": "Composite total; hazard estimator only."
+    },
+    {
+      "field": "NARA Preservation Action",
+      "reason": "Decision/action recommendation, not criterion observation."
+    },
+    {
+      "field": "NARA Proposed Preservation Plan",
+      "reason": "Decision/action planning evidence, not criterion observation."
+    },
+    {
+      "field": "NARA Preferred Processing and Transformation Tool(s)",
+      "reason": "Readiness/tooling evidence, not sustainability or hazard criterion."
+    },
+    {
+      "field": "NARA Transfer Guidance: Preferred",
+      "reason": "Transfer-policy guidance, not neutral sustainability evidence."
+    },
+    {
+      "field": "NARA Transfer Guidance: Acceptable",
+      "reason": "Transfer-policy guidance, not neutral sustainability evidence."
+    },
+    {
+      "field": "Percentage of 2 billion files in NARA ERA holdings",
+      "reason": "NARA-local holdings exposure; not institution-neutral format sustainability evidence."
+    },
+    {
+      "field": "Prevalence: Format Adoption Level as measured by Proportion of File Format in the Overall NARA Holdings",
+      "reason": "NARA-local prevalence score; exposure/adoption context, not neutral criterion evidence."
+    },
+    {
+      "field": "Feasibility Score",
+      "reason": "Composite feasibility judgement; not a source-native criterion observation."
+    },
+    {
+      "field": "1: TOTAL Disclosure Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "2: TOTAL Adoption Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "3: TOTAL Transparency Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "4: TOTAL Self-Documentation Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "5: TOTAL External Hardware Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "6: TOTAL External Software Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "7: TOTAL Impact of Patents Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "8: TOTAL Technical Protection Mechanisms Score",
+      "reason": "Composite section score; not a criterion observation."
+    }
+  ],
+  "maps": [
+    {
+      "id": "nara.rubric.1_2.sustainability_disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "raw.row.1．2: Does the format have a published open specification?",
+      "nara_question_id": "1.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "public_specification",
+        "-2": "undocumented",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "decided_by": "QNL DCPA",
+      "decided_at": "2026-08-16",
+      "rationale": "Approved example. NARA question 1.2 is the strongest NARA disclosure signal because it asks whether a published open specification exists. It remains derived because stored values are rubric scores, not literal answers."
+    },
+    {
+      "id": "nara.rubric.3_2.technical_identifiability.v1",
+      "criterion": "technical.identifiability",
+      "from_field": "raw.row.3．2: Is there an internal signature in an authoritative format registry that can be used to identify a file in this format?",
+      "nara_question_id": "3.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "authoritative_signature",
+        "-2": "no_authoritative_signature",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "decided_by": "QNL DCPA",
+      "decided_at": "2026-08-16",
+      "rationale": "Approved example. NARA question 3.2 directly supports technical identifiability."
+    },
+    {
+      "id": "nara.rubric.6_1.technical_renderer_availability.v1",
+      "criterion": "technical.renderer_availability",
+      "from_field": "raw.row.6．1: Are renderers available?",
+      "nara_question_id": "6.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "renderers_available",
+        "0": "limited_or_unknown",
+        "-4": "no_known_renderer",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "decided_by": "QNL DCPA",
+      "decided_at": "2026-08-16",
+      "rationale": "Approved example. NARA question 6.1 directly supports renderer availability."
+    },
+    {
+      "id": "nara.rubric.8_3.sustainability_tpm_encryption.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "raw.row.8．3: Does the format natively allow the use of technical protection measures (e.g. digital rights management)?",
+      "nara_question_id": "8.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "none_or_not_applicable",
+        "-2": "known_constraint",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "decided_by": "QNL DCPA",
+      "decided_at": "2026-08-16",
+      "rationale": "Approved example. NARA question 8.3 directly supports TPM/DRM possibility evidence."
+    }
+  ]
+}
