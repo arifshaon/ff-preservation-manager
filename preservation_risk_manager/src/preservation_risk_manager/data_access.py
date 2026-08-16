@@ -47,6 +47,94 @@ def _claim_matches_scope(row: dict[str, Any], *, institution_id: str | None) -> 
     return str(row.get("institution_id") or "") == institution_id
 
 
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return [value]
+
+
+def _append_unique(values: list[str], value: str | None) -> None:
+    if not value:
+        return
+    if value not in values:
+        values.append(value)
+
+
+def _string_values(value: Any) -> list[str]:
+    return [str(item).strip() for item in _as_list(value) if str(item).strip()]
+
+
+def _identifier_values(format_doc: dict[str, Any], kind: str) -> list[str]:
+    values: list[str] = []
+    direct_key = {
+        "puid": "puids",
+        "loc": "loc_ids",
+        "nara": "nara_ids",
+    }.get(kind)
+    if direct_key:
+        for value in _string_values(format_doc.get(direct_key)):
+            _append_unique(values, value)
+
+    identifiers = format_doc.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        for value in _string_values(identifiers.get(kind)):
+            _append_unique(values, value)
+    elif isinstance(identifiers, list):
+        for item in identifiers:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or "") != kind:
+                continue
+            for value in _string_values(item.get("value")):
+                _append_unique(values, value)
+    return values
+
+
+def _puid_alias(value: str) -> str | None:
+    normalized = value.strip().lower().replace("/", "-")
+    if not normalized:
+        return None
+    if normalized.startswith("puid-"):
+        return normalized
+    return f"puid-{normalized}"
+
+
+def _loc_alias(value: str) -> str | None:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized.startswith("loc-"):
+        return normalized
+    return f"loc-{normalized}"
+
+
+def _nara_alias(value: str) -> str | None:
+    normalized = value.strip().lower()
+    if not normalized:
+        return None
+    if normalized.startswith("nara-"):
+        return normalized
+    return f"nara-{normalized}"
+
+
+def _claim_dedupe_key(row: dict[str, Any]) -> str:
+    if row.get("_storage_key"):
+        return str(row["_storage_key"])
+    parts = [
+        row.get("canonical_id"),
+        row.get("criterion_id"),
+        row.get("source_id"),
+        row.get("source_record_id"),
+        row.get("mapping_rule_id"),
+        row.get("institution_id"),
+    ]
+    return "|".join(str(part or "") for part in parts)
+
+
 def load_storage_config(path: str | Path) -> dict[str, Any]:
     """Load a registry-builder storage config from JSON.
 
@@ -148,6 +236,29 @@ class RegistryReader:
                 return rows[0]
         return None
 
+    def criterion_claim_canonical_ids(self, format_doc: dict[str, Any]) -> list[str]:
+        """Return canonical IDs whose criterion claims may describe this format.
+
+        The registry may carry an institution aggregate record such as fmt-pdf
+        while source-generated criterion claims are attached to source-derived
+        canonical records such as puid-fmt-18 or loc-fdd000030. Risk analysis
+        should use strong identity aliases to collect those claims without using
+        weak extension/MIME overlaps.
+        """
+        ids: list[str] = []
+        for field in ("canonical_id", "format_id", "id"):
+            value = format_doc.get(field)
+            if value is not None:
+                _append_unique(ids, str(value))
+
+        for value in _identifier_values(format_doc, "puid"):
+            _append_unique(ids, _puid_alias(value))
+        for value in _identifier_values(format_doc, "loc"):
+            _append_unique(ids, _loc_alias(value))
+        for value in _identifier_values(format_doc, "nara"):
+            _append_unique(ids, _nara_alias(value))
+        return ids
+
     def get_criterion_claims(
         self,
         *,
@@ -161,6 +272,23 @@ class RegistryReader:
         """
         rows = self.query("criterion_claims", {"canonical_id": canonical_id})
         return [row for row in rows if _claim_matches_scope(row, institution_id=institution_id)]
+
+    def get_criterion_claims_for_format(
+        self,
+        format_doc: dict[str, Any],
+        *,
+        institution_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        claims: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for canonical_id in self.criterion_claim_canonical_ids(format_doc):
+            for row in self.get_criterion_claims(canonical_id=canonical_id, institution_id=institution_id):
+                key = _claim_dedupe_key(row)
+                if key in seen:
+                    continue
+                seen.add(key)
+                claims.append(row)
+        return claims
 
     def get_format_evidence_claims(
         self,
