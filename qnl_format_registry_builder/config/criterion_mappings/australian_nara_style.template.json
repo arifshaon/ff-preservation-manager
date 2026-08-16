@@ -5,6 +5,7 @@
   "native_vocabulary": "australian_framework_v1",
   "mapping_mode": "manual_or_ai_draft",
   "review_status": "draft",
+  "claim_review_status": "unreviewed",
   "notes": "Template for a NARA-like external preservation framework using different terminology. Composite source risk remains a hazard estimator; rubric/source-observation fields may map to criterion claims after review.",
   "excluded_from_criteria": [
     {
