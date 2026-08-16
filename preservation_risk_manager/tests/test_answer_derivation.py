@@ -22,8 +22,17 @@ def _framework():
                 ],
             },
             {
+                "id": "q_adoption",
+                "evidence_fields": ["sustainability.adoption"],
+                "answers": [
+                    {"id": "widely_adopted", "points": 0},
+                    {"id": "niche_or_declining", "points": 4},
+                    {"id": "unknown", "points": 1, "abstention": True},
+                ],
+            },
+            {
                 "id": "q_external_dependencies",
-                "evidence_fields": ["sustainability.external_dependencies"],
+                "evidence_fields": ["sustainability.external_dependencies", "technical.container_complexity"],
                 "answers": [
                     {"id": "no_special_dependency", "points": 0},
                     {"id": "specialist_dependency", "points": 5},
@@ -46,6 +55,7 @@ def test_derives_answers_from_explicit_criterion_evidence():
 
     assert derived["answers"] == {
         "q_disclosure": "public_specification",
+        "q_adoption": "unknown",
         "q_external_dependencies": "no_special_dependency",
     }
     assert derived["scoring_answers"]["q_disclosure"] == {
@@ -87,3 +97,39 @@ def test_conflicting_evidence_uses_highest_risk_answer_and_exposes_conflict():
     details = derived["derivation"]["q_external_dependencies"]
     assert details["status"] == "derived_conflict_conservative"
     assert details["conflicting_answer_ids"] == ["no_special_dependency", "specialist_dependency"]
+
+
+def test_derives_answers_from_registry_criterion_claim_values():
+    evidence_pack = {
+        "global_evidence": [
+            {"criterion_id": "sustainability.disclosure", "value": "partial_specification"},
+            {"criterion_id": "sustainability.adoption", "value": "high"},
+            {"criterion_id": "sustainability.external_dependencies", "value": "low"},
+            {"criterion_id": "technical.container_complexity", "value": "wrapper"},
+        ]
+    }
+
+    derived = derive_answers(_framework(), evidence_pack)
+
+    assert derived["answers"] == {
+        "q_disclosure": "limited_or_unclear_specification",
+        "q_adoption": "widely_adopted",
+        "q_external_dependencies": "no_special_dependency",
+    }
+
+
+def test_institution_evidence_participates_in_answer_derivation():
+    evidence_pack = {
+        "scope": "institution",
+        "institution_id": "qnl",
+        "global_evidence": [],
+        "institution_evidence": [
+            {"criterion_id": "sustainability.adoption", "value": "low", "institution_id": "qnl"},
+            {"criterion_id": "sustainability.external_dependencies", "value": "high", "institution_id": "qnl"},
+        ],
+    }
+
+    derived = derive_answers(_framework(), evidence_pack)
+
+    assert derived["answers"]["q_adoption"] == "niche_or_declining"
+    assert derived["answers"]["q_external_dependencies"] == "specialist_dependency"
