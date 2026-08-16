@@ -23,6 +23,11 @@ CRITERIA = CriteriaVocabulary({
             "values": ["none", "low", "moderate", "high"],
             "null_value": "unknown",
         },
+        "technical.operating_system_support": {
+            "kind": "ordinal",
+            "values": ["cross_platform", "limited_platform_support"],
+            "null_value": "unknown",
+        },
     },
 })
 
@@ -116,6 +121,30 @@ def test_validate_mapping_rejects_url_presence_as_public_specification():
     errors, _warnings = validate_mapping(mapping, CRITERIA)
 
     assert any("field presence cannot assert public_specification" in error for error in errors)
+
+
+def test_validate_mapping_does_not_treat_operating_as_rating():
+    mapping = {
+        "source_type": "nara_digital_preservation_framework",
+        "mapping_version": "2026-08-16-draft",
+        "criteria_version": "v1",
+        "maps": [
+            {
+                "id": "nara.rubric.6_4.technical_operating_system_support.v1",
+                "criterion": "technical.operating_system_support",
+                "from_field": "raw.row.6．4: Can the format be rendered or executed in more than one computing operating system?",
+                "directness": "derived",
+                "covers": "partial",
+                "source_independence": "source_derived",
+                "mapping_status": "needs_review",
+                "values": {"2": "cross_platform", "-2": "limited_platform_support", "FALSE": "unknown"},
+            }
+        ],
+    }
+
+    errors, _warnings = validate_mapping(mapping, CRITERIA)
+
+    assert not any("hazard/risk conclusion" in error for error in errors)
 
 
 def test_build_criterion_claims_from_institution_evidence_claims():
