@@ -18,6 +18,7 @@ _ALLOWED_DIRECTNESS = {"explicit", "derived", "inferred"}
 _ALLOWED_COVERS = {"full", "partial"}
 _ALLOWED_CLAIM_REVIEW_STATUSES = {"unreviewed", "approved", "rejected", "superseded"}
 _ALLOWED_TRANSFORMS = {"days_since_date"}
+_TEXT_RULE_MATCH_KEYS = {"equals_any", "contains_any", "contains_all", "not_contains_any"}
 _HAZARD_CONCLUSION_TOKENS = (
     "risk level",
     "numeric risk rating",
@@ -75,6 +76,13 @@ def create_store_from_storage_config(path: str | Path) -> RegistryStore:
 
 def _normalise_text(value: Any) -> str:
     return str(value or "").strip().lower().replace("_", " ").replace("-", " ")
+
+
+def _normalise_match_text(value: Any) -> str:
+    if isinstance(value, list):
+        value = " ".join(str(v) for v in value)
+    text = re.sub(r"\s+", " ", str(value or "")).strip().lower()
+    return text.replace("_", " ").replace("-", " ")
 
 
 def _path_text(mapping: dict[str, Any]) -> str:
@@ -163,6 +171,32 @@ def _days_since_date(source_value: Any, observed_at: str | None) -> int | None:
     return max(0, (observed_dt.date() - source_dt.date()).days)
 
 
+def _matches_text_rule(source_value: Any, text_rule: dict[str, Any]) -> bool:
+    haystack = _normalise_match_text(source_value)
+    equals_any = text_rule.get("equals_any")
+    if equals_any:
+        normalized_values = {_normalise_match_text(value).strip(". ") for value in equals_any}
+        if haystack.strip(". ") not in normalized_values:
+            return False
+    contains_all = text_rule.get("contains_all")
+    if contains_all and not all(_normalise_match_text(pattern) in haystack for pattern in contains_all):
+        return False
+    contains_any = text_rule.get("contains_any")
+    if contains_any and not any(_normalise_match_text(pattern) in haystack for pattern in contains_any):
+        return False
+    not_contains_any = text_rule.get("not_contains_any")
+    if not_contains_any and any(_normalise_match_text(pattern) in haystack for pattern in not_contains_any):
+        return False
+    return bool(equals_any or contains_all or contains_any)
+
+
+def _text_rule_value(rule: dict[str, Any], source_value: Any) -> Any | None:
+    for text_rule in rule.get("text_rules") or []:
+        if _matches_text_rule(source_value, text_rule):
+            return text_rule.get("value")
+    return None
+
+
 def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -226,6 +260,19 @@ def validate_mapping(mapping: dict[str, Any], criteria: CriteriaVocabulary) -> t
                 errors.append(f"{rule_id}: {exc}")
             if rule["when_present"] == "public_specification":
                 errors.append(f"{rule_id}: field presence cannot assert public_specification")
+        for text_rule in rule.get("text_rules") or []:
+            if not isinstance(text_rule, dict):
+                errors.append(f"{rule_id}: text_rules entries must be objects")
+                continue
+            if not any(key in text_rule for key in _TEXT_RULE_MATCH_KEYS):
+                errors.append(f"{rule_id}: text_rules entries must declare a match condition")
+            if "value" not in text_rule:
+                errors.append(f"{rule_id}: text_rules entries must declare value")
+                continue
+            try:
+                criteria.validate_value(criterion_id, text_rule["value"])
+            except CriteriaError as exc:
+                errors.append(f"{rule_id}: text rule value: {exc}")
         for source_value, target_value in (rule.get("values") or {}).items():
             try:
                 criteria.validate_value(criterion_id, target_value)
@@ -362,6 +409,9 @@ def _claim_value(rule: dict[str, Any], source_value: Any, *, observed_at: str | 
     transform = rule.get("transform")
     if transform == "days_since_date":
         return _days_since_date(source_value, observed_at)
+    text_value = _text_rule_value(rule, source_value)
+    if text_value is not None:
+        return text_value
     if rule.get("when_present") is not None:
         return rule.get("when_present")
     values = rule.get("values") or {}
