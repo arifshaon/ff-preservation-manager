@@ -172,11 +172,87 @@ def _load_criterion_mapping_inputs(
     return criteria, mappings, metadata
 
 
-def _criterion_claim_summary(claims: list[dict[str, Any]]) -> dict[str, Any]:
+def _claim_source_id(claim: dict[str, Any]) -> str:
+    return str(claim.get("source_id") or claim.get("source_type") or "")
+
+
+def _mapping_source_id(mapping: dict[str, Any]) -> str:
+    return str(mapping.get("source_id") or mapping.get("source_type") or "")
+
+
+def _source_summary_key(source: dict[str, Any]) -> str:
+    return str(source.get("source_id") or source.get("source_type") or "")
+
+
+def _source_claim_status(
+    *,
+    claims_by_source: Counter[str],
+    source_summaries: list[dict[str, Any]],
+    mappings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    mapping_source_ids = {_mapping_source_id(mapping) for mapping in mappings if _mapping_source_id(mapping)}
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for source in source_summaries:
+        key = _source_summary_key(source)
+        if not key:
+            continue
+        seen.add(key)
+        rows.append({
+            "source_id": source.get("source_id"),
+            "source_type": source.get("source_type"),
+            "enabled": source.get("enabled", True),
+            "required": source.get("required", True),
+            "source_run_status": source.get("status", "unknown"),
+            "snapshots": source.get("snapshots", 0),
+            "records_extracted": source.get("records_extracted", 0),
+            "claims_generated": claims_by_source.get(key, 0),
+            "criterion_mapping_configured": key in mapping_source_ids,
+            "contributes_claims": claims_by_source.get(key, 0) > 0,
+        })
+
+    for key in sorted(mapping_source_ids - seen):
+        rows.append({
+            "source_id": key,
+            "source_type": None,
+            "enabled": False,
+            "required": None,
+            "source_run_status": "not_configured",
+            "snapshots": 0,
+            "records_extracted": 0,
+            "claims_generated": claims_by_source.get(key, 0),
+            "criterion_mapping_configured": True,
+            "contributes_claims": claims_by_source.get(key, 0) > 0,
+        })
+
+    return sorted(rows, key=lambda row: str(row.get("source_id") or row.get("source_type") or ""))
+
+
+def _criterion_claim_summary(
+    claims: list[dict[str, Any]],
+    *,
+    source_summaries: list[dict[str, Any]] | None = None,
+    mappings: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    source_summaries = source_summaries or []
+    mappings = mappings or []
+    claims_by_source = Counter(_claim_source_id(claim) for claim in claims)
+    mapped_source_ids = {_mapping_source_id(mapping) for mapping in mappings if _mapping_source_id(mapping)}
+    run_source_ids = {_source_summary_key(source) for source in source_summaries if _source_summary_key(source)}
+    all_source_ids = {source_id for source_id in claims_by_source if source_id} | mapped_source_ids | run_source_ids
     return {
         "claims_generated": len(claims),
-        "claims_by_source": dict(sorted(Counter(str(claim.get("source_id") or claim.get("source_type") or "") for claim in claims).items())),
+        "claims_by_source": {
+            source_id: claims_by_source.get(source_id, 0)
+            for source_id in sorted(all_source_ids)
+        },
         "claims_by_criterion": dict(sorted(Counter(str(claim.get("criterion_id") or "") for claim in claims).items())),
+        "source_claim_status": _source_claim_status(
+            claims_by_source=claims_by_source,
+            source_summaries=source_summaries,
+            mappings=mappings,
+        ),
     }
 
 
@@ -545,12 +621,15 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             extracted = adapter.extract(snapshots)
             all_snapshots.extend(snapshots)
             raw_records.extend(normalize_record(r, identifier_rules=identifier_rules) for r in extracted)
+            source_status = "completed"
+            if len(snapshots) == 0 and len(extracted) == 0:
+                source_status = "unavailable"
             source_summaries.append({
                 "source_id": source["id"],
                 "source_type": source_type,
                 "enabled": True,
                 "required": required,
-                "status": "completed",
+                "status": source_status,
                 "snapshots": len(snapshots),
                 "records_extracted": len(extracted),
                 **_source_snapshot_status(snapshots, offline=offline),
@@ -609,7 +688,11 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             criteria,
             include_drafts=criterion_mapping_report.get("include_drafts", False),
         )
-        criterion_mapping_report = criterion_mapping_report | _criterion_claim_summary(criterion_claims)
+        criterion_mapping_report = criterion_mapping_report | _criterion_claim_summary(
+            criterion_claims,
+            source_summaries=source_summaries,
+            mappings=mappings,
+        )
 
     change_detection = detect_registry_changes(
         previous_registry_view,
@@ -723,6 +806,11 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
                 f"- {src.get('source_id')}: failed; required={src.get('required')}; "
                 f"{src.get('error_type')}: {src.get('error')}"
             )
+        elif src.get("status") == "unavailable":
+            lines.append(
+                f"- {src.get('source_id')}: unavailable; required={src.get('required')}; "
+                f"records={src.get('records_extracted', 0)}, snapshots={src.get('snapshots', 0)}"
+            )
         else:
             status = "changed" if src.get("source_changed") else "unchanged"
             lines.append(
@@ -742,6 +830,14 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         if criterion_mapping.get("claims_by_source"):
             lines.append("- Claims by source:")
             lines.extend(f"  - {k}: {v}" for k, v in criterion_mapping.get("claims_by_source", {}).items())
+        if criterion_mapping.get("source_claim_status"):
+            lines.append("- Source claim status:")
+            for item in criterion_mapping.get("source_claim_status", []):
+                lines.append(
+                    f"  - {item.get('source_id')}: run={item.get('source_run_status')}; "
+                    f"records={item.get('records_extracted', 0)}; claims={item.get('claims_generated', 0)}; "
+                    f"mapped={item.get('criterion_mapping_configured', False)}"
+                )
         if criterion_mapping.get("validation_warnings"):
             lines.append("- Mapping validation warnings:")
             lines.extend(f"  - {w}" for w in criterion_mapping.get("validation_warnings", [])[:20])
