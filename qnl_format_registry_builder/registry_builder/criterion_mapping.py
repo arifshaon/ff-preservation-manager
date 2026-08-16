@@ -5,7 +5,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Callable
 
 from registry_builder.criteria import CriteriaError, CriteriaVocabulary
 from registry_builder.models import utc_now_iso
@@ -34,6 +34,7 @@ _ACTION_DECISION_TOKENS = (
     "action",
     "tooling",
 )
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 class MappingError(ValueError):
@@ -90,6 +91,11 @@ def _contains_guard_token(text: Any, tokens: tuple[str, ...]) -> bool:
         if re.search(pattern, normalized):
             return True
     return False
+
+
+def _emit_progress(progress: ProgressCallback | None, event: str, **payload: Any) -> None:
+    if progress is not None:
+        progress({"event": event, **payload})
 
 
 def _mapping_rule_id(source: dict[str, Any], rule: dict[str, Any]) -> str:
@@ -304,11 +310,24 @@ def build_criterion_claims(
     *,
     include_drafts: bool = False,
     observed_at: str | None = None,
+    progress: ProgressCallback | None = None,
+    progress_every: int = 500,
 ) -> list[dict[str, Any]]:
     observed_at = observed_at or utc_now_iso()
     source_index = _latest_source_record_index(source_records)
     claims: list[dict[str, Any]] = []
-    for canonical in canonical_formats:
+    total_formats = len(canonical_formats)
+    total_mapping_rules = sum(len(mapping.get("maps") or []) for mapping in mappings)
+    progress_every = max(1, int(progress_every or 500))
+    _emit_progress(
+        progress,
+        "build_claims_started",
+        canonical_formats=total_formats,
+        source_records=len(source_records),
+        mapping_rules=total_mapping_rules,
+        include_drafts=include_drafts,
+    )
+    for processed, canonical in enumerate(canonical_formats, start=1):
         if canonical.get("current", True) is False:
             continue
         canonical_id = canonical.get("canonical_id") or canonical.get("format_id")
@@ -369,15 +388,37 @@ def build_criterion_claims(
                         if item.get("claim_id"):
                             claim["source_claim_id"] = item.get("claim_id")
                         claims.append(claim)
+        if processed == total_formats or processed % progress_every == 0:
+            _emit_progress(
+                progress,
+                "build_claims_progress",
+                canonical_formats_processed=processed,
+                canonical_formats=total_formats,
+                claims_generated=len(claims),
+            )
+    _emit_progress(progress, "build_claims_completed", claims_generated=len(claims))
     return claims
 
 
-def store_criterion_claims(store: RegistryStore, claims: list[dict[str, Any]], *, run_id: str | None = None) -> None:
+def store_criterion_claims(
+    store: RegistryStore,
+    claims: list[dict[str, Any]],
+    *,
+    run_id: str | None = None,
+    progress: ProgressCallback | None = None,
+    progress_every: int = 500,
+) -> None:
     run_id = run_id or f"criterion-backfill-{utc_now_iso().replace(':', '').replace('+', 'Z')}"
-    for claim in claims:
+    total_claims = len(claims)
+    progress_every = max(1, int(progress_every or 500))
+    _emit_progress(progress, "write_claims_started", claims=total_claims, run_id=run_id)
+    for index, claim in enumerate(claims, start=1):
         stored = deepcopy(claim)
         stored["run_id"] = run_id
         store.save_criterion_claim(stored)
+        if index == total_claims or index % progress_every == 0:
+            _emit_progress(progress, "write_claims_progress", claims_written=index, claims=total_claims)
+    _emit_progress(progress, "write_claims_completed", claims_written=total_claims, run_id=run_id)
 
 
 def backfill_criterion_claims(
@@ -387,24 +428,40 @@ def backfill_criterion_claims(
     mappings: list[dict[str, Any]],
     dry_run: bool = False,
     include_drafts: bool = False,
+    progress: ProgressCallback | None = None,
+    progress_every: int = 500,
 ) -> dict[str, Any]:
+    _emit_progress(progress, "validate_mappings_started", mappings=len(mappings))
     errors, warnings = validate_mappings(mappings, criteria)
     if errors:
+        _emit_progress(progress, "validate_mappings_failed", errors=len(errors))
         raise MappingError("Invalid criterion mappings: " + "; ".join(errors))
+    _emit_progress(progress, "validate_mappings_completed", warnings=len(warnings))
+
+    _emit_progress(progress, "load_canonical_formats_started")
     canonical_formats = store.get_current_registry_view()
+    _emit_progress(progress, "load_canonical_formats_completed", canonical_formats=len(canonical_formats))
+
+    _emit_progress(progress, "load_source_records_started")
     source_records = store.query("source_records")
+    _emit_progress(progress, "load_source_records_completed", source_records=len(source_records))
+
     claims = build_criterion_claims(
         canonical_formats,
         source_records,
         mappings,
         criteria,
         include_drafts=include_drafts,
+        progress=progress,
+        progress_every=progress_every,
     )
-    if not dry_run:
-        store_criterion_claims(store, claims)
+    if dry_run:
+        _emit_progress(progress, "dry_run_skipping_write", claims=len(claims))
+    else:
+        store_criterion_claims(store, claims, progress=progress, progress_every=progress_every)
     by_criterion = Counter(claim["criterion_id"] for claim in claims)
     by_source = Counter(str(claim.get("source_id") or claim.get("source_type") or "unknown") for claim in claims)
-    return {
+    result = {
         "status": "dry_run" if dry_run else "completed",
         "claims_generated": len(claims),
         "criteria_version": criteria.criteria_version,
@@ -413,6 +470,8 @@ def backfill_criterion_claims(
         "validation_warnings": warnings,
         "sample_claims": claims[:10],
     }
+    _emit_progress(progress, "backfill_completed", status=result["status"], claims_generated=len(claims))
+    return result
 
 
 def projected_coverage(claims: list[dict[str, Any]]) -> dict[str, Any]:
