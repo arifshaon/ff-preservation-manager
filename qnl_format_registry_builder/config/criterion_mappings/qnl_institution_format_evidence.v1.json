@@ -5,6 +5,7 @@
   "native_vocabulary": "qnl_institution_format_evidence_seed_0.1",
   "mapping_mode": "manual",
   "review_status": "accepted",
+  "claim_review_status": "approved",
   "decided_by": "QNL Digital Curation, Preservation, and Access",
   "decided_at": "2026-08-15",
   "notes": "Manual seed mapping for the PDF and netCDF QNL institution evidence examples. These claims are institution-scoped observations, not neutral global evidence and not final scoring.",
