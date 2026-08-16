@@ -100,24 +100,27 @@ def _text_by_names(root: ET.Element, names: set[str]) -> list[str]:
     return out
 
 
-def _direct_text_by_names(root: ET.Element, names: set[str]) -> list[str]:
-    out: list[str] = []
+def _direct_text_by_name(root: ET.Element, name: str) -> str | None:
     for elem in list(root):
-        if _local_name(elem.tag) in names and elem.text and elem.text.strip():
-            out.append(elem.text.strip())
-    return out
+        if _local_name(elem.tag) == name and elem.text and elem.text.strip():
+            return elem.text.strip()
+    return None
 
 
-def _record_primary_text(root: ET.Element, names: set[str]) -> str | None:
-    """Return top-level LOC FDD record metadata only.
+def _record_primary_text(root: ET.Element, names: tuple[str, ...]) -> str | None:
+    """Return top-level LOC FDD record metadata using explicit field priority.
 
     FDD records can cite related formats with nested `<title>`, `<name>`, `<id>`,
     or `<type>` elements. Those nested labels describe related records, not the
-    current record. For record name/category, use only direct children of the FDD
-    record so a relation like RIFF does not overwrite WAVE/WebP.
+    current record. Within direct record fields, prefer the more specific title
+    over generic name fields so a relation/container label such as RIFF does not
+    overwrite WAVE/WebP.
     """
-    values = _direct_text_by_names(root, names)
-    return values[0] if values else None
+    for name in names:
+        value = _direct_text_by_name(root, name)
+        if value:
+            return value
+    return None
 
 
 def _extension_tokens(value: str) -> list[str]:
@@ -288,8 +291,8 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     text = data.decode("utf-8", errors="replace")
     root = ET.fromstring(text)
     loc_id = _first_loc_id(root, text, source_file)
-    name = _record_primary_text(root, {"title", "shortname", "short_name", "name"})
-    category = _record_primary_text(root, {"category", "type"})
+    name = _record_primary_text(root, ("title", "shortname", "short_name", "name"))
+    category = _record_primary_text(root, ("category", "type"))
 
     # Conservative regex fallbacks for common identifiers embedded in FDD text.
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
