@@ -11,6 +11,24 @@
       ],
       "null_value": "unknown"
     },
+    "sustainability.standardization": {
+      "kind": "ordinal",
+      "values": [
+        "international_standard",
+        "community_or_de_facto_standard",
+        "not_standardized"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.specification_currency": {
+      "kind": "ordinal",
+      "values": [
+        "current_or_recent",
+        "dated",
+        "stale_or_legacy"
+      ],
+      "null_value": "unknown"
+    },
     "sustainability.adoption": {
       "kind": "ordinal",
       "values": [
@@ -19,6 +37,24 @@
         "moderate",
         "low",
         "negligible"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.maintenance": {
+      "kind": "ordinal",
+      "values": [
+        "actively_maintained",
+        "partially_maintained",
+        "not_maintained"
+      ],
+      "null_value": "unknown"
+    },
+    "sustainability.community_guidance": {
+      "kind": "ordinal",
+      "values": [
+        "recommended_or_neutral",
+        "caution",
+        "identified_to_avoid"
       ],
       "null_value": "unknown"
     },
@@ -70,6 +106,15 @@
       ],
       "null_value": "unknown"
     },
+    "technical.identifiability": {
+      "kind": "ordinal",
+      "values": [
+        "authoritative_signature",
+        "partial_or_non_authoritative_signature",
+        "no_authoritative_signature"
+      ],
+      "null_value": "unknown"
+    },
     "technical.container_complexity": {
       "kind": "nominal",
       "values": [
@@ -86,6 +131,93 @@
         "none_or_standard",
         "tool_supported",
         "specialist_or_untested"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.lossy_compression": {
+      "kind": "ordinal",
+      "values": [
+        "none_or_not_applicable",
+        "possible_or_lossy"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.embedded_data_support": {
+      "kind": "ordinal",
+      "values": [
+        "none_or_not_supported",
+        "supports_declared_or_hidden_data"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.embedded_data_documentation": {
+      "kind": "ordinal",
+      "values": [
+        "documented",
+        "not_applicable",
+        "undocumented"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.metadata_extensibility": {
+      "kind": "ordinal",
+      "values": [
+        "supports_embedded_metadata",
+        "limited_or_external_metadata",
+        "no_embedded_metadata_support"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.hardware_dependency": {
+      "kind": "ordinal",
+      "values": [
+        "none",
+        "low",
+        "moderate",
+        "high"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.renderer_availability": {
+      "kind": "ordinal",
+      "values": [
+        "renderers_available",
+        "limited_or_unknown",
+        "no_known_renderer"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.open_source_tooling": {
+      "kind": "ordinal",
+      "values": [
+        "open_source_available",
+        "no_open_source_tooling"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.plugin_script_dependency": {
+      "kind": "ordinal",
+      "values": [
+        "none",
+        "low",
+        "moderate",
+        "high"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.operating_system_support": {
+      "kind": "ordinal",
+      "values": [
+        "cross_platform",
+        "limited_platform_support"
+      ],
+      "null_value": "unknown"
+    },
+    "technical.creation_software_support": {
+      "kind": "ordinal",
+      "values": [
+        "currently_supported",
+        "unsupported_or_legacy"
       ],
       "null_value": "unknown"
     },
