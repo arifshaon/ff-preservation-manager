@@ -1,0 +1,92 @@
+{
+  "source_type": "pronom_registry",
+  "mapping_version": "2026-08-16-approved",
+  "criteria_version": "v1",
+  "native_vocabulary": "pronom_github_json",
+  "mapping_mode": "manual_approved",
+  "review_status": "approved",
+  "claim_review_status": "approved",
+  "decided_by": "QNL DCPA",
+  "decided_at": "2026-08-16",
+  "notes": "Approved PRONOM mapping for production-style criterion-claim testing. The rule set intentionally matches the PRONOM draft mapping; the difference is approval metadata and accepted rule status.",
+  "excluded_from_criteria": [
+    {
+      "field": "formatRisk",
+      "reason": "Risk-like source field; excluded from criterion_claims unless separately profiled and proven to be a neutral observation rather than a risk conclusion."
+    },
+    {
+      "field": "raw.record.formatRisk",
+      "reason": "Risk-like source field; hazard/profiling candidate only, not neutral criterion evidence."
+    },
+    {
+      "field": "fileFormatID",
+      "reason": "PRONOM database identifier; identity evidence, not preservation-risk criterion evidence."
+    },
+    {
+      "field": "identifiers.PUID",
+      "reason": "Format identity evidence. PUID presence alone does not prove file-level internal signature availability."
+    },
+    {
+      "field": "externalSignatures",
+      "reason": "Filename extension or other external signature evidence; useful for identity/recognition, but not enough to assert authoritative internal identifiability."
+    }
+  ],
+  "maps": [
+    {
+      "id": "pronom.disclosure.from_format_disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_collection": "evidence",
+      "from_field": "format_disclosure",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {
+        "Full": "public_specification",
+        "full": "public_specification",
+        "Partial": "partial_specification",
+        "partial": "partial_specification",
+        "None": "undocumented",
+        "none": "undocumented",
+        "Unknown": "unknown",
+        "unknown": "unknown"
+      },
+      "rationale": "PRONOM formatDisclosure is the strongest PRONOM disclosure observation exposed by the current adapter. It remains source evidence, not a final risk score."
+    },
+    {
+      "id": "pronom.currency.from_last_updated_date.v1",
+      "criterion": "source.currency",
+      "from_collection": "evidence",
+      "from_field": "last_updated_date",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "transform": "days_since_date",
+      "rationale": "PRONOM lastUpdatedDate is source-record currency evidence. It should be stored as days since update, not interpreted directly as sustainability risk."
+    },
+    {
+      "id": "pronom.identifiability.from_internal_signatures.v1",
+      "criterion": "technical.identifiability",
+      "from_field": "raw.record.internalSignatures",
+      "directness": "explicit",
+      "covers": "full",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "when_present": "authoritative_signature",
+      "rationale": "Presence of PRONOM internalSignatures is direct evidence that PRONOM records an authoritative internal signature for file-level identification."
+    },
+    {
+      "id": "pronom.disclosure.from_pronom_url_presence.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "urls.pronom",
+      "directness": "inferred",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "when_present": "partial_specification",
+      "confidence_reason": "A PRONOM landing page indicates registry documentation exists, but does not prove an open public specification. It must not assert public_specification.",
+      "rationale": "Fallback documentation-presence signal for records where formatDisclosure is unavailable or unknown."
+    }
+  ]
+}
