@@ -524,25 +524,89 @@ def build_criterion_claims(
     return claims
 
 
+def _claim_storage_key(record: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+    return (
+        str(record.get("canonical_id") or record.get("format_id") or ""),
+        str(record.get("criterion_id") or ""),
+        str(record.get("source_id") or record.get("source_type") or ""),
+        str(record.get("source_record_id") or ""),
+        str(record.get("mapping_rule_id") or ""),
+        str(record.get("institution_id") or ""),
+    )
+
+
+def _mapping_matches_claim_source(mapping: dict[str, Any], claim: dict[str, Any]) -> bool:
+    expected_id = mapping.get("source_id")
+    expected_type = mapping.get("source_type")
+    source_id = claim.get("source_id") or claim.get("source_type")
+    source_type = claim.get("source_type")
+    if expected_id and expected_id != source_id:
+        return False
+    if expected_type and expected_type != source_type:
+        return False
+    return bool(expected_id or expected_type)
+
+
+def source_claims_to_supersede(
+    store: RegistryStore,
+    claims: list[dict[str, Any]],
+    mappings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return current claims from mapped sources that are not produced by this backfill.
+
+    This supports deliberate source-level replacement. It is intentionally opt-in
+    so a small mapping file can be tested without retiring claims from a fuller
+    mapping unless the caller passes --replace-source-claims.
+    """
+    active_keys = {_claim_storage_key(claim) for claim in claims}
+    supersede: list[dict[str, Any]] = []
+    for existing in store.query("criterion_claims"):
+        if existing.get("current", True) is False:
+            continue
+        if _claim_storage_key(existing) in active_keys:
+            continue
+        if any(_mapping_matches_claim_source(mapping, existing) for mapping in mappings):
+            supersede.append(existing)
+    return supersede
+
+
 def store_criterion_claims(
     store: RegistryStore,
     claims: list[dict[str, Any]],
     *,
     run_id: str | None = None,
+    mappings: list[dict[str, Any]] | None = None,
+    replace_source_claims: bool = False,
     progress: ProgressCallback | None = None,
     progress_every: int = 500,
-) -> None:
+) -> int:
     run_id = run_id or f"criterion-backfill-{utc_now_iso().replace(':', '').replace('+', 'Z')}"
     total_claims = len(claims)
     progress_every = max(1, int(progress_every or 500))
+    superseded = source_claims_to_supersede(store, claims, mappings or []) if replace_source_claims else []
+    if superseded:
+        _emit_progress(progress, "supersede_claims_started", claims=len(superseded), run_id=run_id)
+        for index, existing in enumerate(superseded, start=1):
+            stored = deepcopy(existing)
+            stored["current"] = False
+            stored["superseded_by_run_id"] = run_id
+            stored["superseded_reason"] = "source_replaced_by_backfill"
+            store.save_criterion_claim(stored)
+            if index == len(superseded) or index % progress_every == 0:
+                _emit_progress(progress, "supersede_claims_progress", claims_superseded=index, claims=len(superseded))
+        _emit_progress(progress, "supersede_claims_completed", claims_superseded=len(superseded), run_id=run_id)
+
     _emit_progress(progress, "write_claims_started", claims=total_claims, run_id=run_id)
     for index, claim in enumerate(claims, start=1):
         stored = deepcopy(claim)
         stored["run_id"] = run_id
+        stored["current"] = True
+        stored["last_seen_run_id"] = run_id
         store.save_criterion_claim(stored)
         if index == total_claims or index % progress_every == 0:
             _emit_progress(progress, "write_claims_progress", claims_written=index, claims=total_claims)
     _emit_progress(progress, "write_claims_completed", claims_written=total_claims, run_id=run_id)
+    return len(superseded)
 
 
 def backfill_criterion_claims(
@@ -552,6 +616,7 @@ def backfill_criterion_claims(
     mappings: list[dict[str, Any]],
     dry_run: bool = False,
     include_drafts: bool = False,
+    replace_source_claims: bool = False,
     progress: ProgressCallback | None = None,
     progress_every: int = 500,
 ) -> dict[str, Any]:
@@ -579,16 +644,28 @@ def backfill_criterion_claims(
         progress=progress,
         progress_every=progress_every,
     )
+    claims_superseded = 0
+    if replace_source_claims:
+        claims_superseded = len(source_claims_to_supersede(store, claims, mappings))
     if dry_run:
         _emit_progress(progress, "dry_run_skipping_write", claims=len(claims))
     else:
-        store_criterion_claims(store, claims, progress=progress, progress_every=progress_every)
+        claims_superseded = store_criterion_claims(
+            store,
+            claims,
+            mappings=mappings,
+            replace_source_claims=replace_source_claims,
+            progress=progress,
+            progress_every=progress_every,
+        )
     by_criterion = Counter(claim["criterion_id"] for claim in claims)
     by_rule = Counter(str(claim.get("mapping_rule_id") or "unknown") for claim in claims)
     by_source = Counter(str(claim.get("source_id") or claim.get("source_type") or "unknown") for claim in claims)
     result = {
         "status": "dry_run" if dry_run else "completed",
         "claims_generated": len(claims),
+        "claims_superseded": claims_superseded,
+        "replace_source_claims": replace_source_claims,
         "criteria_version": criteria.criteria_version,
         "criteria": dict(sorted(by_criterion.items())),
         "mapping_rules": dict(sorted(by_rule.items())),
