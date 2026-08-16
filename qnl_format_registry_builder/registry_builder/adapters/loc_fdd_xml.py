@@ -74,7 +74,6 @@ _SUSTAINABILITY_FACTOR_ALIASES = {
         "technicalprotectionmechanism",
     },
 }
-_SUSTAINABILITY_SECTION_NAMES = {"sustainabilityfactors", "sustainabilityfactor", "sustainability"}
 
 
 def _local_name(tag: str) -> str:
@@ -219,6 +218,11 @@ def _is_fdd_xml_payload_name(name: str) -> bool:
     return bool(re.fullmatch(r"fdd\d{6}\.xml", Path(str(name)).name.lower()))
 
 
+def _loc_id_from_source_file(source_file: str) -> str | None:
+    match = re.fullmatch(r"(fdd\d{6})\.xml", Path(str(source_file)).name.lower())
+    return match.group(1) if match else None
+
+
 def _xml_payloads(snapshot: SourceSnapshot) -> list[tuple[str, bytes]]:
     path = Path(snapshot.local_path)
     if _snapshot_is_zip(snapshot):
@@ -234,11 +238,28 @@ def _xml_payloads(snapshot: SourceSnapshot) -> list[tuple[str, bytes]]:
     return [(snapshot.uri, path.read_bytes())]
 
 
-def _first_loc_id(root: ET.Element, text: str) -> str | None:
-    loc_ids = _text_by_names(root, {"fddid", "fdd_id", "id"})
-    loc_id = next((x for x in loc_ids if re.match(r"fdd\d{6}$", x, re.I)), None)
-    if loc_id:
-        return loc_id.lower()
+def _fddid_from_xml(root: ET.Element) -> str | None:
+    for elem in root.iter():
+        if _local_name(elem.tag) not in {"fddid", "fdd_id"}:
+            continue
+        if elem.text and re.fullmatch(r"fdd\d{6}", elem.text.strip(), flags=re.I):
+            return elem.text.strip().lower()
+    return None
+
+
+def _first_loc_id(root: ET.Element, text: str, source_file: str) -> str | None:
+    """Return the LOC FDD record ID for the current record.
+
+    The filename is authoritative for the official LOC FDD ZIP. Do not use generic
+    `<id>` elements or first-match full-text scanning before the filename, because
+    FDD records often cite related FDD IDs in references and relationship fields.
+    """
+    file_id = _loc_id_from_source_file(source_file)
+    if file_id:
+        return file_id
+    xml_id = _fddid_from_xml(root)
+    if xml_id:
+        return xml_id
     match = re.search(r"\bfdd\d{6}\b", text, flags=re.I)
     return match.group(0).lower() if match else None
 
@@ -246,7 +267,7 @@ def _first_loc_id(root: ET.Element, text: str) -> str | None:
 def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) -> RawFormatRecord | None:
     text = data.decode("utf-8", errors="replace")
     root = ET.fromstring(text)
-    loc_id = _first_loc_id(root, text)
+    loc_id = _first_loc_id(root, text, source_file)
     titles = _text_by_names(root, {"title", "shortname", "short_name", "name"})
     categories = _text_by_names(root, {"category", "type"})
 
