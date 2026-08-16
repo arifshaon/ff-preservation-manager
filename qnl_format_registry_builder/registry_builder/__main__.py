@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from typing import Any
 
 from registry_builder.collision_report import build_collision_report
@@ -48,7 +49,76 @@ def _write_or_print(result: dict, out: str | None = None) -> None:
     print(text)
 
 
-def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, bool, bool]:
+def _progress_enabled(args, config: dict[str, Any] | None = None) -> bool:
+    if getattr(args, "no_progress", False):
+        return False
+    if config and "progress" in config:
+        return bool(config.get("progress"))
+    return True
+
+
+def _progress_every(args, config: dict[str, Any] | None = None) -> int:
+    value = getattr(args, "progress_every", None)
+    if value is None and config:
+        value = config.get("progress_every")
+    return max(1, int(value or 500))
+
+
+def _format_progress(event: dict[str, Any]) -> str:
+    name = event.get("event")
+    if name == "validate_mappings_started":
+        return f"[criterion-claims] validating {event.get('mappings', 0)} mapping file(s)..."
+    if name == "validate_mappings_completed":
+        return f"[criterion-claims] mappings valid; warnings={event.get('warnings', 0)}"
+    if name == "validate_mappings_failed":
+        return f"[criterion-claims] mapping validation failed; errors={event.get('errors', 0)}"
+    if name == "load_canonical_formats_started":
+        return "[criterion-claims] loading current canonical formats..."
+    if name == "load_canonical_formats_completed":
+        return f"[criterion-claims] loaded {event.get('canonical_formats', 0)} canonical format(s)"
+    if name == "load_source_records_started":
+        return "[criterion-claims] loading source records..."
+    if name == "load_source_records_completed":
+        return f"[criterion-claims] loaded {event.get('source_records', 0)} source record(s)"
+    if name == "build_claims_started":
+        return (
+            "[criterion-claims] building claims from "
+            f"{event.get('canonical_formats', 0)} canonical format(s), "
+            f"{event.get('source_records', 0)} source record(s), "
+            f"{event.get('mapping_rules', 0)} mapping rule(s)..."
+        )
+    if name == "build_claims_progress":
+        return (
+            "[criterion-claims] mapped "
+            f"{event.get('canonical_formats_processed', 0)}/{event.get('canonical_formats', 0)} "
+            f"canonical format(s); claims={event.get('claims_generated', 0)}"
+        )
+    if name == "build_claims_completed":
+        return f"[criterion-claims] claim build complete; claims={event.get('claims_generated', 0)}"
+    if name == "dry_run_skipping_write":
+        return f"[criterion-claims] dry run; skipping write of {event.get('claims', 0)} claim(s)"
+    if name == "write_claims_started":
+        return f"[criterion-claims] writing {event.get('claims', 0)} claim(s)..."
+    if name == "write_claims_progress":
+        return f"[criterion-claims] wrote {event.get('claims_written', 0)}/{event.get('claims', 0)} claim(s)"
+    if name == "write_claims_completed":
+        return f"[criterion-claims] write complete; claims_written={event.get('claims_written', 0)}"
+    if name == "backfill_completed":
+        return f"[criterion-claims] completed; status={event.get('status')}; claims={event.get('claims_generated', 0)}"
+    return "[criterion-claims] " + json.dumps(event, ensure_ascii=False, sort_keys=True)
+
+
+def _progress_reporter(enabled: bool):
+    if not enabled:
+        return None
+
+    def report(event: dict[str, Any]) -> None:
+        print(_format_progress(event), file=sys.stderr, flush=True)
+
+    return report
+
+
+def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, bool, bool, bool, int]:
     if not args.config:
         missing = [
             name
@@ -68,6 +138,8 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
             args.out,
             args.dry_run,
             args.include_drafts,
+            _progress_enabled(args),
+            _progress_every(args),
         )
 
     cfg = _load_json(args.config)
@@ -90,6 +162,8 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
         _resolve_relative(args.config, out) if out else None,
         dry_run,
         include_drafts,
+        _progress_enabled(args, cfg),
+        _progress_every(args, cfg),
     )
 
 
@@ -133,6 +207,8 @@ def main() -> None:
     claims_backfill.add_argument("--dry-run", action="store_true")
     claims_backfill.add_argument("--include-drafts", action="store_true", help="Apply draft mappings too; intended for projection/debug only")
     claims_backfill.add_argument("--out", help="Optional JSON output file")
+    claims_backfill.add_argument("--progress-every", type=int, default=500, help="Report progress after this many canonical formats/claims")
+    claims_backfill.add_argument("--no-progress", action="store_true", help="Suppress progress messages on stderr")
 
     args = parser.parse_args()
 
@@ -170,13 +246,15 @@ def main() -> None:
         if errors:
             raise SystemExit(1)
     elif args.command == "criterion-claims" and args.claims_command == "backfill":
-        store, criteria, mappings, out, dry_run, include_drafts = _backfill_inputs(args)
+        store, criteria, mappings, out, dry_run, include_drafts, progress_enabled, progress_every = _backfill_inputs(args)
         result = backfill_criterion_claims(
             store=store,
             criteria=criteria,
             mappings=mappings,
             dry_run=dry_run,
             include_drafts=include_drafts,
+            progress=_progress_reporter(progress_enabled),
+            progress_every=progress_every,
         )
         _write_or_print(result, out)
 
