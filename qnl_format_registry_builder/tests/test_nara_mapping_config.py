@@ -5,16 +5,16 @@ from registry_builder.criterion_mapping import load_mapping, validate_mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAPPING_DIR = ROOT / "config" / "criterion_mappings"
 
 
-def test_full_nara_mapping_config_validates_against_criteria_vocabulary():
-    criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
-    mapping = load_mapping(
-        ROOT
-        / "config"
-        / "criterion_mappings"
-        / "nara_digital_preservation_framework.v1.draft.json"
-    )
+def _criteria():
+    return load_criteria(ROOT / "config" / "criteria" / "v1.json")
+
+
+def test_full_nara_draft_mapping_config_validates_against_criteria_vocabulary():
+    criteria = _criteria()
+    mapping = load_mapping(MAPPING_DIR / "nara_digital_preservation_framework.v1.draft.json")
 
     errors, warnings = validate_mapping(mapping, criteria)
 
@@ -24,13 +24,24 @@ def test_full_nara_mapping_config_validates_against_criteria_vocabulary():
     assert {rule["mapping_status"] for rule in mapping["maps"]} == {"needs_review"}
 
 
+def test_short_nara_approved_mapping_example_validates_against_criteria_vocabulary():
+    criteria = _criteria()
+    mapping = load_mapping(MAPPING_DIR / "nara_digital_preservation_framework.v1.approved.json")
+
+    errors, warnings = validate_mapping(mapping, criteria)
+
+    assert errors == []
+    assert warnings == []
+    assert mapping["review_status"] == "approved"
+    assert mapping["claim_review_status"] == "approved"
+    assert 1 <= len(mapping["maps"]) < 27
+    assert {rule["mapping_status"] for rule in mapping["maps"]} == {"accepted"}
+    assert all(rule.get("decided_by") for rule in mapping["maps"])
+    assert all(rule.get("decided_at") for rule in mapping["maps"])
+
+
 def test_nara_mapping_keeps_conclusions_and_decisions_out_of_criterion_rules():
-    mapping = load_mapping(
-        ROOT
-        / "config"
-        / "criterion_mappings"
-        / "nara_digital_preservation_framework.v1.draft.json"
-    )
+    mapping = load_mapping(MAPPING_DIR / "nara_digital_preservation_framework.v1.draft.json")
 
     mapped_fields = {rule["from_field"] for rule in mapping["maps"]}
     forbidden_fragments = [
