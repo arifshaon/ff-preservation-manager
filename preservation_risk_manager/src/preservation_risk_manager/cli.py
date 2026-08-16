@@ -150,6 +150,101 @@ def _registry_reader_from_args(args: argparse.Namespace) -> RegistryReader:
     return RegistryReader(storage_config=load_storage_config(storage_path))
 
 
+def _compact_claim(claim: dict[str, Any]) -> dict[str, Any]:
+    """Return provenance fields without long source bodies."""
+    keys = (
+        "claim_id",
+        "source_claim_id",
+        "_storage_key",
+        "canonical_id",
+        "criterion_id",
+        "value",
+        "answer_id",
+        "source_id",
+        "source_type",
+        "source_record_id",
+        "source_field",
+        "mapping_rule_id",
+        "mapping_version",
+        "institution_id",
+        "source_independence",
+        "evidence_section",
+        "review_status",
+        "directness",
+        "covers",
+    )
+    return {key: claim[key] for key in keys if key in claim and claim[key] is not None}
+
+
+def _compact_answer_document(answer_document: dict[str, Any]) -> dict[str, Any]:
+    compact = json.loads(json.dumps(answer_document, default=str))
+    derivation = compact.get("derivation")
+    if not isinstance(derivation, dict):
+        return compact
+    for result in derivation.values():
+        if not isinstance(result, dict):
+            continue
+        claims = result.get("evidence_claims")
+        if isinstance(claims, list):
+            result["evidence_claims"] = [
+                _compact_claim(claim)
+                for claim in claims
+                if isinstance(claim, dict)
+            ]
+    return compact
+
+
+def _criterion_claims_summary(claims: list[dict[str, Any]]) -> dict[str, Any]:
+    grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        key = (
+            str(claim.get("criterion_id") or ""),
+            str(claim.get("source_id") or ""),
+            str(claim.get("value") or ""),
+            str(claim.get("institution_id") or ""),
+            str(claim.get("canonical_id") or ""),
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "criterion_id": key[0],
+                "source_id": key[1],
+                "value": key[2],
+                "institution_id": key[3] or None,
+                "canonical_id": key[4],
+                "count": 0,
+                "source_record_ids": set(),
+                "mapping_rule_ids": set(),
+            },
+        )
+        group["count"] += 1
+        if claim.get("source_record_id") is not None:
+            group["source_record_ids"].add(str(claim["source_record_id"]))
+        if claim.get("mapping_rule_id") is not None:
+            group["mapping_rule_ids"].add(str(claim["mapping_rule_id"]))
+
+    rows: list[dict[str, Any]] = []
+    for group in grouped.values():
+        row = dict(group)
+        row["source_record_ids"] = sorted(row["source_record_ids"])
+        row["mapping_rule_ids"] = sorted(row["mapping_rule_ids"])
+        rows.append(row)
+    rows.sort(key=lambda row: (
+        row.get("criterion_id") or "",
+        row.get("institution_id") or "",
+        row.get("source_id") or "",
+        row.get("canonical_id") or "",
+        row.get("value") or "",
+    ))
+
+    return {
+        "total_claims": len(claims),
+        "groups": rows,
+    }
+
+
 def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     framework_path = _require_file(args.framework, label="Framework file")
     framework = load_framework(framework_path)
@@ -172,6 +267,7 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     )
     answer_document = derive_answers(framework, evidence_pack)
     analysis = score_answers(framework, answer_document.get("scoring_answers") or answer_document["answers"])
+    output_answer_document = _compact_answer_document(answer_document) if args.compact_evidence else answer_document
     result: dict[str, Any] = {
         "status": "ok",
         "resolution": _resolution_summary(resolution),
@@ -180,9 +276,11 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
         "evidence_hash": evidence_hash(evidence_pack),
         "criterion_claim_canonical_ids": criterion_claim_canonical_ids,
         "criterion_claims_used": len(criterion_claims),
-        "derived_answers": answer_document,
+        "derived_answers": output_answer_document,
         "analysis": analysis,
     }
+    if args.evidence_summary:
+        result["criterion_claims_summary"] = _criterion_claims_summary(criterion_claims)
 
     if args.institution:
         readiness_status, exposure_level = _posture_fields_from_args(args)
@@ -228,6 +326,16 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_registry.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
     analyze_registry.add_argument("--exposure-level", default="Unknown", help="Institution exposure level when --institution is used.")
     analyze_registry.add_argument("--include-unapproved", action="store_true", help="Include draft/rejected/superseded evidence claims.")
+    analyze_registry.add_argument(
+        "--evidence-summary",
+        action="store_true",
+        help="Add a compact criterion-claim summary grouped by criterion, source, value, institution, and canonical ID.",
+    )
+    analyze_registry.add_argument(
+        "--compact-evidence",
+        action="store_true",
+        help="Suppress long evidence claim bodies in derived_answers while retaining provenance fields.",
+    )
     analyze_registry.set_defaults(func=analyze_format)
     return parser
 
