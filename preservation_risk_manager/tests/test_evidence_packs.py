@@ -197,3 +197,51 @@ def test_institution_pack_adds_global_and_matching_institution_criterion_claims(
     assert "loc-claim" in global_claim_ids
     assert "qnl-claim" in institution_claim_ids
     assert "other-claim" not in global_claim_ids | institution_claim_ids
+
+
+def test_normalized_criterion_claims_shadow_matching_legacy_institution_evidence():
+    record = {
+        **FORMAT_RECORD,
+        "institution_evidence_claims": [
+            {
+                "claim_id": "legacy-qnl-netcdf-disclosure",
+                "source_id": "qnl_seed",
+                "source_record_id": "qnl-evidence-netcdf",
+                "institution_id": "qnl",
+                "criterion_id": "sustainability.disclosure",
+                "evidence_value": "requires_specialist_review",
+                "review_status": "approved",
+            },
+            {
+                "claim_id": "legacy-qnl-netcdf-readiness",
+                "source_id": "qnl_seed",
+                "source_record_id": "qnl-evidence-netcdf",
+                "institution_id": "qnl",
+                "criterion_id": "institution.workflow_integration",
+                "value": "not_covered",
+                "review_status": "approved",
+            },
+        ],
+    }
+
+    pack = build_evidence_pack(
+        record,
+        institution_id="qnl",
+        criterion_claims=[
+            {
+                "source_id": "qnl_seed",
+                "source_record_id": "qnl-evidence-netcdf",
+                "institution_id": "qnl",
+                "source_independence": "institution_scoped",
+                "criterion_id": "sustainability.disclosure",
+                "value": "unknown",
+                "review_status": "approved",
+            }
+        ],
+    )
+
+    claim_ids = {claim.get("claim_id") for claim in pack["institution_evidence"]}
+    criteria = {claim.get("criterion_id") for claim in pack["institution_evidence"]}
+    assert "legacy-qnl-netcdf-disclosure" not in claim_ids
+    assert "institution.workflow_integration" in criteria
+    assert sum(1 for claim in pack["institution_evidence"] if claim.get("criterion_id") == "sustainability.disclosure") == 1
