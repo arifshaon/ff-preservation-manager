@@ -17,6 +17,9 @@ qnl_format_registry_builder/work/
 qnl_format_registry_builder/input/
 qnl_format_registry_builder/output/
 
+# Local AI configuration / secrets
+preservation_risk_manager/config/*.local.json
+
 # Local databases and logs
 *.sqlite
 *.sqlite3
