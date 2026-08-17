@@ -36,12 +36,16 @@ class AIProviderConfig:
     temperature: float = 0.0
     max_output_tokens: int | None = None
     timeout_seconds: float = 60.0
+    max_retries: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AIProviderConfig":
         provider = str(data.get("provider") or "").strip().lower()
         if not provider:
             raise AIConfigurationError("AI configuration requires 'provider'.")
+        max_retries = int(data.get("max_retries", 0))
+        if max_retries < 0:
+            raise AIConfigurationError("AI configuration 'max_retries' must be zero or greater.")
         return cls(
             provider=provider,
             endpoint=_optional_string(data.get("endpoint")),
@@ -57,6 +61,7 @@ class AIProviderConfig:
                 else None
             ),
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
+            max_retries=max_retries,
         )
 
     def resolve_api_key(self, *, required: bool = True) -> str | None:
@@ -93,6 +98,7 @@ class AIProviderConfig:
             "temperature": self.temperature,
             "max_output_tokens": self.max_output_tokens,
             "timeout_seconds": self.timeout_seconds,
+            "max_retries": self.max_retries,
         }
 
 
