@@ -52,13 +52,15 @@ Your task is to map ONLY preservation-relevant DPC source observations to the ex
 - `decided_by` and `decided_at` must be null.
 - Every mapped target value must exist in the uploaded criterion enum/null value.
 - Include `excluded_from_criteria`, `maps`, `no_criterion`, and `needs_review` arrays.
+- `source_id` must be a real identifier.
+- Include `source_type` only if the exact adapter source type is supplied. If it is not known, omit `source_type`; do not return a placeholder string.
 
-Use this shape:
+Use this shape when the exact adapter source type is known:
 
 ```json
 {
   "source_id": "dpc_bit_list",
-  "source_type": "<exact adapter source_type if supplied>",
+  "source_type": "dpc_bit_list",
   "mapping_version": "YYYY-MM-DD-draft",
   "criteria_version": "v1",
   "native_vocabulary": "dpc_bit_list",
@@ -114,10 +116,14 @@ Use this shape:
 }
 ```
 
+If the adapter source type is not yet known, use the same object but omit the `source_type` property.
+
 Before returning JSON, internally check:
 1. every criterion exists in the uploaded vocabulary;
 2. every mapped target value is allowed;
 3. no composite DPC status/risk conclusion is being treated as a primitive criterion;
 4. no action/tool recommendation is being treated as neutral hazard evidence;
 5. `institution_scoped` is not used for a global DPC source;
-6. uncertain mappings are declined rather than guessed.
+6. uncertain mappings are declined rather than guessed;
+7. root `claim_review_status` is exactly `unreviewed`;
+8. no literal placeholder is used as `source_id`, `source_type`, `criterion`, or `from_field` in a supposedly tool-ready draft.
