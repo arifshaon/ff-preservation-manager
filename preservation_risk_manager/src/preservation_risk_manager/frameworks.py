@@ -14,6 +14,8 @@ class AnswerOption:
     points: float
     label: str | None = None
     abstention: bool = False
+    definition: str | None = None
+    guidance: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AnswerOption":
@@ -30,6 +32,8 @@ class AnswerOption:
             points=points,
             label=data.get("label"),
             abstention=bool(data.get("abstention", False)),
+            definition=data.get("definition"),
+            guidance=data.get("guidance"),
         )
 
 
@@ -41,6 +45,12 @@ class Question:
     critical: bool = False
     weight: float = 1.0
     evidence_fields: tuple[str, ...] = ()
+    domain_id: str | None = None
+    domain_label: str | None = None
+    definition: str | None = None
+    guidance: str | None = None
+    applicability: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Question":
@@ -66,6 +76,12 @@ class Question:
             critical=bool(data.get("critical", False)),
             weight=weight,
             evidence_fields=tuple(str(field) for field in data.get("evidence_fields", [])),
+            domain_id=str(data.get("domain_id")) if data.get("domain_id") is not None else None,
+            domain_label=str(data.get("domain_label")) if data.get("domain_label") is not None else None,
+            definition=data.get("definition"),
+            guidance=data.get("guidance"),
+            applicability=tuple(str(value) for value in data.get("applicability", [])),
+            aliases=tuple(str(value) for value in data.get("aliases", [])),
         )
 
     def answer_by_id(self, answer_id: str) -> AnswerOption:
@@ -118,6 +134,7 @@ class RiskScale:
     direction: str
     bands: tuple[ScoreBand, ...]
     min_completeness_for_band: float
+    banding_enabled: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], *, framework_id: str) -> "RiskScale":
@@ -147,7 +164,12 @@ class RiskScale:
             raise FrameworkError(
                 f"Framework {framework_id} scale.min_completeness_for_band must be between 0 and 1"
             )
-        return cls(direction=direction, bands=bands, min_completeness_for_band=min_completeness)
+        return cls(
+            direction=direction,
+            bands=bands,
+            min_completeness_for_band=min_completeness,
+            banding_enabled=bool(data.get("banding_enabled", True)),
+        )
 
 
 @dataclass(frozen=True)
@@ -158,6 +180,9 @@ class RiskFramework:
     scale: RiskScale
     label: str | None = None
     unknown_answer_id: str = "unknown"
+    description: str | None = None
+    calibration_status: str = "calibrated"
+    source_basis: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RiskFramework":
@@ -181,6 +206,9 @@ class RiskFramework:
             questions=questions,
             scale=scale,
             unknown_answer_id=str(data.get("unknown_answer_id") or "unknown"),
+            description=data.get("description"),
+            calibration_status=str(data.get("calibration_status") or "calibrated"),
+            source_basis=tuple(str(value) for value in data.get("source_basis", [])),
         )
 
     @property
@@ -195,11 +223,22 @@ class RiskFramework:
     def min_completeness_for_band(self) -> float:
         return self.scale.min_completeness_for_band
 
+    @property
+    def banding_enabled(self) -> bool:
+        return self.scale.banding_enabled
+
     def question_by_id(self, question_id: str) -> Question:
         for question in self.questions:
             if question.id == question_id:
                 return question
         raise FrameworkError(f"Framework {self.framework_id} has no question ID: {question_id}")
+
+    def questions_for_domain(self, domain_id: str) -> tuple[Question, ...]:
+        needle = str(domain_id).strip().lower()
+        return tuple(
+            question for question in self.questions
+            if str(question.domain_id or "").strip().lower() == needle
+        )
 
     def band_for_score(self, score: float) -> str:
         for band in self.scale.bands:
