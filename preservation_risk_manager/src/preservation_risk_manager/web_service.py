@@ -9,10 +9,15 @@ import zipfile
 
 from preservation_risk_manager import integration_cli as base
 from preservation_risk_manager.ai.batch_risk_analysis import apply_batched_fill_gaps
-from preservation_risk_manager.format_identification import IdentificationResolver, normalize_format_observation
+from preservation_risk_manager.format_identification import IdentificationResolver
 from preservation_risk_manager.human_renderer_multi import render_human_response
 from preservation_risk_manager.integration_cli_human import _RateLimitCircuitProvider, _ask as run_human_query
-from preservation_risk_manager.web_reports import report_document, summary_row, write_report_artifacts
+from preservation_risk_manager.web_reports import (
+    normalize_input_format_id,
+    report_document,
+    summary_row,
+    write_report_artifacts,
+)
 
 
 Progress = Callable[..., None]
@@ -209,7 +214,7 @@ def run_batch_web_job(
 
     total = len(format_ids)
     for index, original in enumerate(format_ids, start=1):
-        normalized = normalize_format_observation(original)
+        normalized = normalize_input_format_id(original)
         identification = resolver.resolve(normalized)
         if identification.resolved and identification.resolution.format_doc:
             format_doc = identification.resolution.format_doc
