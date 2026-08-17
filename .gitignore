@@ -16,6 +16,7 @@ venv/
 qnl_format_registry_builder/work/
 qnl_format_registry_builder/input/
 qnl_format_registry_builder/output/
+preservation_risk_manager/web-jobs/
 
 # Local AI configuration / secrets
 preservation_risk_manager/config/*.local.json
