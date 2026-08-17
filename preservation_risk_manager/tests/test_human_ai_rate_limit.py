@@ -2,10 +2,7 @@ from types import SimpleNamespace
 
 from preservation_risk_manager import integration_cli as base_integration
 from preservation_risk_manager.ai.base import AIProviderError
-from preservation_risk_manager.integration_cli_human import (
-    _RateLimitCircuitProvider,
-    _assess_human_puid_matches,
-)
+from preservation_risk_manager import integration_cli_human as human_cli
 
 
 class FakeReader:
@@ -46,7 +43,7 @@ def _rows():
     ]
 
 
-def test_rate_limit_stops_ai_calls_but_keeps_all_deterministic_puid_assessments(monkeypatch):
+def test_rate_limit_stops_batch_ai_but_keeps_all_deterministic_puid_assessments(monkeypatch):
     reader = FakeReader(_rows())
     request = {
         "action": "assess_format",
@@ -67,7 +64,6 @@ def test_rate_limit_stops_ai_calls_but_keeps_all_deterministic_puid_assessments(
     }
 
     executed = []
-    ai_apply_calls = []
 
     def fake_execute(_reader, _framework, candidate_request):
         executed.append(candidate_request["format"])
@@ -91,24 +87,28 @@ def test_rate_limit_stops_ai_calls_but_keeps_all_deterministic_puid_assessments(
             },
         }
 
-    def fake_apply(_reader, _framework, _request, response, *, provider, ai_mode, **kwargs):
-        ai_apply_calls.append(_request["format"])
+    def fake_batch(provider, _reader, _framework, _request, candidates, assessments, **kwargs):
         try:
             provider.generate(object())
-        except AIProviderError:
-            pass
-        response["ai_risk_assessment"] = {
-            "status": "ok",
-            "ai_mode": ai_mode,
-            "provider": provider.describe(),
+        except AIProviderError as exc:
+            for assessment in assessments:
+                assessment["ai_risk_assessment"] = {
+                    "status": "error_deterministic_retained",
+                    "ai_mode": "fill-gaps",
+                    "reason": "batch_provider_error",
+                    "error": str(exc),
+                }
+        return {
+            "provider_call_count": 1,
+            "matched_puid_count": len(candidates),
+            "failed_error": "429 Too Many Requests",
         }
-        return response
 
     monkeypatch.setattr(base_integration, "execute_request", fake_execute)
-    monkeypatch.setattr(base_integration, "_apply_ai_risk_assessment", fake_apply)
+    monkeypatch.setattr(human_cli, "apply_batched_fill_gaps", fake_batch)
 
     delegate = RateLimitedDelegate()
-    provider = _RateLimitCircuitProvider(delegate)
+    provider = human_cli._RateLimitCircuitProvider(delegate)
     framework = SimpleNamespace(
         framework_id="test",
         version="1",
@@ -116,7 +116,7 @@ def test_rate_limit_stops_ai_calls_but_keeps_all_deterministic_puid_assessments(
         banding_enabled=True,
     )
 
-    response = _assess_human_puid_matches(
+    response = human_cli._assess_human_puid_matches(
         reader,
         framework,
         request,
@@ -124,18 +124,17 @@ def test_rate_limit_stops_ai_calls_but_keeps_all_deterministic_puid_assessments(
         provider=provider,
         ai_mode="fill-gaps",
         max_evidence_items=20,
+        user_question="What is the risk of PDF?",
     )
 
     assert response["status"] == "ok"
     assert response["ai_rate_limited"] is True
     assert response["matched_puids"] == ["fmt/18", "fmt/19"]
     assert executed == ["puid-fmt-18", "puid-fmt-19"]
-
-    # Only the first PUID is allowed to reach the network-backed AI path.
-    assert ai_apply_calls == ["puid-fmt-18"]
     assert delegate.calls == 1
-
-    first, second = response["assessments"]
-    assert first["ai_risk_assessment"]["status"] == "partial_rate_limited"
-    assert second["ai_risk_assessment"]["status"] == "skipped_rate_limited"
-    assert second["result"]["risk_band"] == "Moderate"
+    assert response["ai_batch"]["provider_call_count"] == 1
+    assert all(item["result"]["risk_band"] == "Moderate" for item in response["assessments"])
+    assert all(
+        item["ai_risk_assessment"]["status"] == "error_deterministic_retained"
+        for item in response["assessments"]
+    )
