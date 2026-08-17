@@ -21,15 +21,24 @@ The input may come from a human, an AIP metadata record, DROID, Siegfried, anoth
 format observation
       ↓
 programmatic resolution
-      ↓ if unresolved/ambiguous and AI plugin enabled
+      ↓ if unresolved/ambiguous and AI identification enabled
 bounded AI candidate selection
       ↓
 verified local CanonicalFormat
       ↓
-criterion evidence / risk analysis
+deterministic evidence / risk assessment
+      ↓ if --ai-mode is enabled
+bounded AI-assisted risk interpretation/review
 ```
 
 Risk analysis does **not** begin until a canonical registry format has been resolved.
+
+AI identification and AI risk assessment are separate permissions:
+
+- `--enable-ai-identification` allows AI to help resolve an otherwise unresolved/ambiguous format observation against local registry candidates.
+- `--ai-mode fill-gaps|review-all` enables AI-assisted risk analysis only after a canonical format has been resolved.
+
+They may use the same configured provider, but enabling identification alone does not silently alter risk analysis.
 
 ## Default mode: programmatic only
 
@@ -59,6 +68,8 @@ x-fmt 123      -> x-fmt/123
 ```
 
 This normalization changes syntax only. It does not use general format knowledge to infer a version or identifier.
+
+Candidate generation for optional AI review is broader than deterministic identity resolution. Descriptive input is tokenized so exact observations such as `SWF`, `JPEG`, or `TIFF` remain strong shortlist signals even when embedded in longer prose.
 
 ## Optional AI fallback plugin
 
@@ -106,7 +117,7 @@ Default minimum accepted confidence is:
 
 AI is an optional enhancement, not a dependency of deterministic assessment.
 
-If the provider:
+If the identification provider:
 
 - times out;
 - is unavailable;
@@ -115,15 +126,57 @@ If the provider:
 - falls below the configured confidence threshold;
 - abstains;
 
-then the programmatic result is retained.
+then the programmatic identification result is retained.
+
+If AI risk assessment fails after canonical resolution, the deterministic risk assessment is retained and the response reports:
+
+```text
+error_deterministic_retained
+```
 
 The response metadata reports whether AI was attempted and why it was accepted/rejected.
 
+## AI-assisted risk assessment after identification
+
+Once identification succeeds, `--ai-mode` can continue the same request into the existing bounded AI risk engine.
+
+### `fill-gaps`
+
+```text
+canonical format
+   ↓
+deterministic evidence pack
+   ↓
+deterministic answer derivation
+   ↓
+AI receives only unresolved/ambiguous questions + supplied evidence
+   ↓
+AI may interpret supplied evidence or abstain
+   ↓
+AI-assisted analysis + deterministic baseline retained
+```
+
+Deterministically resolved answers are not silently replaced in this mode.
+
+### `review-all`
+
+```text
+canonical format
+   ↓
+deterministic baseline
+   +
+independent raw-source-only AI review
+   ↓
+agreement/divergence audit
+```
+
+This mode is for calibration and review. AI review does not replace deterministic scoring inputs.
+
 ## Human mode
 
-Human question routing already requires an AI provider. Format-identification AI remains separately opt-in.
+Human question routing already requires an AI provider. Format-identification and risk-analysis AI remain separately controlled.
 
-Example:
+Identification only:
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -134,7 +187,19 @@ python -m preservation_risk_manager ask `
   --enable-ai-identification
 ```
 
-The same provider is reused for request routing and bounded identification fallback.
+Identification plus AI-assisted risk analysis:
+
+```powershell
+python -m preservation_risk_manager ask `
+  "What is the preservation risk of Adobe Shockwave Flash SWF?" `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --ai-config config\ai.local.json `
+  --enable-ai-identification `
+  --ai-mode fill-gaps
+```
+
+The same provider is reused for request routing, optional identification, and optional AI risk analysis.
 
 Optional threshold:
 
@@ -144,32 +209,68 @@ Optional threshold:
 
 ## Machine mode
 
-Without AI:
+For Windows PowerShell, prefer a request file instead of inline JSON because native-command quote handling can alter embedded JSON quotes.
+
+Create a request:
+
+```powershell
+$json = @'
+{
+  "action": "assess_format",
+  "format": "Adobe Shockwave Flash SWF file",
+  "scope": "global"
+}
+'@
+
+[System.IO.File]::WriteAllText(
+  "$PWD\request-flash.json",
+  $json,
+  (New-Object System.Text.UTF8Encoding($false))
+)
+```
+
+Programmatic identification + deterministic risk assessment only:
 
 ```powershell
 python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"PRONOM fmt 18","scope":"global"}' `
+  --request request-flash.json `
   --framework examples\qnl_sustainability.framework.example.json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
 ```
 
-This uses programmatic normalization and resolution only.
-
-With AI fallback enabled:
+AI identification fallback, but deterministic risk assessment:
 
 ```powershell
 python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"old adobe flash movie","scope":"global"}' `
+  --request request-flash.json `
   --framework examples\qnl_sustainability.framework.example.json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
   --enable-ai-identification `
-  --identification-ai-config config\ai.local.json
+  --ai-config config\ai.local.json
 ```
 
-Optional threshold:
+AI identification fallback **and** AI-assisted risk assessment:
+
+```powershell
+python -m preservation_risk_manager query-json `
+  --request request-flash.json `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --enable-ai-identification `
+  --ai-config config\ai.local.json `
+  --ai-mode fill-gaps
+```
+
+For an already specific identifier such as `fmt/18`, AI identification is normally unnecessary; `--ai-mode fill-gaps` can still be used for the downstream risk stage.
+
+`--identification-ai-config` remains accepted for backward compatibility and can supply the same provider when `--ai-config` is omitted in machine mode.
+
+Optional controls:
 
 ```powershell
 --identification-ai-min-confidence 0.90
+--max-ai-evidence-items 20
+--ai-mode review-all
 ```
 
 ## Response metadata
@@ -192,31 +293,26 @@ Integration responses may include:
 }
 ```
 
-AI-assisted example:
+AI identification output also includes the local shortlist audit (`candidate_count` and `candidates`) when AI is attempted, so an abstention can be distinguished from a genuinely empty local registry match.
+
+When `--ai-mode` is enabled after successful identification, the response adds:
 
 ```json
 {
-  "identification": {
-    "input": "old adobe flash movie",
-    "method": "ai_fallback",
-    "status": "resolved",
-    "match_type": "ai_candidate_verified_local",
-    "ai_attempted": true,
-    "ai": {
-      "status": "match",
-      "confidence": 0.93,
-      "accepted": true,
-      "candidate_canonical_id": "..."
-    }
+  "ai_risk_assessment": {
+    "status": "ok",
+    "ai_mode": "fill-gaps",
+    "provider": {},
+    "criterion_claims_used": 0,
+    "evidence_hash": "...",
+    "deterministic_analysis": {},
+    "analysis": {},
+    "derived_answers": {}
   }
 }
 ```
 
-An AI provider failure leaves the deterministic result intact and reports a method similar to:
-
-```text
-ai_fallback_error_programmatic_result_retained
-```
+The normal deterministic request result remains present. This makes the AI layer additive and auditable rather than replacing the canonical deterministic response.
 
 ## Plugin contract
 
@@ -257,7 +353,9 @@ IdentificationResolver
         ↓
 CanonicalFormat
         ↓
-existing risk workflow
+deterministic risk workflow
+        ↓ optional
+AI-assisted risk interpretation/review
 ```
 
 Those future adapters should preserve identification provenance such as tool, tool version, method, and source/AIP record while keeping the downstream risk engine independent of the identification tool.
