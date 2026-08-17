@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any
 
 from preservation_risk_manager import integration_cli as base
 from preservation_risk_manager.ai.base import AIProviderError
+from preservation_risk_manager.ai.batch_risk_analysis import apply_batched_fill_gaps
 from preservation_risk_manager.format_identification import IdentificationResolver
 from preservation_risk_manager.human_format_matches import human_puid_candidates
 from preservation_risk_manager.human_renderer_multi import render_human_response
@@ -13,26 +15,19 @@ from preservation_risk_manager.request_api import normalize_request
 
 
 _RATE_LIMIT_REASON = "provider_rate_limit_circuit_open"
+_SIMPLE_RISK_QUERY = re.compile(
+    r"^\s*(?:(?:what(?:'s|\s+is)?|tell\s+me)\s+)?(?:the\s+)?(?:preservation\s+)?risk\s+(?:of|for)\s+(.+?)\s*\??\s*$",
+    re.IGNORECASE,
+)
 
 
 def _is_rate_limit_error(exc: BaseException) -> bool:
     text = str(exc or "").lower()
-    return (
-        "429" in text
-        or "too many requests" in text
-        or "rate limit" in text
-        or "ratelimit" in text
-    )
+    return "429" in text or "too many requests" in text or "rate limit" in text or "ratelimit" in text
 
 
 class _RateLimitCircuitProvider:
-    """Stop network AI calls after the first provider rate-limit response.
-
-    The underlying provider remains responsible for normal request/response
-    handling. This wrapper is scoped to one human CLI request. Once a 429-like
-    provider error is observed, subsequent AI calls fail locally and immediately,
-    allowing deterministic assessments to continue for every matched PUID.
-    """
+    """Stop network AI calls after the first provider rate-limit response."""
 
     def __init__(self, delegate) -> None:
         self.delegate = delegate
@@ -64,6 +59,48 @@ class _RateLimitCircuitProvider:
                 self.rate_limited = True
                 self.rate_limit_error = "429 Too Many Requests"
             raise
+
+
+def _programmatic_simple_risk_route(
+    prompt: str,
+    *,
+    default_scope: str,
+    default_institution_id: str | None,
+    default_limit: int,
+) -> dict[str, Any] | None:
+    """Route only obvious ``risk of <format>`` questions without an AI router call."""
+    match = _SIMPLE_RISK_QUERY.fullmatch(str(prompt or ""))
+    if not match:
+        return None
+    format_value = match.group(1).strip().strip(". ")
+    if not format_value:
+        return None
+    raw_request = {
+        "action": "assess_format",
+        "format": format_value,
+        "query": None,
+        "filters": {
+            "family": None,
+            "risk_bands": [],
+            "domains": [],
+            "question_ids": [],
+            "content_type": None,
+        },
+        "scope": default_scope,
+        "institution_id": default_institution_id if default_scope == "institution" else None,
+        "limit": default_limit,
+    }
+    return {
+        "request": normalize_request(raw_request),
+        "router": {
+            "provider": "programmatic",
+            "model": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+            "repairs": [],
+            "raw_request": raw_request,
+            "method": "programmatic_simple_risk_query",
+        },
+    }
 
 
 def _match_summary(row: dict[str, Any]) -> dict[str, Any]:
@@ -127,40 +164,65 @@ def _assess_human_puid_matches(
     provider,
     ai_mode: str,
     max_evidence_items: int,
+    user_question: str = "",
 ) -> dict[str, Any] | None:
-    """Assess every distinct PUID matched by a human-format observation.
-
-    Deterministic assessment is never abandoned because AI is throttled. Once a
-    provider 429 is seen, the per-request AI circuit opens and the remaining PUIDs
-    are assessed deterministically with an explicit AI-skipped audit marker.
-    """
+    """Assess each distinct human-matched PUID; batch fill-gaps across the set."""
     candidates = human_puid_candidates(reader, request, identification)
     if not candidates:
         return None
 
     assessments: list[dict[str, Any]] = []
-    reported_rate_limit = False
     total = len(candidates)
     for index, candidate in enumerate(candidates, start=1):
         if total > 1:
             print(
-                f"[human-risk] Assessing {index}/{total}: {candidate['puid']} {candidate.get('label') or ''}".rstrip(),
+                f"[human-risk] Deterministic assessment {index}/{total}: {candidate['puid']} {candidate.get('label') or ''}".rstrip(),
                 file=sys.stderr,
                 flush=True,
             )
-
         candidate_request = dict(request)
         candidate_request["format"] = candidate["canonical_id"]
         subresponse = base.execute_request(reader, framework, candidate_request)
+        subresponse["matched_puid"] = candidate["puid"]
+        subresponse["matched_label"] = candidate.get("label")
+        subresponse["matched_version"] = candidate.get("version")
+        assessments.append(subresponse)
 
-        if ai_mode != "off":
+    batch_meta: dict[str, Any] | None = None
+    if ai_mode == "fill-gaps" and len(candidates) > 1:
+        print(
+            f"[human-risk] AI fill-gaps will be batched across {len(candidates)} matched PUIDs.",
+            file=sys.stderr,
+            flush=True,
+        )
+        batch_meta = apply_batched_fill_gaps(
+            provider,
+            reader,
+            framework,
+            request,
+            candidates,
+            assessments,
+            user_question=user_question or str(request.get("format") or ""),
+            max_evidence_items=max_evidence_items,
+            max_puids_per_call=8,
+            progress=lambda message: print(f"[human-risk] {message}", file=sys.stderr, flush=True),
+        )
+        if bool(getattr(provider, "rate_limited", False)):
+            print(
+                "[human-risk] Azure/OpenAI rate limit reached. No further AI calls will be made; "
+                "deterministic assessments are retained.",
+                file=sys.stderr,
+                flush=True,
+            )
+    elif ai_mode != "off":
+        reported_rate_limit = False
+        for candidate, subresponse in zip(candidates, assessments):
+            candidate_request = dict(request)
+            candidate_request["format"] = candidate["canonical_id"]
             if bool(getattr(provider, "rate_limited", False)):
-                subresponse["ai_risk_assessment"] = _skipped_rate_limit_assessment(
-                    provider,
-                    ai_mode=ai_mode,
-                )
+                subresponse["ai_risk_assessment"] = _skipped_rate_limit_assessment(provider, ai_mode=ai_mode)
             else:
-                subresponse = base._apply_ai_risk_assessment(
+                base._apply_ai_risk_assessment(
                     reader,
                     framework,
                     candidate_request,
@@ -169,31 +231,14 @@ def _assess_human_puid_matches(
                     ai_mode=ai_mode,
                     max_evidence_items=max_evidence_items,
                 )
-                if bool(getattr(provider, "rate_limited", False)):
-                    ai_result = subresponse.setdefault("ai_risk_assessment", {})
-                    ai_result["status"] = "partial_rate_limited"
-                    ai_result["reason"] = _RATE_LIMIT_REASON
-                    ai_result["rate_limit_error"] = (
-                        getattr(provider, "rate_limit_error", None) or "429 Too Many Requests"
-                    )
-                    ai_result.setdefault(
-                        "authority_boundary",
-                        "AI interpretation was interrupted by a provider rate limit; deterministic results were retained.",
-                    )
-
             if bool(getattr(provider, "rate_limited", False)) and not reported_rate_limit:
                 print(
-                    "[human-risk] Azure/OpenAI rate limit reached. AI calls are disabled for the rest of this "
-                    "request; deterministic assessments will continue for all remaining PUIDs.",
+                    "[human-risk] Azure/OpenAI rate limit reached. AI calls are disabled for the rest of this request; "
+                    "deterministic assessments will continue.",
                     file=sys.stderr,
                     flush=True,
                 )
                 reported_rate_limit = True
-
-        subresponse["matched_puid"] = candidate["puid"]
-        subresponse["matched_label"] = candidate.get("label")
-        subresponse["matched_version"] = candidate.get("version")
-        assessments.append(subresponse)
 
     if len(assessments) == 1:
         return assessments[0]
@@ -213,6 +258,7 @@ def _assess_human_puid_matches(
         "matched_puid_count": len(assessments),
         "matched_puids": [item["matched_puid"] for item in assessments],
         "ai_rate_limited": bool(getattr(provider, "rate_limited", False)),
+        "ai_batch": batch_meta,
         "assessments": assessments,
     }
 
@@ -223,16 +269,25 @@ def _ask(args) -> dict[str, Any]:
     framework = base.load_framework(base._require_file(args.framework, label="Framework file"))
     config = base.load_ai_config(base._require_file(args.ai_config, label="AI config file"))
     raw_provider = base.build_ai_provider(config)
+    provider = _RateLimitCircuitProvider(raw_provider)
     default_scope = "institution" if args.institution else "global"
-    routed = base.route_natural_language_request(
-        raw_provider,
+
+    routed = _programmatic_simple_risk_route(
         args.question,
-        framework=framework,
         default_scope=default_scope,
         default_institution_id=args.institution,
         default_limit=args.limit,
     )
-    provider = _RateLimitCircuitProvider(raw_provider)
+    if routed is None:
+        routed = base.route_natural_language_request(
+            provider,
+            args.question,
+            framework=framework,
+            default_scope=default_scope,
+            default_institution_id=args.institution,
+            default_limit=args.limit,
+        )
+
     routed_request = normalize_request(routed["request"])
     plugin = base._identification_plugin(args, existing_provider=provider)
     prepared_request, identification = _resolve_human_request_format(reader, routed_request, plugin=plugin)
@@ -245,24 +300,25 @@ def _ask(args) -> dict[str, Any]:
         provider=provider,
         ai_mode=args.ai_mode,
         max_evidence_items=max_items,
+        user_question=args.question,
     )
     if response is None:
         response = base._identification_ambiguity_response(framework, routed_request, identification)
     if response is None:
         response = base.execute_request(reader, framework, prepared_request)
-        if ai_mode := str(args.ai_mode or "off"):
-            if ai_mode != "off" and provider.rate_limited:
-                response["ai_risk_assessment"] = _skipped_rate_limit_assessment(provider, ai_mode=ai_mode)
-            else:
-                response = base._apply_ai_risk_assessment(
-                    reader,
-                    framework,
-                    prepared_request,
-                    response,
-                    provider=provider,
-                    ai_mode=ai_mode,
-                    max_evidence_items=max_items,
-                )
+        ai_mode = str(args.ai_mode or "off")
+        if ai_mode != "off" and provider.rate_limited:
+            response["ai_risk_assessment"] = _skipped_rate_limit_assessment(provider, ai_mode=ai_mode)
+        else:
+            response = base._apply_ai_risk_assessment(
+                reader,
+                framework,
+                prepared_request,
+                response,
+                provider=provider,
+                ai_mode=ai_mode,
+                max_evidence_items=max_items,
+            )
 
     response["input"] = {"mode": "human_prompt", "prompt": args.question}
     response["router"] = routed["router"]
