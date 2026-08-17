@@ -23,15 +23,21 @@ AI_ELIGIBLE_STATUSES = {
 
 RISK_INTERPRETER_SYSTEM_PROMPT = (
     "You are an evidence interpreter inside a file-format preservation risk system. "
-    "Use only the evidence items supplied by the application. Never use general knowledge, "
-    "memory, unstated assumptions, web knowledge, or the risk score itself. Evidence may include "
-    "approved normalized criterion claims and bounded raw/source-native observations linked to the "
-    "format by a direct source record or shared strong identifier. Treat source-family evidence as "
-    "applicable only when the supplied link_basis supports that relationship; do not infer family "
-    "membership from names alone. Choose exactly one allowed controlled answer. If the supplied "
-    "evidence cannot support a non-abstention answer, choose the framework's unknown/abstention "
-    "answer. Cite only evidence refs that appear in the supplied evidence list. Do not calculate "
-    "risk scores, bands, posture, or actions."
+    "Use only the evidence items supplied by the application. Never use general knowledge, memory, "
+    "unstated assumptions, web knowledge, or the risk score itself. Evidence may include approved "
+    "normalized criterion claims and bounded raw/source-native observations linked to the format by a "
+    "direct source record or shared strong identifier. Treat source-family evidence as applicable only "
+    "when the supplied link_basis supports that relationship; do not infer family membership from names "
+    "alone. When format.version is present, distinguish version-specific from family-wide facts. Prefer "
+    "link_basis.specificity direct_source_record or exact_authority_record for version-scoped properties "
+    "such as disclosure/documentation. Never treat a family statement that documentation is missing for "
+    "other versions as evidence that the current version lacks documentation. Compare explicit version "
+    "ranges/lists with format.version. If evidence does not establish the current version's state, abstain "
+    "rather than extrapolating. Family-wide facts such as overall adoption, end-of-life support, or runtime "
+    "dependence may still apply when properly linked. Choose exactly one allowed controlled answer. If the "
+    "supplied evidence cannot support a non-abstention answer, choose the framework's unknown/abstention "
+    "answer. Cite only evidence refs supplied by the application. Do not calculate risk scores, bands, "
+    "posture, or actions."
 )
 
 
@@ -90,34 +96,17 @@ def question_evidence(
     max_items: int = 20,
     prefer_deterministic_evidence: bool = True,
 ) -> list[dict[str, Any]]:
-    """Return bounded, reference-addressable evidence for one framework question.
-
-    Deterministic derivation continues to consume only the standard evidence-pack
-    sections. The AI layer may additionally inspect ``ai_source_evidence``: raw or
-    source-native observations linked by direct source provenance or shared strong
-    identifiers. Fill-gaps may prefer evidence already matched by deterministic
-    derivation; independent review disables that preference. Evidence matching the
-    question's declared evidence fields wins. If nothing matches, the bounded pack
-    is exposed as a final fallback and the model is still required to abstain when
-    it cannot support an answer.
-    """
+    """Return bounded, reference-addressable evidence for one framework question."""
     preferred: list[dict[str, Any]] = []
     if prefer_deterministic_evidence:
-        preferred = [
-            item
-            for item in deterministic_result.get("evidence_claims", [])
-            if isinstance(item, dict)
-        ]
+        preferred = [item for item in deterministic_result.get("evidence_claims", []) if isinstance(item, dict)]
     all_items = evidence_items(evidence_pack) + _ai_source_evidence_items(evidence_pack)
     matching = [item for item in all_items if _claim_matches_question(item, question)]
     selected = _dedupe_evidence(preferred + matching)
     if not selected:
         selected = _dedupe_evidence(all_items)
     selected = selected[:max_items]
-    return [
-        {"ref": f"E{index:03d}", "evidence": item}
-        for index, item in enumerate(selected, start=1)
-    ]
+    return [{"ref": f"E{index:03d}", "evidence": item} for index, item in enumerate(selected, start=1)]
 
 
 def _response_schema(question: Question) -> dict[str, Any]:
@@ -125,26 +114,13 @@ def _response_schema(question: Question) -> dict[str, Any]:
         "type": "object",
         "properties": {
             "question_id": {"type": "string", "enum": [question.id]},
-            "answer_id": {
-                "type": "string",
-                "enum": [answer.id for answer in question.answers],
-            },
+            "answer_id": {"type": "string", "enum": [answer.id for answer in question.answers]},
             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             "rationale": {"type": "string"},
-            "evidence_refs": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
+            "evidence_refs": {"type": "array", "items": {"type": "string"}},
             "uncertainty": {"type": "string"},
         },
-        "required": [
-            "question_id",
-            "answer_id",
-            "confidence",
-            "rationale",
-            "evidence_refs",
-            "uncertainty",
-        ],
+        "required": ["question_id", "answer_id", "confidence", "rationale", "evidence_refs", "uncertainty"],
         "additionalProperties": False,
     }
 
@@ -173,11 +149,7 @@ def _question_prompt(
             "critical": question.critical,
             "evidence_fields": list(question.evidence_fields),
             "allowed_answers": [
-                {
-                    "id": answer.id,
-                    "label": answer.label,
-                    "abstention": answer.abstention,
-                }
+                {"id": answer.id, "label": answer.label, "abstention": answer.abstention}
                 for answer in question.answers
             ],
         },
@@ -190,13 +162,12 @@ def _question_prompt(
             "conflicting_answer_ids": deterministic_result.get("conflicting_answer_ids", []),
         }
     return (
-        "Interpret the supplied evidence for this one framework question. "
-        "Source-native evidence can be linked directly to the canonical record or indirectly through "
-        "a supplied shared strong identifier; inspect link_basis before treating related/family evidence "
-        "as applicable. Return only the required structured response. For a non-abstention answer, "
-        "evidence_refs must contain at least one supplied ref that directly supports the choice. "
-        "If support is insufficient or contradictory in a way you cannot resolve from the supplied "
-        "evidence, choose the unknown/abstention answer.\n\n"
+        "Interpret the supplied evidence for this one framework question. Inspect link_basis.specificity. "
+        "When format.version is present, do not transfer documentation gaps for other versions to this version; "
+        "prefer direct/exact-authority evidence for version-scoped properties and abstain when the current version "
+        "is not established. Return only the required structured response. For a non-abstention answer, evidence_refs "
+        "must contain at least one supplied ref that directly supports the choice. If support is insufficient or "
+        "contradictory in a way you cannot resolve from supplied evidence, choose the unknown/abstention answer.\n\n"
         + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
 
@@ -210,26 +181,18 @@ def _validate_ai_answer(
     data = response.structured
     if not isinstance(data, dict):
         raise AIProviderError("AI risk answer did not return a structured JSON object.")
-
     if str(data.get("question_id")) != question.id:
-        raise AIProviderError(
-            f"AI risk answer returned question_id '{data.get('question_id')}' instead of '{question.id}'."
-        )
-
+        raise AIProviderError(f"AI risk answer returned question_id '{data.get('question_id')}' instead of '{question.id}'.")
     allowed_answers = {answer.id: answer for answer in question.answers}
     answer_id = str(data.get("answer_id") or "")
     if answer_id not in allowed_answers:
-        raise AIProviderError(
-            f"AI risk answer '{answer_id}' is not allowed for question '{question.id}'."
-        )
-
+        raise AIProviderError(f"AI risk answer '{answer_id}' is not allowed for question '{question.id}'.")
     try:
         confidence = float(data.get("confidence"))
     except (TypeError, ValueError) as exc:
         raise AIProviderError("AI risk answer confidence must be numeric.") from exc
     if not 0 <= confidence <= 1:
         raise AIProviderError("AI risk answer confidence must be between 0 and 1.")
-
     evidence_refs_raw = data.get("evidence_refs")
     if not isinstance(evidence_refs_raw, list):
         raise AIProviderError("AI risk answer evidence_refs must be an array.")
@@ -237,17 +200,10 @@ def _validate_ai_answer(
     known_refs = {entry["ref"] for entry in referenced_evidence}
     unknown_refs = sorted(set(evidence_refs) - known_refs)
     if unknown_refs:
-        raise AIProviderError(
-            "AI risk answer cited evidence refs not supplied by the application: "
-            + ", ".join(unknown_refs)
-        )
-
+        raise AIProviderError("AI risk answer cited evidence refs not supplied by the application: " + ", ".join(unknown_refs))
     answer = allowed_answers[answer_id]
     if not answer.abstention and not evidence_refs:
-        raise AIProviderError(
-            f"AI risk answer '{answer_id}' requires at least one supplied evidence reference."
-        )
-
+        raise AIProviderError(f"AI risk answer '{answer_id}' requires at least one supplied evidence reference.")
     evidence_by_ref = {entry["ref"]: entry["evidence"] for entry in referenced_evidence}
     return {
         "question_id": question.id,
@@ -287,7 +243,6 @@ def interpret_question_with_ai(
             "question_id": question.id,
             "answer_id": deterministic_result.get("answer_id"),
         }
-
     request = AIRequest(
         messages=(
             AIMessage("system", RISK_INTERPRETER_SYSTEM_PROMPT),
@@ -309,9 +264,7 @@ def interpret_question_with_ai(
     )
     response = provider.generate(request)
     validated = _validate_ai_answer(question, framework, response, referenced_evidence)
-    validated["status"] = (
-        "abstained" if question.answer_by_id(validated["answer_id"]).abstention else "accepted"
-    )
+    validated["status"] = "abstained" if question.answer_by_id(validated["answer_id"]).abstention else "accepted"
     return validated
 
 
@@ -323,19 +276,11 @@ def derive_answers_with_ai(
     *,
     max_evidence_items: int = 20,
 ) -> dict[str, Any]:
-    """Use AI only for unresolved/ambiguous questions, then return controlled answers.
-
-    Deterministically derived answers remain authoritative and are never sent for
-    replacement in this mode. AI may fill unknown/missing questions or resolve a
-    deterministic conflict, but every accepted non-abstention answer must cite
-    evidence supplied by the application. Provider/validation failures preserve
-    the original deterministic answer.
-    """
+    """Use AI only for unresolved/ambiguous questions, then return controlled answers."""
     result = deepcopy(deterministic_answer_document)
     answers = result.setdefault("answers", {})
     scoring_answers = result.setdefault("scoring_answers", {})
     derivation = result.setdefault("derivation", {})
-
     summary = {
         "provider": provider.describe(),
         "eligible_questions": 0,
@@ -349,13 +294,11 @@ def derive_answers_with_ai(
         "total_tokens": 0,
     }
     audit: dict[str, Any] = {}
-
     for question in framework.questions:
         deterministic_result = derivation.get(question.id) or {}
         previous_status = str(deterministic_result.get("status") or "")
         if previous_status not in AI_ELIGIBLE_STATUSES:
             continue
-
         summary["eligible_questions"] += 1
         try:
             ai_result = interpret_question_with_ai(
@@ -376,7 +319,6 @@ def derive_answers_with_ai(
                 "previous_answer_id": deterministic_result.get("answer_id"),
             }
             continue
-
         if ai_result["status"] == "skipped_no_evidence":
             summary["skipped_no_evidence"] += 1
             audit[question.id] = {
@@ -385,12 +327,10 @@ def derive_answers_with_ai(
                 "previous_answer_id": deterministic_result.get("answer_id"),
             }
             continue
-
         summary["attempted_questions"] += 1
         usage = ai_result.get("usage") or {}
         for field in ("input_tokens", "output_tokens", "total_tokens"):
             summary[field] += int(usage.get(field) or 0)
-
         answer_id = str(ai_result["answer_id"])
         answer = question.answer_by_id(answer_id)
         if answer.abstention:
@@ -399,7 +339,6 @@ def derive_answers_with_ai(
         else:
             summary["accepted_answers"] += 1
             new_status = "ai_interpreted"
-
         answers[question.id] = answer_id
         scoring_answers[question.id] = {
             "answer_id": answer_id,
@@ -413,18 +352,13 @@ def derive_answers_with_ai(
             "previous_answer_id": deterministic_result.get("answer_id"),
             "evidence_fields": list(question.evidence_fields),
             "evidence_claims": ai_result.get("cited_evidence") or deterministic_result.get("evidence_claims", []),
-            "ai": {
-                key: value
-                for key, value in ai_result.items()
-                if key not in {"cited_evidence", "status"}
-            },
+            "ai": {key: value for key, value in ai_result.items() if key not in {"cited_evidence", "status"}},
         }
         audit[question.id] = {
             **ai_result,
             "previous_status": previous_status,
             "previous_answer_id": deterministic_result.get("answer_id"),
         }
-
     result["derivation_method"] = "deterministic_then_ai_evidence_interpretation"
     result["ai_summary"] = summary
     result["ai_audit"] = audit
