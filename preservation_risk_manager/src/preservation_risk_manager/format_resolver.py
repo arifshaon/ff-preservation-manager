@@ -6,6 +6,9 @@ from typing import Any, Iterable
 from preservation_risk_manager.data_access import RegistryReader
 
 
+AUTHORITY_IDENTIFIER_KINDS = {"puid", "loc", "nara", "wikidata"}
+
+
 @dataclass(frozen=True)
 class FormatResolution:
     query: str
@@ -79,9 +82,19 @@ def _claim_value(claim: dict[str, Any]) -> str:
 
 
 def _identifier_claim_values(format_doc: dict[str, Any], *, verified: bool | None = None) -> set[str]:
+    """Return only strong authority identifiers from identifier claims.
+
+    Canonical records can also contain copied claims for extensions, MIME types,
+    names, and aliases. Treating every identifier_claim value as an authority ID
+    made human tokens such as ``PDF`` outrank an exact canonical name and caused
+    large ambiguous result sets. Only recognized authority namespaces belong in
+    this resolver tier; extensions/MIME/names are handled by their own tiers.
+    """
     values: set[str] = set()
     for claim in _as_iter(format_doc.get("identifier_claims")):
         if not isinstance(claim, dict):
+            continue
+        if _claim_kind(claim) not in AUTHORITY_IDENTIFIER_KINDS:
             continue
         if verified is not None and bool(claim.get("verified", False)) is not verified:
             continue
@@ -95,18 +108,22 @@ def _identifier_values(format_doc: dict[str, Any]) -> set[str]:
     values = set()
     for field in ("puids", "loc_ids", "nara_ids", "wikidata_ids"):
         values.update(_field_values(format_doc, (field,)))
-    for kind in ("puid", "loc", "nara", "wikidata"):
+    for kind in AUTHORITY_IDENTIFIER_KINDS:
         values.update(_identifier_bucket(format_doc, kind))
     values.update(_identifier_claim_values(format_doc))
     identifiers = format_doc.get("identifiers")
     if not isinstance(identifiers, dict):
         for identifier in _as_iter(identifiers):
             if not isinstance(identifier, dict):
+                # Untyped identifier values are retained for backwards
+                # compatibility with older registry exports.
                 values.add(_normalize(identifier))
                 continue
-            for key in ("value", "id", "identifier", "identifier_value"):
-                if identifier.get(key):
-                    values.add(_normalize(identifier[key]))
+            if _claim_kind(identifier) not in AUTHORITY_IDENTIFIER_KINDS:
+                continue
+            value = _claim_value(identifier)
+            if value:
+                values.add(value)
     return {value for value in values if value}
 
 
@@ -135,9 +152,9 @@ def resolve_format(query: str, format_docs: Iterable[dict[str, Any]]) -> FormatR
     """Resolve a user-supplied format token against canonical format documents.
 
     Resolution is strict by design: exact IDs and verified authority identifiers
-    have highest precedence; copied/unverified identifiers are weaker evidence;
-    extensions and names must identify a single top-priority match. Ambiguity is
-    reported instead of guessed.
+    have highest precedence; copied/unverified strong authority identifiers are
+    weaker evidence; MIME, extensions, names, and aliases use their own matching
+    tiers. Ambiguity is reported instead of guessed.
     """
     candidates: list[tuple[int, str, dict[str, Any]]] = []
     for format_doc in format_docs:
