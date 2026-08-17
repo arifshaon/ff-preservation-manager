@@ -36,6 +36,34 @@ def _require_file(path: str | Path, *, label: str) -> Path:
     raise FileNotFoundError(f"{label} not found: {candidate.resolve(strict=False)}")
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def _validate_ai_options(args: argparse.Namespace) -> int:
+    """Validate AI controls before registry reads or deterministic execution."""
+    try:
+        max_items = int(getattr(args, "max_ai_evidence_items", 20))
+    except (TypeError, ValueError) as exc:
+        raise RequestValidationError("--max-ai-evidence-items must be an integer.") from exc
+    if max_items <= 0:
+        raise RequestValidationError("--max-ai-evidence-items must be greater than zero.")
+
+    try:
+        confidence = float(getattr(args, "identification_ai_min_confidence", 0.80))
+    except (TypeError, ValueError) as exc:
+        raise RequestValidationError("--identification-ai-min-confidence must be numeric.") from exc
+    if confidence < 0.0 or confidence > 1.0:
+        raise RequestValidationError("--identification-ai-min-confidence must be between 0 and 1.")
+    return max_items
+
+
 def _reader_from_args(args: argparse.Namespace) -> RegistryReader:
     if getattr(args, "registry_json", None):
         path = _require_file(args.registry_json, label="Registry JSON file")
@@ -89,7 +117,7 @@ def _add_ai_risk_args(parser: argparse.ArgumentParser, *, machine_mode: bool) ->
     )
     parser.add_argument(
         "--max-ai-evidence-items",
-        type=int,
+        type=_positive_int,
         default=20,
         help="Maximum evidence items supplied to AI per framework question. Default: 20.",
     )
@@ -199,13 +227,7 @@ def _query_has_explicit_version(query: str, versions: set[str]) -> bool:
 
 
 def _promote_version_ambiguity(metadata: dict[str, Any]) -> dict[str, Any]:
-    """Correct an AI no-match when its shortlist proves a version-family ambiguity.
-
-    A model may describe "cannot choose one version" as no_match. When the local
-    shortlist itself demonstrates that the query matches one format family but
-    spans multiple declared versions, the programmatic layer reports ambiguity
-    instead. The original AI decision remains untouched under ``ai`` for audit.
-    """
+    """Correct an AI no-match when its shortlist proves a version-family ambiguity."""
     if metadata.get("status") in {"resolved", "ambiguous"}:
         return metadata
     ai = metadata.get("ai") or {}
@@ -346,16 +368,10 @@ def _apply_ai_risk_assessment(
     ai_mode: str,
     max_evidence_items: int,
 ) -> dict[str, Any]:
-    """Attach AI-assisted risk analysis after a canonical single-format assessment.
-
-    Deterministic assessment remains based on the normal evidence pack and
-    approved criterion claims. AI modes receive an additive, bounded source-native
-    evidence section for unresolved interpretation; that section is ignored by
-    deterministic answer derivation and scoring.
-    """
+    """Attach AI-assisted risk analysis after a canonical single-format assessment."""
     if ai_mode == "off" or response.get("status") != "ok":
         return response
-    if str(request.get("action") or "") != "assess_format":
+    if str(request.get("action") or "").strip() != "assess_format":
         response["ai_risk_assessment"] = {
             "status": "not_applicable",
             "ai_mode": ai_mode,
@@ -363,10 +379,7 @@ def _apply_ai_risk_assessment(
         }
         return response
 
-    try:
-        max_items = int(max_evidence_items)
-    except (TypeError, ValueError) as exc:
-        raise RequestValidationError("--max-ai-evidence-items must be an integer.") from exc
+    max_items = int(max_evidence_items)
     if max_items <= 0:
         raise RequestValidationError("--max-ai-evidence-items must be greater than zero.")
 
@@ -460,6 +473,7 @@ def _apply_ai_risk_assessment(
 
 
 def _ask(args: argparse.Namespace) -> dict[str, Any]:
+    max_items = _validate_ai_options(args)
     reader = _reader_from_args(args)
     framework = load_framework(_require_file(args.framework, label="Framework file"))
     config = load_ai_config(_require_file(args.ai_config, label="AI config file"))
@@ -473,9 +487,10 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
         default_institution_id=args.institution,
         default_limit=args.limit,
     )
+    routed_request = normalize_request(routed["request"])
     plugin = _identification_plugin(args, existing_provider=provider)
-    prepared_request, identification = _resolve_request_format(reader, routed["request"], plugin=plugin)
-    response = _identification_ambiguity_response(framework, routed["request"], identification)
+    prepared_request, identification = _resolve_request_format(reader, routed_request, plugin=plugin)
+    response = _identification_ambiguity_response(framework, routed_request, identification)
     if response is None:
         response = execute_request(reader, framework, prepared_request)
         response = _apply_ai_risk_assessment(
@@ -485,7 +500,7 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
             response,
             provider=provider,
             ai_mode=args.ai_mode,
-            max_evidence_items=args.max_ai_evidence_items,
+            max_evidence_items=max_items,
         )
     response["input"] = {"mode": "human_prompt", "prompt": args.question}
     response["router"] = routed["router"]
@@ -495,9 +510,10 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _query_json(args: argparse.Namespace) -> dict[str, Any]:
+    max_items = _validate_ai_options(args)
+    request = normalize_request(_load_request(args))
     reader = _reader_from_args(args)
     framework = load_framework(_require_file(args.framework, label="Framework file"))
-    request = _load_request(args)
     provider = _provider_for_enabled_ai(args)
     plugin = _identification_plugin(args, existing_provider=provider)
     prepared_request, identification = _resolve_request_format(reader, request, plugin=plugin)
@@ -512,7 +528,7 @@ def _query_json(args: argparse.Namespace) -> dict[str, Any]:
                 response,
                 provider=provider,
                 ai_mode=args.ai_mode,
-                max_evidence_items=args.max_ai_evidence_items,
+                max_evidence_items=max_items,
             )
     response["input"] = {"mode": "structured_request"}
     if identification is not None:
