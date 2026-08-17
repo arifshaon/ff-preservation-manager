@@ -16,7 +16,11 @@ from preservation_risk_manager.ai.request_router import route_natural_language_r
 from preservation_risk_manager.answer_derivation import derive_answers
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
-from preservation_risk_manager.format_identification import AIFormatIdentificationPlugin, IdentificationResolver
+from preservation_risk_manager.format_identification import (
+    AIFormatIdentificationPlugin,
+    IdentificationResolver,
+    enrich_candidate_from_source_records,
+)
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.human_renderer import render_human_response
@@ -280,6 +284,8 @@ def _resolve_request_format(
             metadata["resolved_label"] = (
                 row.get("preferred_name") or row.get("format_name") or row.get("name") or row.get("label")
             )
+            if row.get("version") is not None:
+                metadata["resolved_version"] = str(row.get("version"))
     else:
         metadata = _promote_version_ambiguity(metadata)
     return prepared, metadata
@@ -320,6 +326,14 @@ def _identification_ambiguity_response(framework, request: dict[str, Any], ident
             "reason": "canonical_format_not_uniquely_resolved",
         },
     }
+
+
+def _ai_format_context(reader: RegistryReader, format_doc: dict[str, Any]) -> dict[str, Any]:
+    """Recover source-declared version/signature identity for AI interpretation."""
+    try:
+        return enrich_candidate_from_source_records(reader, format_doc)
+    except Exception:
+        return format_doc
 
 
 def _apply_ai_risk_assessment(
@@ -367,8 +381,16 @@ def _apply_ai_risk_assessment(
         return response
 
     institution_id = response.get("institution_id") if response.get("scope") == "institution" else None
-    claims = reader.get_criterion_claims_for_format(resolution.format_doc, institution_id=institution_id)
-    pack = build_evidence_pack(resolution.format_doc, institution_id=institution_id, criterion_claims=claims)
+    format_doc = _ai_format_context(reader, resolution.format_doc)
+    claims = reader.get_criterion_claims_for_format(format_doc, institution_id=institution_id)
+    pack = build_evidence_pack(format_doc, institution_id=institution_id, criterion_claims=claims)
+    if format_doc.get("version") is not None:
+        pack["format"]["version"] = str(format_doc.get("version"))
+    if format_doc.get("versions"):
+        pack["format"]["versions"] = [str(value) for value in format_doc.get("versions")]
+    if format_doc.get("internal_signature_names"):
+        pack["format"]["internal_signature_names"] = [str(value) for value in format_doc.get("internal_signature_names")]
+
     deterministic_answers = derive_answers(framework, pack)
     deterministic_analysis = score_answers(
         framework,
@@ -377,7 +399,7 @@ def _apply_ai_risk_assessment(
 
     source_evidence = build_ai_source_evidence(
         reader,
-        resolution.format_doc,
+        format_doc,
         max_source_records=max(40, max_items * 3),
         max_items=max(60, max_items * 5),
     )
@@ -414,6 +436,7 @@ def _apply_ai_risk_assessment(
             "criterion_claims_used": len(claims),
             "ai_source_evidence_items": len(source_evidence),
             "ai_source_records_used": len(source_record_keys),
+            "ai_format_context": pack.get("format") or {},
             "deterministic_analysis": deterministic_analysis,
             "analysis": ai_analysis,
             "derived_answers": ai_answers,
