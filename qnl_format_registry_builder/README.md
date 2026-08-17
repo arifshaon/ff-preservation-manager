@@ -4,16 +4,21 @@
 
 It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, or other configured sources change.
 
-At repository level:
+For the first cross-package run from source acquisition to risk assessment, use:
+
+**[`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md)**
+
+## Repository role
 
 ```text
 sources
   -> qnl_format_registry_builder
-  -> common RegistryStore / evidence model
+  -> canonical formats + criterion claims
+  -> RegistryStore / exports
   -> preservation_risk_manager
 ```
 
-See the repository architecture and shared data model first if you are working across modules:
+Repository architecture/data model:
 
 - [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
 - [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
@@ -31,16 +36,15 @@ Source acquisition
   -> source-native evidence retention
   -> declarative criterion mapping
   -> criterion_claims
-  -> RegistryStore persistence
+  -> RegistryStore persistence / exports
   -> change detection
-  -> optional exports/reports
 ```
 
-The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction.
+The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction or the paired export files.
 
 ## Main capabilities
 
-- NARA Digital Preservation Framework acquisition and parsing.
+- NARA Digital Preservation Framework acquisition/parsing.
 - PRONOM registry and DROID/signature evidence.
 - Library of Congress FDD XML evidence.
 - Structured JSON source packages.
@@ -48,10 +52,10 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 - QNL institutional format evidence.
 - Content-addressed source snapshot cache and offline replay.
 - Conservative reconciliation using configured identifier authority rules.
-- Source-by-source incremental augmentation against a persistent store.
+- Source-by-source incremental augmentation against persistent storage.
 - Declarative source-to-criterion mappings with review status/versioning.
 - Criterion-claim audit and backfill workflows.
-- Institution-scoped evidence kept separate from global facts.
+- Institution-scoped evidence separated from global facts.
 - Preservation method/readiness/trend evidence support.
 - Change detection between registry states.
 - Pluggable source adapters, storage backends, and exporters.
@@ -62,6 +66,7 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 
 | Need | Document |
 | --- | --- |
+| First build + risk assessment across both packages | [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md) |
 | Installation/setup/all builder modes | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Full builder documentation map | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
 | Add/map a new source or institution evidence | [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
@@ -80,13 +85,15 @@ python -m pip install -e ".[dev,mongo]"
 pytest -q
 ```
 
-If MongoDB is not required:
+Without MongoDB:
 
 ```powershell
 python -m pip install -e ".[dev]"
 ```
 
-## Quick run
+## Two different quickstart configurations
+
+### Registry-construction example
 
 ```powershell
 python -m registry_builder run `
@@ -95,9 +102,41 @@ python -m registry_builder run `
   --out output
 ```
 
-The default/example workflow demonstrates multi-source registry construction. Exact record counts depend on the configured/pinned/current upstream data.
+This demonstrates multi-source registry construction. **Criterion mapping is not enabled in this config.** It is therefore valid for learning/building the registry, but its outputs are not sufficient by themselves to demonstrate framework-driven risk assessment.
 
-Offline replay after snapshots have been cached:
+### Cross-package risk-assessment quickstart
+
+Use:
+
+```powershell
+python -m registry_builder run `
+  --config config\sources.criterion-mapping.quickstart.json `
+  --workdir work `
+  --out output
+```
+
+This no-database config explicitly enables approved criterion mappings and exports:
+
+```text
+output\registry.json
+output\criterion_claims.jsonl
+```
+
+The risk manager uses these together. When given `output\registry.json`, it automatically discovers the sibling criterion-claim export.
+
+Verify:
+
+```powershell
+Test-Path output\registry.json
+Test-Path output\criterion_claims.jsonl
+(Get-Content output\criterion_claims.jsonl | Measure-Object -Line).Lines
+```
+
+Full path: [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md).
+
+## Offline replay
+
+After snapshots have been cached:
 
 ```powershell
 python -m registry_builder run `
@@ -107,9 +146,13 @@ python -m registry_builder run `
   --offline
 ```
 
+Offline mode replays previously acquired evidence; it cannot discover a new upstream release that has never been fetched.
+
 ## Periodic source updates
 
-For operational monitoring, an external scheduler/service can rerun an integrated source configuration periodically:
+For operational monitoring, an external scheduler/service can rerun an integrated source configuration periodically.
+
+Example:
 
 ```powershell
 python -m registry_builder run `
@@ -118,48 +161,42 @@ python -m registry_builder run `
   --out output
 ```
 
-However, **release behavior is source/configuration-specific**. The committed integrated example intentionally pins NARA to a dated release for reproducibility. Rerunning that exact configuration will not automatically advance NARA to a newer release.
-
-For NARA follow-latest monitoring, the adapter supports:
+Release behavior is source/configuration-specific. The committed integrated example intentionally pins NARA for reproducibility. For NARA follow-latest monitoring, use:
 
 ```json
 "release_mode": "latest"
 ```
 
-A production deployment may therefore keep a pinned baseline config and a separate monitoring config whose selected sources follow their latest/current upstream data. A normal upstream monitoring refresh should run online; `--offline` only replays previously acquired evidence.
-
-The persistent registry can then be queried by `preservation_risk_manager` for watchlists, High-risk/Top-10 reports, family reports, and evidence-gap reports.
+A deployment may keep separate pinned baseline and follow-latest monitoring configurations.
 
 See:
 
-- NARA release semantics: [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md)
-- monitoring/reporting: [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
+- [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md)
+- [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
 
 ## Common CLI modes
 
 | Command | Purpose |
 | --- | --- |
-| `registry_builder run` | Run source acquisition, reconciliation, mapping, persistence, change detection, and exports. |
-| `registry_builder validate` | Validate an exported `registry.json`. |
+| `registry_builder run` | Source acquisition, reconciliation, mapping, persistence, change detection, exports. |
+| `registry_builder validate` | Validate exported `registry.json`. |
 | `registry_builder collision-report` | Inspect identifier collisions/heuristic bridges. |
-| `registry_builder criterion-evidence-audit` | Read-only audit of source fields and projected criterion coverage. |
+| `registry_builder criterion-evidence-audit` | Read-only audit of source fields/projected criterion coverage. |
 | `registry_builder mapping validate` | Validate criterion-mapping configuration. |
-| `registry_builder criterion-claims backfill` | Rebuild criterion claims from existing stored evidence without reacquiring all sources. |
+| `registry_builder criterion-claims backfill` | Rebuild criterion claims from stored evidence without reacquiring sources. |
 
-Full commands and examples: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
+Full command guide: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
 
-## Storage and the common interface
+## Storage and common interface
 
-All persistence is behind `RegistryStore`.
-
-A full backend implements:
+All persistence is behind `RegistryStore`:
 
 ```python
 upsert(collection, key, document)
 query(collection, filter)
 ```
 
-Built-in names:
+Built-in backends:
 
 ```text
 memory
@@ -167,76 +204,56 @@ file / json_file
 mongodb
 ```
 
-Example MongoDB block:
-
-```json
-{
-  "storage": {
-    "type": "mongodb",
-    "uri": "mongodb://localhost:27017",
-    "database": "format_registry"
-  }
-}
-```
-
-The sibling risk manager reuses the same configured store through `RegistryReader`; it does not duplicate MongoDB access logic.
+The sibling risk manager reuses the same store through `RegistryReader`; it does not duplicate MongoDB access logic.
 
 Read:
 
-- shared logical model/interface: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
-- builder storage/export config: [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
-- MongoDB physical schema: [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
+- [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
+- [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
 
 ## Source-by-source augmentation
 
 A persistent registry can be updated one source at a time:
 
 ```text
-NARA run
- -> adds/refreshes NARA source contribution
-
-PRONOM run later
- -> adds/refreshes verified PRONOM identity evidence
- -> current canonical view is recomputed from active source contributions
-
-LOC run later
- -> adds/refreshes LOC FDD sustainability evidence
+NARA run -> refresh NARA contribution
+PRONOM run -> refresh verified PUID/identity contribution
+LOC run -> refresh FDD sustainability evidence
 ```
 
-Earlier source records remain available for provenance/history. The current view uses active source contributions rather than blindly appending duplicates.
+The current canonical view is recomputed from active source contributions; source history/provenance is retained.
 
 Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md).
 
 ## Criterion claims
 
-Source adapters should retain source-native vocabulary. Declarative mapping files then convert relevant source fields into neutral `criterion_claims` with provenance.
-
-This is the bridge used by `preservation_risk_manager`:
+Source adapters retain source-native vocabulary. Declarative mapping files convert only preservation-relevant source fields into neutral `criterion_claims` with provenance.
 
 ```text
 source-native field/value
  -> approved mapping rule
  -> criterion_claim
- -> framework question
+ -> risk framework question
  -> deterministic answer/risk analysis
 ```
 
-For a new source, use this operational sequence:
+For a new source:
 
 ```text
 ingest -> audit -> compare with criteria -> draft mapping -> validate
 -> human approve -> dry-run backfill -> write claims -> verify in risk manager
 ```
 
-Read [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
+Use [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
 
-That guide also explains:
+That guide also covers:
 
-- when a new source only needs a mapping versus a genuinely new neutral criterion;
-- how institution-level evidence must use `source_independence: institution_scoped`;
-- how to bind a new criterion into a risk framework question;
-- how to use AI to draft a mapping safely;
-- a DPC Bit List prompt that returns validator-compatible mapping JSON for human review.
+- external vs institution-scoped evidence;
+- when to add a genuinely new neutral criterion;
+- binding criteria into framework questions;
+- AI-assisted mapping drafts;
+- the dedicated DPC Bit List prompt.
 
 Reusable DPC prompt:
 
@@ -244,11 +261,9 @@ Reusable DPC prompt:
 config/prompts/propose_mapping/dpc_bit_list.v1.md
 ```
 
-Detailed mapping lifecycle: [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md).
-
 ## Adding sources/backends
 
-Built-in adapters use short names. External trusted packages can use explicit plugin paths:
+External trusted source adapter:
 
 ```json
 {
@@ -258,7 +273,7 @@ Built-in adapters use short names. External trusted packages can use explicit pl
 }
 ```
 
-Storage plugins use the same pattern:
+Storage plugin:
 
 ```json
 {
@@ -278,19 +293,16 @@ Read:
 
 ## Generated data
 
-Normal runtime/export directories are not source documentation and should not be committed as ordinary generated output.
+Runtime/export directories are generated output and should not normally be committed.
 
-Source snapshots belong under the configured work directory, commonly:
+Common paths:
 
 ```text
 work/snapshots/<source_id>/
+output/
 ```
 
-Optional review exports commonly appear under `output/` or `out/`.
-
 ## Tests
-
-Before pushing changes:
 
 ```powershell
 cd qnl_format_registry_builder
@@ -302,6 +314,6 @@ For source/mapping changes, also run the smallest relevant real/configured pipel
 
 ## Related module
 
-Once evidence is in the registry, `preservation_risk_manager` can perform deterministic or AI-assisted assessment without duplicating the ingestion/storage logic.
+Once criterion evidence is available, `preservation_risk_manager` can perform deterministic or AI-assisted assessment without duplicating ingestion/storage logic.
 
 Start at [`../preservation_risk_manager/README.md`](../preservation_risk_manager/README.md).
