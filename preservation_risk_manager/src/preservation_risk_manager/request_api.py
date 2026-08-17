@@ -102,6 +102,63 @@ def _searchable_values(format_doc: dict[str, Any]) -> list[str]:
     return values
 
 
+def _strong_identifiers(format_doc: dict[str, Any]) -> set[tuple[str, str]]:
+    values: set[tuple[str, str]] = set()
+    direct = {
+        "puid": "puids",
+        "loc": "loc_ids",
+        "nara": "nara_ids",
+    }
+    for kind, field in direct.items():
+        for value in _as_list(format_doc.get(field)):
+            text = str(value).strip().lower()
+            if text:
+                values.add((kind, text))
+    identifiers = format_doc.get("identifiers")
+    if isinstance(identifiers, dict):
+        for kind in ("puid", "loc", "nara"):
+            for value in _as_list(identifiers.get(kind)):
+                text = str(value).strip().lower()
+                if text:
+                    values.add((kind, text))
+    return values
+
+
+def _canonical_preference(format_doc: dict[str, Any]) -> int:
+    canonical_id = (_format_id(format_doc) or "").lower()
+    if canonical_id.startswith("fmt-"):
+        return 3
+    if canonical_id.startswith(("puid-", "loc-", "nara-")):
+        return 1
+    return 2
+
+
+def _dedupe_format_docs(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefer aggregate canonical records over source aliases sharing strong IDs."""
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            -_canonical_preference(row),
+            (_format_label(row) or _format_id(row) or "").lower(),
+        ),
+    )
+    kept: list[dict[str, Any]] = []
+    seen_strong_ids: set[tuple[str, str]] = set()
+    seen_format_ids: set[str] = set()
+    for row in ordered:
+        format_id = (_format_id(row) or "").lower()
+        strong_ids = _strong_identifiers(row)
+        if format_id and format_id in seen_format_ids:
+            continue
+        if strong_ids and strong_ids.intersection(seen_strong_ids):
+            continue
+        kept.append(row)
+        if format_id:
+            seen_format_ids.add(format_id)
+        seen_strong_ids.update(strong_ids)
+    return kept
+
+
 def search_format_docs(
     reader: RegistryReader,
     query: str,
@@ -111,7 +168,8 @@ def search_format_docs(
     """Return current canonical formats matching a human/family search term.
 
     This is intentionally a discovery search, not authoritative identity
-    resolution. Exact assessment still goes through FormatResolver.
+    resolution. Exact assessment still goes through FormatResolver. Strong-ID
+    duplicates are collapsed in favour of aggregate canonical records.
     """
     needle = str(query or "").strip().lower()
     if not needle:
@@ -127,8 +185,19 @@ def search_format_docs(
         score = 2 if exact else 1
         label = (_format_label(row) or _format_id(row) or "").lower()
         ranked.append((score, label, row))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    rows = [deepcopy(item[2]) for item in ranked]
+
+    deduped = _dedupe_format_docs(item[2] for item in ranked)
+    score_by_id = {
+        (_format_id(item[2]) or ""): item[0]
+        for item in ranked
+    }
+    deduped.sort(
+        key=lambda row: (
+            -score_by_id.get(_format_id(row) or "", 0),
+            (_format_label(row) or _format_id(row) or "").lower(),
+        )
+    )
+    rows = [deepcopy(row) for row in deduped]
     return rows[:limit] if limit is not None else rows
 
 
@@ -298,7 +367,10 @@ def execute_request(
         return result
 
     family = request["filters"].get("family")
-    candidates = search_format_docs(reader, family, limit=request["limit"]) if family else reader.list_canonical_formats()[: request["limit"]]
+    if family:
+        candidates = search_format_docs(reader, family, limit=request["limit"])
+    else:
+        candidates = _dedupe_format_docs(reader.list_canonical_formats())[: request["limit"]]
     assessments = [
         _assessment_for_doc(reader, framework, row, institution_id=institution_id)
         for row in candidates
