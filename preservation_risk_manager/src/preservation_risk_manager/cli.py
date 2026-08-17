@@ -19,6 +19,13 @@ from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.policy_proposals import build_policy_change_proposal
 from preservation_risk_manager.posture import compute_local_risk_posture
+from preservation_risk_manager.literature_corpus import (
+    ChunkSettings,
+    LiteratureCorpusError,
+    build_literature_corpus,
+    init_inbox,
+    search_corpus,
+)
 from preservation_risk_manager.scoring import score_answers
 from preservation_risk_manager.training_corpus import (
     VALID_TIERS,
@@ -487,6 +494,33 @@ def build_corpus(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def init_literature_inbox(args: argparse.Namespace) -> dict[str, Any]:
+    """Create the drop folder a curator puts PDFs and OCR text into."""
+    return init_inbox(Path(args.path), out_hint=args.out_hint)
+
+
+def build_literature(args: argparse.Namespace) -> dict[str, Any]:
+    """Ingest the inbox into a versioned, searchable chunk store."""
+    try:
+        settings = ChunkSettings(
+            corpus_version=args.corpus_version,
+            chunk_words=args.chunk_words,
+            chunk_overlap=args.chunk_overlap,
+            min_chars_per_doc=args.min_chars_per_doc,
+        )
+        return build_literature_corpus(Path(args.inbox), Path(args.out), settings)
+    except LiteratureCorpusError as exc:
+        raise CliFailure({"status": "literature_corpus_error", "error": str(exc)}) from exc
+
+
+def search_literature(args: argparse.Namespace) -> dict[str, Any]:
+    """Search a built literature corpus and return citable chunk hits."""
+    try:
+        return search_corpus(Path(args.corpus), args.query, limit=args.limit)
+    except LiteratureCorpusError as exc:
+        raise CliFailure({"status": "literature_corpus_error", "error": str(exc)}) from exc
+
+
 def _add_registry_source_args(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--registry-json", help="Path to registry_builder registry.json export.")
@@ -639,6 +673,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional cap on formats scanned, for smoke runs against a large registry.",
     )
     corpus.set_defaults(func=build_corpus)
+
+    inbox = subparsers.add_parser(
+        "init-literature-inbox",
+        help="Create the drop folder for Corpus B documents, with a README explaining what to drop.",
+    )
+    inbox.add_argument("--path", required=True, help="Directory to create; the drop folder is <path>/inbox.")
+    inbox.add_argument("--out-hint", default="corpus/", help="Output path shown in the generated README.")
+    inbox.set_defaults(func=init_literature_inbox)
+
+    literature = subparsers.add_parser(
+        "build-literature-corpus",
+        help="Build Corpus B: chunk and index PDFs/OCR text dropped in the inbox.",
+    )
+    literature.add_argument("--inbox", required=True, help="Directory containing dropped documents.")
+    literature.add_argument("--out", required=True, help="Output root; the corpus is written to <out>/<corpus-version>/.")
+    literature.add_argument("--corpus-version", required=True, help="Corpus version label, for example 2026-09.")
+    literature.add_argument(
+        "--chunk-words",
+        type=_positive_int,
+        default=220,
+        help="Words per chunk. Chunks never span a page boundary. Default: 220.",
+    )
+    literature.add_argument(
+        "--chunk-overlap",
+        type=int,
+        default=40,
+        help="Words repeated between neighbouring chunks so claims are not split. Default: 40.",
+    )
+    literature.add_argument(
+        "--min-chars-per-doc",
+        type=int,
+        default=50,
+        help="Below this, a document is reported as needing OCR instead of indexed. Default: 200.",
+    )
+    literature.set_defaults(func=build_literature)
+
+    find = subparsers.add_parser(
+        "search-literature",
+        help="Search a built literature corpus and return citable chunk IDs.",
+    )
+    find.add_argument("--corpus", required=True, help="Path to a built corpus directory, for example corpus/2026-09.")
+    find.add_argument("--query", required=True, help="Search terms.")
+    find.add_argument("--limit", type=_positive_int, default=10, help="Maximum results. Default: 10.")
+    find.set_defaults(func=search_literature)
     return parser
 
 
