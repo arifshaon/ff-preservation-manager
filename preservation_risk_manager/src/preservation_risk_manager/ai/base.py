@@ -19,17 +19,39 @@ class AIProviderError(AIError):
 
 
 @dataclass(frozen=True)
+class AIToolCall:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+    def to_openai_tool_call(self) -> dict[str, Any]:
+        return {
+            "id": self.call_id,
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": json.dumps(self.arguments, separators=(",", ":"), sort_keys=True),
+            },
+        }
+
+
+@dataclass(frozen=True)
 class AIMessage:
     role: str
-    content: str
+    content: str | None
     name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: tuple[AIToolCall, ...] = ()
 
     def __post_init__(self) -> None:
         if self.role not in {"system", "user", "assistant", "tool"}:
             raise ValueError(f"Unsupported AI message role: {self.role}")
         if self.role == "tool" and not self.tool_call_id:
             raise ValueError("Tool messages require tool_call_id.")
+        if self.tool_calls and self.role != "assistant":
+            raise ValueError("Only assistant messages may contain tool_calls.")
+        if self.content is None and not (self.role == "assistant" and self.tool_calls):
+            raise ValueError("Message content may be null only for an assistant tool-call message.")
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"role": self.role, "content": self.content}
@@ -37,6 +59,8 @@ class AIMessage:
             data["name"] = self.name
         if self.tool_call_id:
             data["tool_call_id"] = self.tool_call_id
+        if self.tool_calls:
+            data["tool_calls"] = [call.to_openai_tool_call() for call in self.tool_calls]
         return data
 
 
@@ -76,13 +100,6 @@ class AIRequest:
 
 
 @dataclass(frozen=True)
-class AIToolCall:
-    call_id: str
-    name: str
-    arguments: dict[str, Any]
-
-
-@dataclass(frozen=True)
 class AIUsage:
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -99,6 +116,13 @@ class AIResponse:
     finish_reason: str | None = None
     usage: AIUsage = field(default_factory=AIUsage)
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def as_assistant_message(self) -> AIMessage:
+        return AIMessage(
+            role="assistant",
+            content=self.text,
+            tool_calls=self.tool_calls,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
