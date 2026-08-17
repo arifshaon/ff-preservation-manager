@@ -10,6 +10,7 @@ preservation-risk-manager = "preservation_risk_manager.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+ai = ["openai>=1.42"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
