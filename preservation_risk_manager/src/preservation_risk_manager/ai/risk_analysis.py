@@ -24,10 +24,14 @@ AI_ELIGIBLE_STATUSES = {
 RISK_INTERPRETER_SYSTEM_PROMPT = (
     "You are an evidence interpreter inside a file-format preservation risk system. "
     "Use only the evidence items supplied by the application. Never use general knowledge, "
-    "memory, unstated assumptions, web knowledge, or the risk score itself. Choose exactly "
-    "one allowed controlled answer. If the supplied evidence cannot support a non-abstention "
-    "answer, choose the framework's unknown/abstention answer. Cite only evidence refs that "
-    "appear in the supplied evidence list. Do not calculate risk scores, bands, posture, or actions."
+    "memory, unstated assumptions, web knowledge, or the risk score itself. Evidence may include "
+    "approved normalized criterion claims and bounded raw/source-native observations linked to the "
+    "format by a direct source record or shared strong identifier. Treat source-family evidence as "
+    "applicable only when the supplied link_basis supports that relationship; do not infer family "
+    "membership from names alone. Choose exactly one allowed controlled answer. If the supplied "
+    "evidence cannot support a non-abstention answer, choose the framework's unknown/abstention "
+    "answer. Cite only evidence refs that appear in the supplied evidence list. Do not calculate "
+    "risk scores, bands, posture, or actions."
 )
 
 
@@ -65,6 +69,19 @@ def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def _ai_source_evidence_items(evidence_pack: dict[str, Any]) -> list[dict[str, Any]]:
+    value = evidence_pack.get("ai_source_evidence") or []
+    items = [value] if isinstance(value, dict) else list(value)
+    result: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        stored = dict(item)
+        stored.setdefault("evidence_section", "ai_source_evidence")
+        result.append(stored)
+    return result
+
+
 def question_evidence(
     question: Question,
     evidence_pack: dict[str, Any],
@@ -75,11 +92,14 @@ def question_evidence(
 ) -> list[dict[str, Any]]:
     """Return bounded, reference-addressable evidence for one framework question.
 
-    Fill-gaps mode may prefer evidence already matched by deterministic derivation.
-    Independent review mode disables that preference and selects evidence only by
-    the question's declared evidence fields. If neither path finds matching
-    evidence, the bounded evidence pack is exposed as a final fallback. The
-    model remains forbidden from using facts outside these supplied items.
+    Deterministic derivation continues to consume only the standard evidence-pack
+    sections. The AI layer may additionally inspect ``ai_source_evidence``: raw or
+    source-native observations linked by direct source provenance or shared strong
+    identifiers. Fill-gaps may prefer evidence already matched by deterministic
+    derivation; independent review disables that preference. Evidence matching the
+    question's declared evidence fields wins. If nothing matches, the bounded pack
+    is exposed as a final fallback and the model is still required to abstain when
+    it cannot support an answer.
     """
     preferred: list[dict[str, Any]] = []
     if prefer_deterministic_evidence:
@@ -88,7 +108,7 @@ def question_evidence(
             for item in deterministic_result.get("evidence_claims", [])
             if isinstance(item, dict)
         ]
-    all_items = evidence_items(evidence_pack)
+    all_items = evidence_items(evidence_pack) + _ai_source_evidence_items(evidence_pack)
     matching = [item for item in all_items if _claim_matches_question(item, question)]
     selected = _dedupe_evidence(preferred + matching)
     if not selected:
@@ -171,7 +191,9 @@ def _question_prompt(
         }
     return (
         "Interpret the supplied evidence for this one framework question. "
-        "Return only the required structured response. For a non-abstention answer, "
+        "Source-native evidence can be linked directly to the canonical record or indirectly through "
+        "a supplied shared strong identifier; inspect link_basis before treating related/family evidence "
+        "as applicable. Return only the required structured response. For a non-abstention answer, "
         "evidence_refs must contain at least one supplied ref that directly supports the choice. "
         "If support is insufficient or contradictory in a way you cannot resolve from the supplied "
         "evidence, choose the unknown/abstention answer.\n\n"
