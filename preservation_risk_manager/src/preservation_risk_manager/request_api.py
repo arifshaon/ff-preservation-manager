@@ -7,6 +7,10 @@ from preservation_risk_manager.answer_derivation import derive_answers
 from preservation_risk_manager.data_access import RegistryReader
 from preservation_risk_manager.evidence_gaps import diagnose_format_evidence_gaps, summarize_evidence_gaps
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
+from preservation_risk_manager.evidence_remediation import (
+    plan_format_evidence_remediation,
+    summarize_evidence_remediation,
+)
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import RiskFramework
 from preservation_risk_manager.scoring import score_answers
@@ -18,6 +22,7 @@ SUPPORTED_ACTIONS = (
     "assess_format_family",
     "list_at_risk_formats",
     "list_evidence_gaps",
+    "plan_evidence_remediation",
 )
 DEFAULT_AT_RISK_BANDS = ("Moderate", "High")
 
@@ -284,8 +289,10 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         raise RequestValidationError("query is required for search_formats.")
     if action == "assess_format_family" and not normalized["filters"]["family"]:
         raise RequestValidationError("filters.family is required for assess_format_family.")
-    if action == "list_evidence_gaps" and not (normalized["format"] or normalized["filters"]["family"]):
-        raise RequestValidationError("format or filters.family is required for list_evidence_gaps.")
+    if action in {"list_evidence_gaps", "plan_evidence_remediation"} and not (
+        normalized["format"] or normalized["filters"]["family"]
+    ):
+        raise RequestValidationError(f"format or filters.family is required for {action}.")
     return normalized
 
 
@@ -409,18 +416,23 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
         result.update({"results": [_format_identity(row) for row in matches], "result_count": len(matches)})
         return result
 
-    if action in {"assess_format", "list_evidence_gaps"} and request.get("format"):
+    if action in {"assess_format", "list_evidence_gaps", "plan_evidence_remediation"} and request.get("format"):
         resolution = FormatResolver(reader).resolve(request["format"])
         if not resolution.resolved or not resolution.format_doc:
             return _resolution_failure(result, resolution)
         if action == "assess_format":
             result["result"] = _assessment_for_doc(reader, framework, resolution.format_doc, institution_id=institution_id)
         else:
-            result["result"] = diagnose_format_evidence_gaps(
+            diagnostic = diagnose_format_evidence_gaps(
                 reader,
                 framework,
                 resolution.format_doc,
                 institution_id=institution_id,
+            )
+            result["result"] = (
+                diagnostic
+                if action == "list_evidence_gaps"
+                else plan_format_evidence_remediation(diagnostic)
             )
         result["result_count"] = 1
         return result
@@ -431,7 +443,7 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
     else:
         candidates = _dedupe_format_docs(reader.list_canonical_formats())[: request["limit"]]
 
-    if action == "list_evidence_gaps":
+    if action in {"list_evidence_gaps", "plan_evidence_remediation"}:
         diagnostics = [
             diagnose_format_evidence_gaps(reader, framework, row, institution_id=institution_id)
             for row in candidates
@@ -445,13 +457,27 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
                 str((row.get("format") or {}).get("label") or ""),
             )
         )
-        result.update({
-            "filters": deepcopy(request["filters"]),
-            "candidate_count": len(candidates),
-            "gap_summary": summarize_evidence_gaps(gap_results, candidate_count=len(candidates)),
-            "results": gap_results,
-            "result_count": len(gap_results),
-        })
+        result["filters"] = deepcopy(request["filters"])
+        result["candidate_count"] = len(candidates)
+        if action == "list_evidence_gaps":
+            result["gap_summary"] = summarize_evidence_gaps(gap_results, candidate_count=len(candidates))
+            result["results"] = gap_results
+        else:
+            plans = [plan_format_evidence_remediation(row) for row in gap_results]
+            plans.sort(
+                key=lambda row: (
+                    -int((row.get("priority_counts") or {}).get("P1", 0)),
+                    -int((row.get("priority_counts") or {}).get("P2", 0)),
+                    -int(row.get("remediation_item_count") or 0),
+                    str((row.get("format") or {}).get("label") or ""),
+                )
+            )
+            result["remediation_summary"] = summarize_evidence_remediation(
+                plans,
+                candidate_count=len(candidates),
+            )
+            result["results"] = plans
+        result["result_count"] = len(result["results"])
         return result
 
     all_assessments = [
