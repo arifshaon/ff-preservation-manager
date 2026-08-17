@@ -289,6 +289,49 @@ written so the failure can be inspected.
 
 See [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md).
 
+## `init-literature-inbox`
+
+Create the drop folder for Corpus B, with a README explaining what to drop.
+
+```powershell
+python -m preservation_risk_manager init-literature-inbox --path literature\
+```
+
+## `build-literature-corpus`
+
+Chunk and index PDFs/OCR text dropped in the inbox.
+
+```powershell
+python -m preservation_risk_manager build-literature-corpus `
+  --inbox literature\inbox `
+  --out corpus\ `
+  --corpus-version 2026-09
+```
+
+Optional:
+
+```text
+--chunk-words          default 220
+--chunk-overlap        default 40
+--min-chars-per-doc    default 50 (PDF OCR check)
+```
+
+Writes `chunks.jsonl`, `index.json`, `manifest.json`, and `ingest_report.json`.
+PDF input needs the optional `corpus` extra; `.txt`/`.md` needs nothing.
+
+## `search-literature`
+
+Search a built corpus and return citable chunk IDs with page numbers.
+
+```powershell
+python -m preservation_risk_manager search-literature `
+  --corpus corpus\2026-09 `
+  --query "JPEG 2000 renderer availability" `
+  --limit 10
+```
+
+See [`LITERATURE_CORPUS.md`](LITERATURE_CORPUS.md).
+
 ## `propose-policy-change`
 
 Create an evidence-grounded draft proposal package for human review.
@@ -435,3 +478,4 @@ Suppression reasons are documented in [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSI
 - [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
 - [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
 - [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md)
+- [`LITERATURE_CORPUS.md`](LITERATURE_CORPUS.md)

@@ -30,6 +30,7 @@ For repository-wide architecture/storage, also read:
 | Review the 8 domains / 22 questions | [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md) |
 | Set up periodic source refresh / Top 10 / watchlist reports | [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md) |
 | Build a fine-tuning corpus from registry evidence | [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md) |
+| Index dropped PDFs/OCR text for criteria no registry covers | [`LITERATURE_CORPUS.md`](LITERATURE_CORPUS.md) |
 | Understand each Python module | [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md) |
 | Add/map a new evidence source | [`../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 
