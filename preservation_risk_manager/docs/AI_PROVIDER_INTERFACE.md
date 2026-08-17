@@ -17,7 +17,7 @@ The application—not the model—owns:
 
 AI supplies language-model inference only within explicitly bounded workflows.
 
-For the full runtime architecture, see [`ARCHITECTURE.md`](ARCHITECTURE.md). For installation and all modes, see [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md).
+For the user-facing AI modes (`ask`, `fill-gaps`, `review-all`) see **[`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)**. This document focuses on the provider/configuration contract.
 
 ## Current providers
 
@@ -71,21 +71,37 @@ Use:
 
 Aliases include `openai` and `local`.
 
-Example:
+A committed local template now ships at:
+
+```text
+examples/ai.local.example.json
+```
+
+Copy it:
+
+```powershell
+New-Item -ItemType Directory -Force config | Out-Null
+Copy-Item examples\ai.local.example.json config\ai.local.json
+```
+
+Template shape:
 
 ```json
 {
   "ai": {
-    "provider": "local",
+    "provider": "openai_compatible",
     "endpoint": "http://127.0.0.1:8000/v1",
     "model": "<LOCAL_MODEL_NAME>",
     "temperature": 0.0,
+    "max_output_tokens": 1200,
     "timeout_seconds": 60
   }
 }
 ```
 
-This supports future/local servers such as vLLM/llama.cpp/Ollama-compatible gateways when they expose the expected OpenAI-compatible API behavior. Strict structured-output/tool support depends on the actual server/model.
+Edit `endpoint` and `model` to match the local inference server. A key is optional for a compatible local endpoint that does not require authentication; the adapter supplies an internal non-secret placeholder to the SDK in that case.
+
+This provider can be used with compatible vLLM, llama.cpp, Ollama gateways, or other OpenAI-compatible HTTP servers. Strict structured-output/tool support depends on the actual server and model, so validate capabilities before relying on human routing or AI-assisted analysis.
 
 ## Installation
 
@@ -98,7 +114,7 @@ python -m pip install -e ".[dev,ai]"
 
 The `ai` extra installs the OpenAI Python SDK used by the Azure and OpenAI-compatible adapters.
 
-Deterministic `query-json` / `analyze-format` do not require AI.
+Deterministic `query-json` and `analyze-format` do not require AI.
 
 ## Provider-neutral core abstractions
 
@@ -116,9 +132,7 @@ AIToolCall
 AIError / provider/configuration error types
 ```
 
-Provider implementations translate these types to/from their SDK/protocol.
-
-Preservation logic must not import an Azure-specific response type.
+Provider implementations translate these types to/from their SDK/protocol. Preservation logic must not depend on an Azure-specific response object.
 
 ## Configuration and secret handling
 
@@ -136,7 +150,7 @@ or environment variable:
 
 Placeholder-looking configuration is rejected where required. Configuration description/redaction must never echo the secret.
 
-## Validate local configuration without a network call
+## Validate configuration without a network call
 
 ```powershell
 python -m preservation_risk_manager.ai info `
@@ -162,9 +176,7 @@ python -m preservation_risk_manager.ai validate-structured `
   --config config\ai.local.json
 ```
 
-The validation sends a small schema-constrained request and verifies the provider returns a parseable structured object.
-
-Structured output is important because routing and evidence interpretation must return controlled application fields rather than free-form scores.
+Structured output is important because routing/evidence interpretation must return controlled application fields rather than free-form scores.
 
 ## Validate tool calling
 
@@ -173,11 +185,9 @@ python -m preservation_risk_manager.ai validate-tools `
   --config config\ai.local.json
 ```
 
-This exercises normalized tool-call behavior where supported.
+Capability support should be verified independently for each local server/model combination.
 
 ## Current AI roles
-
-AI currently has three distinct preservation-related roles.
 
 ### 1. Natural-language request routing
 
@@ -199,11 +209,9 @@ AI-routed request:
 }
 ```
 
-The router does **not** answer whether PDF is risky. It only selects a supported action/parameters. `request_api.execute_request(...)` then queries the registry and runs deterministic assessment.
+The router does not answer whether PDF is risky. It selects a supported action/parameters. `request_api.execute_request(...)` then queries the registry and runs deterministic assessment.
 
-Machine integrations should bypass this AI step and send the structured request directly through `query-json`/the future API layer.
-
-See [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
+Machine integrations should bypass this AI step and send the structured request directly through `query-json` or a future wrapper around the same canonical request layer.
 
 ### 2. `fill-gaps` evidence interpretation
 
@@ -221,22 +229,15 @@ Safety properties:
 
 ### 3. `review-all` independent calibration
 
-`analyze-format-ai --ai-mode review-all` independently evaluates all eligible questions for calibration/evaluation.
+`analyze-format-ai --ai-mode review-all` independently evaluates eligible questions for calibration/evaluation.
 
-The review prompt uses **raw-source-only evidence**. It excludes:
+The review prompt uses **raw-source-only evidence** and excludes deterministic answer/status, normalized mapped values used as answer shortcuts, score/band/posture, and mapping fields that would leak the reference answer.
 
-- deterministic answer/status;
-- normalized mapped claim values used as answer shortcuts;
-- deterministic score/band/local posture;
-- mapping rationale/answer IDs that would leak the reference answer.
-
-After the model responds, its controlled answer is compared with the deterministic answer.
-
-A divergence is a review signal. It does not automatically change deterministic scoring or mappings.
+After the model responds, its controlled answer is compared with the deterministic answer. A divergence is a review signal; it does not automatically change deterministic scoring or mappings.
 
 ## Example commands
 
-### Human routing + detailed answer
+### Human routing
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -244,17 +245,6 @@ python -m preservation_risk_manager ask `
   --framework examples\qnl_preservation_risk_questions.framework.draft.json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
   --ai-config config\ai.local.json
-```
-
-### Audit the routed JSON
-
-```powershell
-python -m preservation_risk_manager ask `
-  "Which PDF formats need more evidence?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --json
 ```
 
 ### Fill unresolved questions
@@ -265,8 +255,7 @@ python -m preservation_risk_manager analyze-format-ai `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
   --format PDF `
   --ai-config config\ai.local.json `
-  --ai-mode fill-gaps `
-  --compact-evidence
+  --ai-mode fill-gaps
 ```
 
 ### Independent review
@@ -277,23 +266,22 @@ python -m preservation_risk_manager analyze-format-ai `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
   --format PDF `
   --ai-config config\ai.local.json `
-  --ai-mode review-all `
-  --compact-evidence
+  --ai-mode review-all
 ```
 
 ## Structured output contract
 
-`AIRequest` can carry a JSON Schema. Provider adapters normalize the parsed output into `AIResponse.structured`.
+`AIRequest` can carry a JSON Schema. Provider adapters normalize parsed output into `AIResponse.structured`.
 
-Application code should validate the result against its allowed action/answer schema and then execute deterministic logic. A model's structured output is still untrusted input until validated.
+Application code validates the result against its allowed action/answer schema before deterministic execution. A model's structured output remains untrusted input until validated.
 
 ## Tool calling contract
 
 `AIRequest` can carry `AIToolDefinition` objects and providers can return normalized `AIToolCall` objects.
 
-The current human request path uses structured request routing rather than handing arbitrary database tools directly to the model. Future tool-oriented assistants should expose **controlled application functions** above `RegistryReader`/`request_api`, not raw MongoDB access.
+Future tool-oriented assistants should expose controlled application functions above `RegistryReader`/`request_api`, not arbitrary MongoDB access or scoring-rule mutation.
 
-Good future tool boundaries are operations such as:
+Appropriate boundaries include:
 
 ```text
 resolve/search formats
@@ -301,8 +289,6 @@ execute canonical assessment request
 get evidence/provenance
 compare assessments/history
 ```
-
-Avoid exposing arbitrary collection mutation or scoring-rule changes as model tools.
 
 ## Provider switching and deterministic equivalence
 
@@ -316,7 +302,7 @@ Switching providers/models must not change:
 - band thresholds;
 - evidence-gap/remediation rules.
 
-Provider changes can affect routing quality or AI interpretation/review behavior, so these need evaluation, but the deterministic reference result remains application-owned.
+Provider changes can affect routing quality or AI interpretation/review behavior, so those need evaluation, but the deterministic reference result remains application-owned.
 
 ## Evaluation areas
 
@@ -326,18 +312,17 @@ Useful AI evaluation dimensions include:
 - correct action selection;
 - structured-output validity;
 - appropriate abstention;
-- citation/evidence-reference validity;
+- evidence-reference validity;
 - hallucination rate;
 - agreement/divergence against reviewed deterministic examples;
 - recommendation boundedness;
 - latency/token usage.
 
-Use the router audit metadata and `review-all` outputs to build reproducible evaluation sets rather than relying on anecdotal chat quality.
-
 ## Related documentation
 
-- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- Install/setup/all execution modes: [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md)
-- Human/system request contract: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
-- Preservation question framework: [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md)
-- Shared registry/store interface: [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md)
+- [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
+- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
