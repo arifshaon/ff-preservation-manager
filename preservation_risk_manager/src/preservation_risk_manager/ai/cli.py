@@ -8,7 +8,9 @@ from typing import Any
 from preservation_risk_manager.ai import (
     AIError,
     AIMessage,
+    AIProviderError,
     AIRequest,
+    AIToolDefinition,
     build_ai_provider,
     load_ai_config,
 )
@@ -64,6 +66,90 @@ def run_query(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def validate_structured_output(args: argparse.Namespace) -> dict[str, Any]:
+    config = load_ai_config(args.config)
+    provider = build_ai_provider(config)
+    schema = {
+        "type": "object",
+        "properties": {
+            "status": {"type": "string", "enum": ["available"]},
+            "message": {"type": "string"},
+        },
+        "required": ["status", "message"],
+        "additionalProperties": False,
+    }
+    response = provider.generate(
+        AIRequest(
+            messages=(
+                AIMessage(
+                    "system",
+                    "Return only the requested structured object. Do not add fields.",
+                ),
+                AIMessage(
+                    "user",
+                    "Confirm that strict structured output is available. Set status to available.",
+                ),
+            ),
+            response_schema=schema,
+            response_schema_name="provider_capability_check",
+            temperature=0.0,
+        )
+    )
+    structured = response.structured
+    if not isinstance(structured, dict) or structured.get("status") != "available":
+        raise AIProviderError("Provider did not return the expected strict structured output.")
+    return {
+        "status": "ok",
+        "capability": "structured_output",
+        "provider": provider.describe(),
+        "response": response.to_dict(),
+    }
+
+
+def validate_tool_calling(args: argparse.Namespace) -> dict[str, Any]:
+    config = load_ai_config(args.config)
+    provider = build_ai_provider(config)
+    tool = AIToolDefinition(
+        name="report_provider_status",
+        description="Report that tool calling is available for the preservation assistant.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["available"]},
+                "message": {"type": "string"},
+            },
+            "required": ["status", "message"],
+            "additionalProperties": False,
+        },
+    )
+    response = provider.generate(
+        AIRequest(
+            messages=(
+                AIMessage(
+                    "system",
+                    "Use the application tool when instructed. Do not answer from prose instead.",
+                ),
+                AIMessage(
+                    "user",
+                    "Call report_provider_status and confirm that preservation-assistant tool calling is available.",
+                ),
+            ),
+            tools=(tool,),
+            required_tool_name=tool.name,
+            temperature=0.0,
+        )
+    )
+    matching = [call for call in response.tool_calls if call.name == tool.name]
+    if len(matching) != 1 or matching[0].arguments.get("status") != "available":
+        raise AIProviderError("Provider did not return the expected required tool call.")
+    return {
+        "status": "ok",
+        "capability": "tool_calling",
+        "provider": provider.describe(),
+        "response": response.to_dict(),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m preservation_risk_manager.ai")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -81,6 +167,20 @@ def build_parser() -> argparse.ArgumentParser:
     query.add_argument("--temperature", type=float, help="Override configured temperature.")
     query.add_argument("--max-output-tokens", type=int, help="Override configured output token limit.")
     query.set_defaults(func=run_query)
+
+    structured = subparsers.add_parser(
+        "validate-structured",
+        help="Make a live provider request to validate strict structured JSON output.",
+    )
+    structured.add_argument("--config", required=True, help="Path to AI provider JSON configuration.")
+    structured.set_defaults(func=validate_structured_output)
+
+    tools = subparsers.add_parser(
+        "validate-tools",
+        help="Make a live provider request that requires one strict function/tool call.",
+    )
+    tools.add_argument("--config", required=True, help="Path to AI provider JSON configuration.")
+    tools.set_defaults(func=validate_tool_calling)
     return parser
 
 
