@@ -17,6 +17,7 @@ For repository-wide architecture/storage, also read:
 | --- | --- |
 | First end-to-end run | [`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md) |
 | Understand the module | [`../README.md`](../README.md) |
+| Run the browser UI / batch report exporter | [`WEB_UI.md`](WEB_UI.md) |
 | Resolve PUID/MIME/name/other format observations | [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md) |
 | Enable bounded AI fallback for unresolved format identification | [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md) |
 | Understand evidence → derivation → score → suppression | [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md) |
@@ -38,6 +39,7 @@ For repository-wide architecture/storage, also read:
 
 ```text
 ../README.md
+ -> WEB_UI.md
  -> FORMAT_IDENTIFICATION.md
  -> RISK_ANALYSIS_WORKFLOW.md
  -> PRESERVATION_RISK_QUESTIONS.md
@@ -49,6 +51,7 @@ For repository-wide architecture/storage, also read:
 ```text
 ../../docs/GETTING_STARTED.md
  -> INSTALLATION_SETUP_AND_RUN.md
+ -> WEB_UI.md
  -> FORMAT_IDENTIFICATION.md
  -> CLI_REFERENCE.md
  -> RISK_MONITORING_AND_REPORTING.md
@@ -90,6 +93,7 @@ ARCHITECTURE.md
 | `DOCUMENTATION_MAP.md` | This navigation page. |
 | `ARCHITECTURE.md` | High-level resolver/evidence/framework/request/AI architecture and safety boundaries. |
 | `MODULE_REFERENCE.md` | Responsibility of each Python module and AI submodule. |
+| `WEB_UI.md` | Local browser UI, background jobs, TXT/CSV upload, progress, and downloadable batch risk reports. |
 | `FORMAT_IDENTIFICATION.md` | Programmatic format resolution, conservative normalization, optional AI candidate plugin, safety/failure behavior and integration commands. |
 | `RISK_ANALYSIS_WORKFLOW.md` | Detailed deterministic flow and band-suppression explanations. |
 | `FRAMEWORKS.md` | Framework JSON schema, questions, answers, weights, bands, completeness, calibration and governance. |
@@ -158,6 +162,16 @@ structured JSON request
  -> canonical JSON
 ```
 
+Web mode adds a presentation/job layer only:
+
+```text
+browser
+ -> human question OR explicit format-ID batch
+ -> background job queue / progress
+ -> existing resolver + request executor + optional AI interpretation
+ -> rendered answer OR CSV/JSON/ZIP report
+```
+
 ## Current framework files
 
 | File | Purpose |
@@ -178,6 +192,7 @@ The broad framework is a QNL working synthesis, not a verbatim official LOC/NARA
 
 | Mode | Input | Output | AI role |
 | --- | --- | --- | --- |
+| `web` | Browser human question or pasted/uploaded format IDs | Interactive progress + TXT/CSV/JSON/ZIP downloads | Optional human identification and risk fill-gaps; batch IDs remain deterministic identifiers |
 | `ask` | Natural-language question | Detailed human-readable answer | Route request only; optional identification fallback when explicitly enabled |
 | `ask --json` | Natural-language question | Canonical JSON + router/identification audit metadata | Route request; optional identification fallback |
 | `query-json` | Structured request | Canonical JSON | None by default; optional identification fallback when explicitly enabled |
