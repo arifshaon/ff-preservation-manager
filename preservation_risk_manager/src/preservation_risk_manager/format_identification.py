@@ -61,25 +61,34 @@ class FormatIdentificationPlugin(Protocol):
         """Return a verified local candidate and plugin metadata, or (None, metadata)."""
 
 
+def _canonical_puid_variant(value: str) -> str | None:
+    match = _PUID_PATTERN.fullmatch(str(value or "").strip())
+    if not match:
+        return None
+    prefix = match.group(1).lower().replace("-", "")
+    canonical_prefix = "x-fmt" if prefix == "xfmt" else "fmt"
+    return f"{canonical_prefix}/{match.group(2)}"
+
+
 def normalize_format_observation(value: str) -> list[str]:
     """Return conservative deterministic variants for a format observation.
 
-    This intentionally normalizes only syntax that is safe to recognize without
-    external knowledge. It does not infer a format family/version from prose.
+    Syntax wrappers are removed before PUID normalization so values such as
+    ``[fmt 18]`` and ``"x-fmt 123"`` remain deterministic and never need a paid
+    AI fallback. This intentionally normalizes syntax only; it does not infer a
+    format family/version from prose.
     """
     raw = str(value or "").strip()
     variants: list[str] = []
     if not raw:
         return variants
 
-    match = _PUID_PATTERN.fullmatch(raw)
-    if match:
-        prefix = match.group(1).lower().replace("-", "")
-        canonical_prefix = "x-fmt" if prefix == "xfmt" else "fmt"
-        variants.append(f"{canonical_prefix}/{match.group(2)}")
-
-    compact = raw.strip().strip("[](){}<>,;\"'")
-    if compact != raw:
+    compact = raw.strip("[](){}<>,;\"'").strip()
+    for candidate in (raw, compact):
+        normalized_puid = _canonical_puid_variant(candidate)
+        if normalized_puid:
+            variants.append(normalized_puid)
+    if compact and compact != raw:
         variants.append(compact)
 
     seen: set[str] = set()
@@ -189,8 +198,6 @@ def enrich_candidate_from_source_records(reader: RegistryReader, row: dict[str, 
                 if detail not in details:
                     details.append(detail)
 
-    # Prefer a source-declared canonical version already present on the row. The
-    # source-record lookup fills the field only when all observed versions agree.
     existing_version = enriched.get("version")
     if existing_version is not None and str(existing_version).strip():
         version = str(existing_version).strip()
@@ -214,10 +221,17 @@ def _search_values(row: dict[str, Any]) -> list[str]:
         "format_id",
         "id",
         "preferred_name",
+        "format_name",
         "name",
         "label",
         "short_name",
         "display_name",
+        "family",
+        "format_family",
+        "format_type",
+        "media_type",
+        "category",
+        "description",
         "version",
         "versions",
         "internal_signature_names",
@@ -242,15 +256,24 @@ def _tokens(value: str) -> set[str]:
     return {token.lower() for token in _TOKEN_PATTERN.findall(str(value or "")) if len(token) >= 2}
 
 
+def _meaningful_length(value: str) -> int:
+    return len(re.sub(r"[^a-z0-9]+", "", str(value or "").lower()))
+
+
+def _is_descriptive_query(query: str) -> bool:
+    """Return true for prose-like observations that need a wider AI shortlist."""
+    return len(_tokens(query)) >= 4
+
+
 def _fuzzy_score(query: str, row: dict[str, Any]) -> float:
     """Rank local candidates for optional AI review.
 
     Candidate generation is intentionally broader than deterministic identity
-    resolution. A descriptive observation such as ``Adobe Shockwave Flash SWF
-    file`` must retain a registry record whose extension/alias is exactly ``swf``
-    even though comparing the whole phrase to the three-letter token produces a
-    weak SequenceMatcher score. The AI plugin still decides only among supplied
-    local candidates and may abstain.
+    resolution. Raw substring matching is guarded so one-character extensions
+    such as ``a``, ``c`` and ``o`` cannot score 0.88 merely because the character
+    appears somewhere in descriptive prose. Descriptive queries deliberately
+    retain weaker lexical candidates because the bounded AI stage supplies the
+    semantic decision and is still restricted to local registry candidates.
     """
     needle = query.lower().strip()
     if not needle:
@@ -263,15 +286,16 @@ def _fuzzy_score(query: str, row: dict[str, Any]) -> float:
             continue
         if needle == candidate:
             return 1.0
-        if needle in candidate or candidate in needle:
+
+        if _meaningful_length(needle) >= 3 and needle in candidate:
+            best = max(best, 0.88)
+        if _meaningful_length(candidate) >= 3 and candidate in needle:
             best = max(best, 0.88)
 
         candidate_tokens = _tokens(candidate)
         if candidate_tokens and query_tokens:
             overlap = candidate_tokens.intersection(query_tokens)
             if overlap:
-                # A complete candidate token set contained in the observation is
-                # highly relevant for aliases/extensions such as SWF, JPEG, TIFF.
                 if candidate_tokens.issubset(query_tokens):
                     best = max(best, 0.96 if len(candidate_tokens) == 1 else 0.92)
                 else:
@@ -294,7 +318,12 @@ def shortlist_candidates(
         ((_fuzzy_score(query, row), row) for row in rows),
         key=lambda item: (-item[0], _format_label(item[1]).lower(), str(item[1].get("version") or "")),
     )
-    return [row for score, row in ranked[:limit] if score >= minimum_score]
+    # A hard 0.25 floor is appropriate for token-like observations but can make
+    # semantic fallback impossible for prose. The AI resolver cannot select a
+    # candidate it never sees, so descriptive queries use a lower lexical floor
+    # while retaining the same bounded candidate limit and abstention controls.
+    effective_minimum = min(float(minimum_score), 0.10) if _is_descriptive_query(query) else float(minimum_score)
+    return [row for score, row in ranked if score >= effective_minimum][: max(1, int(limit))]
 
 
 def _candidate_summary(row: dict[str, Any]) -> dict[str, Any]:
@@ -504,9 +533,6 @@ class IdentificationResolver:
                 method="deterministic_best_effort",
             )
 
-        # Do not ask AI to arbitrate an authority collision or a bare extension/MIME
-        # ambiguity. Those cases either indicate a registry/data issue or simply do
-        # not contain enough information for a defensible variant-level decision.
         if base_resolution.ambiguous and base_resolution.match_type in _AI_UNSAFE_AMBIGUITY_TYPES:
             return FormatIdentificationResult(
                 input_value=original,
@@ -523,9 +549,6 @@ class IdentificationResolver:
         if base_resolution.ambiguous and base_resolution.matches:
             candidates = self._enriched_candidates(list(base_resolution.matches))
         else:
-            # Rank using the cheap canonical metadata first. Only enrich the small
-            # shortlist from source_records; do not perform source-record queries
-            # for every canonical format in a large registry.
             raw_candidates = shortlist_candidates(
                 original,
                 self.reader.list_canonical_formats(),
