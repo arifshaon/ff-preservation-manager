@@ -1,157 +1,163 @@
-# Documentation map
+# Registry Builder documentation map
 
-This map is the starting point for the documentation. Use it to avoid reading every file.
+This map is the starting point for documentation specific to `qnl_format_registry_builder`.
 
-## Audiences
+For repository-wide architecture and the shared data/storage interface, first see:
 
-| Audience | Start here |
+- [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+
+## Start by task
+
+| Task | Start here |
 | --- | --- |
-| New user or operator | `README.md` |
-| Preservation officer reading outputs | `READING_THE_REGISTRY.md` |
-| Administrator configuring sources/storage | `ADDING_AND_RUNNING_DATA_SOURCES.md`, `ADAPTER_REFERENCE.md`, `STORAGE_AND_EXPORT_CONFIG.md` |
-| Developer adding an adapter | `ADDING_AND_RUNNING_DATA_SOURCES.md`, `ADAPTER_IMPLEMENTATION_GUIDE.md` |
-| Developer changing matching/update logic | `IDENTIFIER_RECONCILIATION.md`, `INCREMENTAL_SOURCE_UPDATES.md` |
-| Maintainer planning future work | `NEXT_STEPS.md` |
+| Install, configure, and run the builder | [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md) |
+| Understand what the module does | [`../README.md`](../README.md) |
+| Interpret generated registry data | [`READING_THE_REGISTRY.md`](READING_THE_REGISTRY.md) |
+| Add/run a data source | [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md) |
+| Configure existing adapters | [`ADAPTER_REFERENCE.md`](ADAPTER_REFERENCE.md) |
+| Implement a new source/storage/export adapter | [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md) |
+| Understand internal builder architecture | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
+| Configure storage and exports | [`STORAGE_AND_EXPORT_CONFIG.md`](STORAGE_AND_EXPORT_CONFIG.md) |
+| Inspect MongoDB collections/indexes | [`MONGODB_STORAGE_SCHEMA.md`](MONGODB_STORAGE_SCHEMA.md) |
+| Understand identifier matching | [`IDENTIFIER_RECONCILIATION.md`](IDENTIFIER_RECONCILIATION.md) |
+| Understand incremental source replacement/augmentation | [`INCREMENTAL_SOURCE_UPDATES.md`](INCREMENTAL_SOURCE_UPDATES.md) |
+| Develop/review criterion mappings | [`criterion_mapping_workflow.md`](criterion_mapping_workflow.md) |
+| Add QNL institutional format evidence | [`QNL_INSTITUTION_FORMAT_EVIDENCE.md`](QNL_INSTITUTION_FORMAT_EVIDENCE.md) |
+| Understand institutional policy overlays | [`INSTITUTIONAL_OVERLAYS.md`](INSTITUTIONAL_OVERLAYS.md) |
+| Understand source cache/offline/fallback behavior | [`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md) |
+| Review preservation method profiles | [`PRESERVATION_METHOD_PROFILES.md`](PRESERVATION_METHOD_PROFILES.md) |
+| Review method coverage caveats | [`METHOD_COVERAGE_NOTES.md`](METHOD_COVERAGE_NOTES.md) |
+| Review design decisions | [`DECISIONS.md`](DECISIONS.md) |
+| Review remaining roadmap | [`NEXT_STEPS.md`](NEXT_STEPS.md) |
 
-## Start here
+## Operator path
 
-| Need | Read |
+For a new operator, read in this order:
+
+```text
+../README.md
+  -> INSTALLATION_SETUP_AND_RUN.md
+  -> READING_THE_REGISTRY.md
+  -> source/storage specialist docs as needed
+```
+
+`INSTALLATION_SETUP_AND_RUN.md` is the canonical runbook for:
+
+- installation;
+- MongoDB/file setup;
+- full online run;
+- offline replay;
+- NARA-only / PRONOM-only / LOC-only / QNL-evidence runs;
+- registry validation;
+- collision reports;
+- criterion evidence audit;
+- mapping validation;
+- criterion-claim backfill;
+- test/deployment checks.
+
+## Architecture/developer path
+
+For code changes that cross components:
+
+```text
+../../docs/REPOSITORY_ARCHITECTURE.md
+  -> ../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md
+  -> ARCHITECTURE.md
+  -> ADAPTER_IMPLEMENTATION_GUIDE.md
+```
+
+Important boundary:
+
+```text
+SourceAdapter
+ -> SourceSnapshot / RawFormatRecord
+ -> reconciliation / criterion mapping
+ -> RegistryStore
+```
+
+Adapters should not issue source-specific database writes. Storage is selected through `RegistryStore`.
+
+## Data/storage documentation boundary
+
+| Document | Scope |
 | --- | --- |
-| Understand the project goal and run the default multi-source quickstart | `README.md` |
-| Navigate all documentation | `docs/DOCUMENTATION_MAP.md` |
-| Add a new data source, choose downloaded-file/JSON/CSV/archive acquisition, or run NARA/PRONOM/LOC individually | `docs/ADDING_AND_RUNNING_DATA_SOURCES.md` |
-| Add QNL-specific preservation-risk evidence for formats such as PDF and netCDF | `docs/QNL_INSTITUTION_FORMAT_EVIDENCE.md` |
-| Interpret `registry.csv`, `registry.json`, MongoDB records, hazard fields, review flags, and change events | `docs/READING_THE_REGISTRY.md` |
-| Understand the end-to-end architecture and source-adapter concept | `docs/ARCHITECTURE.md` |
-| Understand source retrieval, cache, offline replay, local files, and fallback logic | `docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md` |
-| Understand source-by-source augmentation and active evidence reuse | `docs/INCREMENTAL_SOURCE_UPDATES.md` |
-| Understand verified-only strong identifier reconciliation | `docs/IDENTIFIER_RECONCILIATION.md` |
-| Configure existing adapter types | `docs/ADAPTER_REFERENCE.md` |
-| Build a new source/storage/export adapter | `docs/ADAPTER_IMPLEMENTATION_GUIDE.md` |
-| Understand NARA release modes and local admin files | `docs/NARA_LOCAL_FILES.md` and `docs/NARA_ADAPTER_REQUIREMENTS.md` |
-| Configure MongoDB, file storage, and exports | `docs/STORAGE_AND_EXPORT_CONFIG.md` |
-| Understand MongoDB collections, fields, indexes, and queries | `docs/MONGODB_STORAGE_SCHEMA.md` |
-| Understand institutional policy overlays such as QNL | `docs/INSTITUTIONAL_OVERLAYS.md` |
-| Understand preservation method profiles | `docs/PRESERVATION_METHOD_PROFILES.md` |
-| Understand method coverage states and caveats | `docs/METHOD_COVERAGE_NOTES.md` |
-| Understand implementation decisions and constraints | `docs/DECISIONS.md` |
-| Review current roadmap | `docs/NEXT_STEPS.md` |
+| [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) | Repository-wide logical model, common `query`/`upsert` contract, read/write ownership, risk-manager `RegistryReader`. |
+| [`STORAGE_AND_EXPORT_CONFIG.md`](STORAGE_AND_EXPORT_CONFIG.md) | Builder configuration for memory/file/MongoDB and optional exports. |
+| [`MONGODB_STORAGE_SCHEMA.md`](MONGODB_STORAGE_SCHEMA.md) | MongoDB-specific physical collections, fields, indexes, and verification queries. |
+| [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md) | How to implement a new backend/plugin. |
+
+Do not treat the MongoDB document layout as the only supported application interface.
+
+## Source-adapter documentation boundary
+
+| Document | Boundary |
+| --- | --- |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Concept and pipeline placement. |
+| [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md) | Operator runbook for adding/configuring sources. |
+| [`ADAPTER_REFERENCE.md`](ADAPTER_REFERENCE.md) | Built-in adapter configuration and behavior. |
+| [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md) | Developer implementation contract. |
+| [`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md) | Acquisition/cache/offline/local-file semantics. |
+
+## Evidence and mapping path
+
+The builder intentionally separates source-native data from assessment frameworks:
+
+```text
+upstream data
+ -> RawFormatRecord.native_fields / raw
+ -> criterion mapping
+ -> criterion_claim
+ -> preservation_risk_manager framework question
+```
+
+Read:
+
+- [`criterion_mapping_workflow.md`](criterion_mapping_workflow.md)
+- [`QNL_INSTITUTION_FORMAT_EVIDENCE.md`](QNL_INSTITUTION_FORMAT_EVIDENCE.md)
+- sibling risk framework docs: [`../../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md`](../../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md)
 
 ## Live reference documents
 
 | Document | Status | Purpose |
 | --- | --- | --- |
+| `INSTALLATION_SETUP_AND_RUN.md` | Live | Primary installation/setup/operator runbook. |
 | `DOCUMENTATION_MAP.md` | Live | This navigation map. |
-| `ARCHITECTURE.md` | Live | Core design, source-adapter concept, storage/export boundaries. |
-| `READING_THE_REGISTRY.md` | Live | User-facing glossary and examples for preservation officers. |
-| `ADDING_AND_RUNNING_DATA_SOURCES.md` | Live | Practical runbook for adding source adapters, choosing downloaded-file/JSON/CSV/archive acquisition, and running sources together or individually. |
-| `QNL_INSTITUTION_FORMAT_EVIDENCE.md` | Live | QNL-specific preservation-risk evidence source, seed data, template, and run instructions. |
-| `SOURCE_RETRIEVAL_AND_FALLBACKS.md` | Live | Online, cached, offline, local-file, fallback and required/optional behavior. |
-| `INCREMENTAL_SOURCE_UPDATES.md` | Live | Source-by-source augmentation model and active evidence reuse. |
-| `IDENTIFIER_RECONCILIATION.md` | Live | Verified identifier rules and strong-key matching behavior. |
-| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Live | How to implement adapters. |
-| `ADAPTER_REFERENCE.md` | Live | Existing adapter configuration and behavior. |
-| `NARA_ADAPTER_REQUIREMENTS.md` | Live | Detailed NARA requirements and hazard/rating behavior. |
-| `NARA_LOCAL_FILES.md` | Live | Admin-downloaded NARA CSV workflows. |
-| `STORAGE_AND_EXPORT_CONFIG.md` | Live | Storage backends and optional exports. |
-| `MONGODB_STORAGE_SCHEMA.md` | Live | MongoDB collection and field reference. |
-| `INSTITUTIONAL_OVERLAYS.md` | Live | Institution-specific policy and decision overlays. |
-| `PRESERVATION_METHOD_PROFILES.md` | Live | Method-profile assignment model. |
-| `METHOD_COVERAGE_NOTES.md` | Live | Coverage-state interpretation and caveats. |
-| `DECISIONS.md` | Live | Design decisions and rationale. |
-| `NEXT_STEPS.md` | Live | Remaining work and roadmap. |
+| `ARCHITECTURE.md` | Live | Builder internals and adapter/storage boundaries. |
+| `READING_THE_REGISTRY.md` | Live | Registry/output interpretation. |
+| `ADDING_AND_RUNNING_DATA_SOURCES.md` | Live | Source acquisition/configuration/run patterns. |
+| `ADAPTER_REFERENCE.md` | Live | Built-in source adapter reference. |
+| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Live | Source/storage/export extension guide. |
+| `SOURCE_RETRIEVAL_AND_FALLBACKS.md` | Live | Retrieval/cache/offline behavior. |
+| `INCREMENTAL_SOURCE_UPDATES.md` | Live | Active source contribution/update model. |
+| `IDENTIFIER_RECONCILIATION.md` | Live | Authority-aware reconciliation. |
+| `criterion_mapping_workflow.md` | Live | Mapping lifecycle and claims. |
+| `QNL_INSTITUTION_FORMAT_EVIDENCE.md` | Live | QNL local evidence source. |
+| `INSTITUTIONAL_OVERLAYS.md` | Live | Local policy decisions. |
+| `STORAGE_AND_EXPORT_CONFIG.md` | Live | Storage/export configuration. |
+| `MONGODB_STORAGE_SCHEMA.md` | Live | MongoDB physical implementation. |
+| `PRESERVATION_METHOD_PROFILES.md` | Live | Preservation method-profile model. |
+| `METHOD_COVERAGE_NOTES.md` | Live | Coverage interpretation/caveats. |
+| `DECISIONS.md` | Live | Design rationale. |
+| `NEXT_STEPS.md` | Live | Builder roadmap. |
 
 ## Historical notes
 
-Historical planning or refactor notes live under:
+Historical plans/refactors live under `docs/history/`. They are context, not current operator instructions.
 
-```text
-docs/history/
-```
+## Documentation standard for an adapter
 
-They are kept for context, not as current implementation guidance.
+Each adapter's documentation should state:
 
-| Historical note | Why it exists |
-| --- | --- |
-| `docs/history/ADAPTER_REFACTOR_PLAN.md` | Completed storage/export refactor tracking note. |
+- what upstream source it represents;
+- supported acquisition modes;
+- required/optional configuration;
+- snapshot behavior;
+- what it emits into `RawFormatRecord`;
+- which identifier namespaces it verifies;
+- which source-native fields are retained;
+- which criterion mappings apply;
+- failure/required-vs-optional behavior;
+- tests that prove the adapter works.
 
-## How the documents fit together
-
-```text
-README.md
-  -> quickstart and common operator path
-
-DOCUMENTATION_MAP.md
-  -> choose the right document
-
-ADDING_AND_RUNNING_DATA_SOURCES.md
-  -> practical source plug-in and runbook: downloaded file, JSON, CSV, archive, individual runs
-
-QNL_INSTITUTION_FORMAT_EVIDENCE.md
-  -> QNL-specific evidence template for future preservation-risk analysis
-
-READING_THE_REGISTRY.md
-  -> understand generated outputs and MongoDB records
-
-ARCHITECTURE.md
-  -> design model, adapter boundaries, storage/export separation
-
-SOURCE_RETRIEVAL_AND_FALLBACKS.md
-  -> acquisition modes, cache, offline, local files, required/optional sources
-
-INCREMENTAL_SOURCE_UPDATES.md
-  -> source-by-source registry augmentation
-
-IDENTIFIER_RECONCILIATION.md
-  -> verified identifiers and strong-key matching
-
-ADAPTER_REFERENCE.md
-  -> configure built-in adapters
-
-ADAPTER_IMPLEMENTATION_GUIDE.md
-  -> build a new adapter
-
-STORAGE_AND_EXPORT_CONFIG.md + MONGODB_STORAGE_SCHEMA.md
-  -> storage and database details
-```
-
-## Adapter documentation boundary
-
-The adapter docs have a clean split:
-
-| Document | Boundary |
-| --- | --- |
-| `ARCHITECTURE.md` | Concept: what a source adapter is and where it fits. |
-| `ADDING_AND_RUNNING_DATA_SOURCES.md` | Runbook: how to plug in and run a source today, including MongoDB configs and acquisition patterns. |
-| `ADAPTER_IMPLEMENTATION_GUIDE.md` | Build: how to implement a new adapter class. |
-| `ADAPTER_REFERENCE.md` | Configure: how existing adapters work. |
-
-## Naming rules
-
-Use source-level names for adapters wherever possible:
-
-```text
-nara_digital_preservation_framework
-pronom_registry
-loc_fdd_xml
-institution_policy_xlsx
-qnl_institution_format_evidence
-```
-
-Avoid naming a new adapter after a temporary file representation unless that representation is truly the source boundary. For example, CSV is only NARA's current publication format, so the preferred adapter is `nara_digital_preservation_framework`, not `nara_csv`.
-
-Compatibility aliases can remain for old names, but new configuration should use the source-level name.
-
-## Documentation standard for each adapter
-
-Each adapter section should answer the same questions:
-
-- What source does it represent?
-- When should it be used?
-- What config fields does it accept?
-- How does acquisition work?
-- Does it support online, offline, cache, local files, pinned/latest release modes, or fallback files?
-- What does it emit into `RawFormatRecord`?
-- Which identifiers are verified by this adapter?
-- What can fail, and whether it should be `required:true` or `required:false`?
-- Which tests prove the adapter works?
+Prefer source-level names such as `nara_digital_preservation_framework`, `pronom_registry`, and `loc_fdd_xml` rather than naming an adapter after a temporary transport format.
