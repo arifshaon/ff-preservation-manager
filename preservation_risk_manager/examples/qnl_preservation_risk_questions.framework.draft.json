@@ -1,0 +1,564 @@
+{
+  "framework_id": "qnl_preservation_risk_questions",
+  "version": "0.1.0-draft",
+  "label": "QNL Preservation Risk Question Set",
+  "description": "Draft operational question set for file-format sustainability, obsolescence, data-loss and institutional feasibility assessment. The questions are usable for evidence collection and targeted assessment, but overall Low/Moderate/High banding is disabled until QNL validates scoring weights and thresholds.",
+  "calibration_status": "draft_unvalidated",
+  "source_basis": [
+    "QNL working synthesis supplied on 2026-08-17, informed by Library of Congress sustainability concepts and National Archives and Records Administration preservation considerations",
+    "This is a QNL working question set, not an official verbatim LOC or NARA questionnaire"
+  ],
+  "unknown_answer_id": "unknown",
+  "scale": {
+    "direction": "higher_is_risk",
+    "banding_enabled": false,
+    "min_completeness_for_band": 0.8,
+    "bands": [
+      {"band": "Low", "min_score": 0, "max_score": 14},
+      {"band": "Moderate", "min_score": 15, "max_score": 29},
+      {"band": "High", "min_score": 30, "max_score": 44}
+    ]
+  },
+  "questions": [
+    {
+      "id": "q_specification_disclosure",
+      "label": "Is the format specification fully disclosed and publicly accessible?",
+      "domain_id": "specification_governance",
+      "domain_label": "Specification Disclosure & Governance",
+      "definition": "Assesses whether independent developers can understand and implement the format without reverse-engineering.",
+      "guidance": "Prefer evidence about availability and completeness of the normative specification rather than general popularity or software support.",
+      "aliases": ["specification disclosure", "public specification", "documentation"],
+      "critical": true,
+      "evidence_fields": ["sustainability.disclosure"],
+      "evidence_value_map": {
+        "openly_documented": "low_risk",
+        "open_documentation": "low_risk",
+        "public_specification": "low_risk",
+        "public_specification_available": "low_risk",
+        "partial_specification": "moderate_risk",
+        "proprietary_documented": "moderate_risk",
+        "limited": "moderate_risk",
+        "limited_documentation": "moderate_risk",
+        "limited_or_unclear": "moderate_risk",
+        "limited_or_unclear_specification": "moderate_risk",
+        "unclear": "moderate_risk",
+        "restricted": "high_risk",
+        "undisclosed": "high_risk",
+        "reverse_engineering_required": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Full public specification supports independent implementation", "points": 0},
+        {"id": "moderate_risk", "label": "Specification is partial, restricted in practice, or otherwise difficult to implement independently", "points": 1},
+        {"id": "high_risk", "label": "Specification is unavailable or reverse-engineering is required", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_specification_governance",
+      "label": "Who maintains and governs the format specification?",
+      "domain_id": "specification_governance",
+      "domain_label": "Specification Disclosure & Governance",
+      "definition": "Assesses whether stewardship is distributed through an open standards body or concentrated in a single vendor or owner.",
+      "guidance": "Consider recognized standards organizations, governance transparency, succession and continued maintenance.",
+      "aliases": ["governance", "standards body", "maintainer", "vendor control"],
+      "evidence_fields": ["governance.maintainer_model"],
+      "evidence_value_map": {
+        "open_standards_body": "low_risk",
+        "community_governed": "low_risk",
+        "multi_stakeholder": "low_risk",
+        "single_vendor_with_public_spec": "moderate_risk",
+        "single_vendor": "high_risk",
+        "abandoned_vendor": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Maintained through an open or durable multi-stakeholder governance model", "points": 0},
+        {"id": "moderate_risk", "label": "Governance is concentrated but maintenance and documentation remain credible", "points": 1},
+        {"id": "high_risk", "label": "Control is concentrated, opaque, abandoned, or dependent on one commercial owner", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_specification_stability",
+      "label": "Is the specification stable, with manageable and backward-compatible change?",
+      "domain_id": "specification_governance",
+      "domain_label": "Specification Disclosure & Governance",
+      "definition": "Assesses whether frequent major revisions or incompatible versions create preservation risk.",
+      "guidance": "Distinguish healthy maintenance from churn that breaks compatibility or requires repeated migrations.",
+      "aliases": ["specification updates", "version stability", "backward compatibility"],
+      "evidence_fields": ["governance.specification_stability"],
+      "evidence_value_map": {
+        "stable": "low_risk",
+        "backward_compatible": "low_risk",
+        "moderate_change": "moderate_risk",
+        "frequent_major_revisions": "high_risk",
+        "backward_incompatible": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Stable specification or changes preserve practical backward compatibility", "points": 0},
+        {"id": "moderate_risk", "label": "Meaningful revisions occur but remain manageable", "points": 1},
+        {"id": "high_risk", "label": "Frequent or incompatible revisions materially threaten long-term usability", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_platform_dependency",
+      "label": "Is rendering dependent on specific operating systems, proprietary software, or legacy hardware?",
+      "domain_id": "software_dependencies_environment",
+      "domain_label": "Software Dependencies & Environment",
+      "definition": "Assesses environmental dependencies outside the file that are required to render, validate or reuse content.",
+      "guidance": "Treat obsolete hardware, single-platform requirements and proprietary runtime dependencies as distinct from resources embedded within the file.",
+      "aliases": ["software dependency", "operating system dependency", "legacy hardware", "runtime dependency"],
+      "critical": true,
+      "evidence_fields": ["sustainability.platform_dependency"],
+      "evidence_value_map": {
+        "platform_independent": "low_risk",
+        "common_cross_platform": "low_risk",
+        "limited_platforms": "moderate_risk",
+        "proprietary_runtime": "high_risk",
+        "legacy_hardware": "high_risk",
+        "obsolete_os": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "No specialist platform dependency beyond widely available environments", "points": 0},
+        {"id": "moderate_risk", "label": "Support is constrained to a limited but still maintainable environment", "points": 1},
+        {"id": "high_risk", "label": "Rendering depends on proprietary, obsolete or specialist software/hardware environments", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_external_assets",
+      "label": "Does opening or rendering the file depend on external assets or services?",
+      "domain_id": "software_dependencies_environment",
+      "domain_label": "Software Dependencies & Environment",
+      "definition": "Assesses non-embedded dependencies such as fonts, DLLs, linked spreadsheets, plugins or online endpoints.",
+      "guidance": "Embedded resources do not count as external dependencies merely because the format requires them to be embedded.",
+      "aliases": ["external dependencies", "external assets", "linked resources", "unembedded fonts"],
+      "critical": true,
+      "evidence_fields": ["sustainability.external_dependencies"],
+      "evidence_value_map": {
+        "none": "low_risk",
+        "low": "low_risk",
+        "no_special_dependency": "low_risk",
+        "common_tooling": "low_risk",
+        "standard_tooling": "low_risk",
+        "moderate": "moderate_risk",
+        "high": "high_risk",
+        "specialist": "high_risk",
+        "specialist_dependency": "high_risk",
+        "specialist_software_dependency": "high_risk",
+        "proprietary_dependency": "high_risk",
+        "runtime_dependency": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "The file is self-contained or uses only common non-specialist dependencies", "points": 0},
+        {"id": "moderate_risk", "label": "Some external dependencies exist but can be managed or captured", "points": 1},
+        {"id": "high_risk", "label": "Essential content depends on fragile, proprietary, remote or otherwise hard-to-preserve external assets", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_open_source_tooling",
+      "label": "Are open-source viewers, validators or extraction tools available?",
+      "domain_id": "software_dependencies_environment",
+      "domain_label": "Software Dependencies & Environment",
+      "definition": "Assesses whether the format can be rendered or inspected without relying exclusively on licensed vendor software.",
+      "guidance": "Consider independent implementations for reading, validation, metadata extraction and transformation.",
+      "aliases": ["open source tools", "free viewer", "validator", "extraction tools"],
+      "evidence_fields": ["sustainability.open_source_tooling"],
+      "evidence_value_map": {
+        "multiple_open_source_tools": "low_risk",
+        "open_source_available": "low_risk",
+        "limited_open_source_support": "moderate_risk",
+        "vendor_only": "high_risk",
+        "no_available_tooling": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Multiple viable open-source or freely available implementations exist", "points": 0},
+        {"id": "moderate_risk", "label": "Independent tooling exists but is incomplete or weakly maintained", "points": 1},
+        {"id": "high_risk", "label": "Practical use depends on licensed vendor software or unavailable tooling", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_adoption",
+      "label": "How widely adopted is the format across its target industry or creator community?",
+      "domain_id": "adoption_community_support",
+      "domain_label": "Adoption & Community Support",
+      "definition": "Assesses the breadth and durability of real-world use.",
+      "guidance": "Judge adoption in the format's relevant domain, while distinguishing active mainstream use from legacy prevalence.",
+      "aliases": ["adoption", "community use", "industry use", "popularity"],
+      "evidence_fields": ["sustainability.adoption"],
+      "evidence_value_map": {
+        "very_high": "low_risk",
+        "high": "low_risk",
+        "widely_adopted": "low_risk",
+        "active": "low_risk",
+        "actively_used": "low_risk",
+        "common": "low_risk",
+        "mainstream": "low_risk",
+        "moderate": "moderate_risk",
+        "domain_specific": "moderate_risk",
+        "low": "high_risk",
+        "negligible": "high_risk",
+        "niche": "high_risk",
+        "declining": "high_risk",
+        "niche_or_declining": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Widely and actively adopted in the relevant community", "points": 0},
+        {"id": "moderate_risk", "label": "Adoption is domain-specific, moderate, or showing signs of concentration", "points": 1},
+        {"id": "high_risk", "label": "Use is niche, negligible, legacy-only, or clearly declining", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_third_party_support",
+      "label": "Are third-party applications actively maintaining read/write support?",
+      "domain_id": "adoption_community_support",
+      "domain_label": "Adoption & Community Support",
+      "definition": "Assesses diversity and currency of independent software support.",
+      "guidance": "Prefer evidence of maintained implementations over historical compatibility claims.",
+      "aliases": ["third party support", "software support", "read write support"],
+      "evidence_fields": ["sustainability.software_support"],
+      "evidence_value_map": {
+        "broad_active_support": "low_risk",
+        "multiple_active_implementations": "low_risk",
+        "limited_active_support": "moderate_risk",
+        "legacy_support_only": "high_risk",
+        "single_implementation": "high_risk",
+        "unsupported": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Multiple actively maintained applications support the format", "points": 0},
+        {"id": "moderate_risk", "label": "Current support exists but is limited or concentrated", "points": 1},
+        {"id": "high_risk", "label": "Support is legacy-only, single-implementation, or effectively absent", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_registry_recognition",
+      "label": "Is the format formally identifiable through technical registries or standard identifiers?",
+      "domain_id": "adoption_community_support",
+      "domain_label": "Adoption & Community Support",
+      "definition": "Assesses whether the format can be reliably identified using formal registry identifiers such as PRONOM PUIDs or registered MIME types.",
+      "guidance": "Consider identifier specificity and automated identification support, not just the presence of a file extension.",
+      "aliases": ["PUID", "PRONOM", "MIME type", "format registry", "identification"],
+      "evidence_fields": ["identification.registry_recognition"],
+      "evidence_value_map": {
+        "formal_registry_identifier": "low_risk",
+        "puid_and_mime": "low_risk",
+        "partial_registry_coverage": "moderate_risk",
+        "extension_only": "high_risk",
+        "no_formal_identifier": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Formal, specific identifiers support automated identification", "points": 0},
+        {"id": "moderate_risk", "label": "Registry coverage exists but is incomplete or insufficiently specific", "points": 1},
+        {"id": "high_risk", "label": "No reliable formal identifier is available for automated identification", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_byte_transparency",
+      "label": "Is the byte structure transparent and directly inspectable?",
+      "domain_id": "technical_structure_transparency",
+      "domain_label": "Technical Structure & Transparency",
+      "definition": "Assesses whether the representation is readily inspectable or opaque and dependent on specialized parsing.",
+      "guidance": "Plain text/XML is generally more transparent, but binary formats can still be well documented and preservable; use this criterion narrowly.",
+      "aliases": ["byte structure", "plain text", "XML", "binary", "transparency"],
+      "evidence_fields": ["technical.byte_transparency"],
+      "evidence_value_map": {
+        "plain_text": "low_risk",
+        "xml": "low_risk",
+        "documented_binary": "moderate_risk",
+        "opaque_binary": "high_risk",
+        "obfuscated": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Structure is directly inspectable or highly transparent", "points": 0},
+        {"id": "moderate_risk", "label": "Binary structure is documented and parseable but not directly inspectable", "points": 1},
+        {"id": "high_risk", "label": "Structure is opaque, obfuscated, or difficult to interpret independently", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_compression",
+      "label": "What compression mechanism is used?",
+      "domain_id": "technical_structure_transparency",
+      "domain_label": "Technical Structure & Transparency",
+      "definition": "Assesses whether encoding is uncompressed, lossless, or lossy and how that affects preservation options.",
+      "guidance": "Compression alone is not obsolescence; distinguish reversible lossless compression from irreversible lossy encoding.",
+      "aliases": ["compression", "lossless", "lossy", "uncompressed"],
+      "evidence_fields": ["technical.compression"],
+      "evidence_value_map": {
+        "uncompressed": "low_risk",
+        "lossless": "low_risk",
+        "mixed": "moderate_risk",
+        "lossy": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Uncompressed or losslessly compressed representation", "points": 0},
+        {"id": "moderate_risk", "label": "Mixed or context-dependent compression requires preservation review", "points": 1},
+        {"id": "high_risk", "label": "Lossy compression may constrain preservation or future transformation", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_lossy_migration",
+      "label": "Would migration cause irreversible loss of essential characteristics?",
+      "domain_id": "technical_structure_transparency",
+      "domain_label": "Technical Structure & Transparency",
+      "definition": "Assesses transformation risk where decoding, recompression or conversion may irreversibly alter significant properties.",
+      "guidance": "Evaluate migration against documented essential characteristics rather than assuming all conversion is equivalent.",
+      "aliases": ["migration loss", "irreversible loss", "transcoding loss"],
+      "critical": true,
+      "evidence_fields": ["technical.lossy_migration_risk"],
+      "evidence_value_map": {
+        "none": "low_risk",
+        "low": "low_risk",
+        "manageable": "moderate_risk",
+        "moderate": "moderate_risk",
+        "high": "high_risk",
+        "irreversible_loss": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Established migration can preserve required essential characteristics", "points": 0},
+        {"id": "moderate_risk", "label": "Migration requires controlled trade-offs or careful validation", "points": 1},
+        {"id": "high_risk", "label": "Available migration is expected to irreversibly lose essential characteristics", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_ip_constraints",
+      "label": "Is the format subject to patents, trademark constraints, licensing fees or other IP restrictions?",
+      "domain_id": "intellectual_property_rights",
+      "domain_label": "Intellectual Property & Rights Management",
+      "definition": "Assesses legal or commercial constraints that can limit implementation, validation or migration tooling.",
+      "guidance": "Separate ordinary trademark ownership from enforceable restrictions that materially constrain preservation activity.",
+      "aliases": ["patents", "licensing", "intellectual property", "trademark"],
+      "evidence_fields": ["rights.ip_constraints"],
+      "evidence_value_map": {
+        "none": "low_risk",
+        "royalty_free": "low_risk",
+        "known_but_manageable": "moderate_risk",
+        "active_patent_constraints": "high_risk",
+        "licensing_fee_required": "high_risk",
+        "implementation_restricted": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "No material IP restriction limits preservation implementation", "points": 0},
+        {"id": "moderate_risk", "label": "Known constraints exist but appear manageable", "points": 1},
+        {"id": "high_risk", "label": "Active restrictions or fees materially constrain preservation tooling or use", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_tpm_drm",
+      "label": "Does the file format support or commonly contain DRM, encryption, hardcoded passwords or other TPMs that block preservation operations?",
+      "domain_id": "intellectual_property_rights",
+      "domain_label": "Intellectual Property & Rights Management",
+      "definition": "Assesses technological protection measures that prevent automated identification, validation, indexing or transformation.",
+      "guidance": "Distinguish optional security capabilities from files that are actually inaccessible without keys or credentials.",
+      "aliases": ["DRM", "encryption", "TPM", "password", "technological protection measures"],
+      "critical": true,
+      "evidence_fields": ["rights.tpm_drm_encryption"],
+      "evidence_value_map": {
+        "none": "low_risk",
+        "optional_and_removable": "moderate_risk",
+        "password_protected": "high_risk",
+        "encrypted": "high_risk",
+        "drm": "high_risk",
+        "key_required": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "No TPM prevents normal preservation operations", "points": 0},
+        {"id": "moderate_risk", "label": "Protection is optional or can be removed through an established controlled process", "points": 1},
+        {"id": "high_risk", "label": "DRM, encryption or credentials materially block preservation operations", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_embedded_metadata",
+      "label": "Can the format self-document through embedded technical, descriptive or structural metadata?",
+      "domain_id": "metadata_self_documentation",
+      "domain_label": "Metadata & Self-Documentation",
+      "definition": "Assesses native support for embedded metadata such as EXIF, XMP or structured internal metadata.",
+      "guidance": "Consider both metadata capacity and whether widely used tools preserve it reliably through normal workflows.",
+      "aliases": ["embedded metadata", "EXIF", "XMP", "self-documentation"],
+      "evidence_fields": ["metadata.self_documentation"],
+      "evidence_value_map": {
+        "rich_embedded_metadata": "low_risk",
+        "standard_embedded_metadata": "low_risk",
+        "limited_embedded_metadata": "moderate_risk",
+        "external_metadata_only": "high_risk",
+        "no_metadata_support": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Strong native metadata support enables self-documentation", "points": 0},
+        {"id": "moderate_risk", "label": "Embedded metadata support is limited or inconsistently preserved", "points": 1},
+        {"id": "high_risk", "label": "Essential metadata must be maintained externally or cannot be represented", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_accessibility_features",
+      "label": "Can accessibility features be represented and preserved natively?",
+      "domain_id": "metadata_self_documentation",
+      "domain_label": "Metadata & Self-Documentation",
+      "definition": "Assesses support for text structure, alternate text, structured tables, captions or comparable accessibility semantics.",
+      "guidance": "Evaluate accessibility features relevant to the content type rather than requiring every feature for every format.",
+      "aliases": ["accessibility", "alt text", "tagged text", "captions", "structured tables"],
+      "evidence_fields": ["metadata.accessibility"],
+      "evidence_value_map": {
+        "native_accessibility_support": "low_risk",
+        "partial_accessibility_support": "moderate_risk",
+        "no_accessibility_support": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Relevant accessibility semantics can be represented and preserved natively", "points": 0},
+        {"id": "moderate_risk", "label": "Only part of the required accessibility semantics can be preserved", "points": 1},
+        {"id": "high_risk", "label": "The format cannot preserve required accessibility semantics", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_image_fidelity",
+      "label": "For image content, can required bit depth, colour profiles and vector scale be preserved?",
+      "domain_id": "essential_characteristics",
+      "domain_label": "Essential Characteristics (Content Fidelity)",
+      "definition": "Assesses whether image-specific significant properties can be retained through storage, rendering and migration.",
+      "guidance": "Apply only when the assessed content is image or graphics content.",
+      "applicability": ["image", "graphics"],
+      "aliases": ["image fidelity", "bit depth", "colour profile", "vector scale"],
+      "critical": true,
+      "evidence_fields": ["fidelity.image"],
+      "evidence_value_map": {
+        "preserves_all_required_characteristics": "low_risk",
+        "partial_characteristic_support": "moderate_risk",
+        "loses_essential_characteristics": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Required image characteristics can be preserved", "points": 0},
+        {"id": "moderate_risk", "label": "Some characteristics require constrained workflows or may degrade", "points": 1},
+        {"id": "high_risk", "label": "Essential image characteristics cannot be reliably retained", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_av_fidelity",
+      "label": "For audio/video content, can required timecodes, multi-track audio, subtitles and related characteristics be preserved?",
+      "domain_id": "essential_characteristics",
+      "domain_label": "Essential Characteristics (Content Fidelity)",
+      "definition": "Assesses whether audiovisual significant properties remain representable and migratable.",
+      "guidance": "Apply only to audio or video content and assess the characteristics required by the collection policy.",
+      "applicability": ["audio", "video", "audiovisual"],
+      "aliases": ["audio video fidelity", "timecode", "multi-track audio", "subtitles"],
+      "critical": true,
+      "evidence_fields": ["fidelity.audio_video"],
+      "evidence_value_map": {
+        "preserves_all_required_characteristics": "low_risk",
+        "partial_characteristic_support": "moderate_risk",
+        "loses_essential_characteristics": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Required audiovisual characteristics can be preserved", "points": 0},
+        {"id": "moderate_risk", "label": "Some characteristics require constrained workflows or may degrade", "points": 1},
+        {"id": "high_risk", "label": "Essential audiovisual characteristics cannot be reliably retained", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_data_fidelity",
+      "label": "For data or spreadsheets, can explicit data types, formulas and relationships be preserved rather than flattened?",
+      "domain_id": "essential_characteristics",
+      "domain_label": "Essential Characteristics (Content Fidelity)",
+      "definition": "Assesses whether structured data semantics and computational relationships survive preservation and migration.",
+      "guidance": "Apply only to datasets, spreadsheets or comparable structured data content.",
+      "applicability": ["data", "dataset", "spreadsheet"],
+      "aliases": ["data fidelity", "spreadsheet formulas", "data types", "relationships"],
+      "critical": true,
+      "evidence_fields": ["fidelity.data"],
+      "evidence_value_map": {
+        "preserves_all_required_characteristics": "low_risk",
+        "partial_characteristic_support": "moderate_risk",
+        "flattened_or_lost_semantics": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Required data semantics and relationships can be preserved", "points": 0},
+        {"id": "moderate_risk", "label": "Some semantics require constrained workflows or special handling", "points": 1},
+        {"id": "high_risk", "label": "Preservation or migration would flatten or lose essential data semantics", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_local_capability",
+      "label": "Does the institution possess the software infrastructure and staff expertise required to manage the format?",
+      "domain_id": "local_institutional_feasibility",
+      "domain_label": "Local Institutional Feasibility",
+      "definition": "Assesses institution-specific operational capability rather than the format's global sustainability in isolation.",
+      "guidance": "Use institution-scoped evidence for software, validation, staffing, skills and operational support.",
+      "aliases": ["local capability", "staff expertise", "institutional software", "operational readiness"],
+      "evidence_fields": ["local.management_capability"],
+      "evidence_value_map": {
+        "fully_supported": "low_risk",
+        "routine_capability": "low_risk",
+        "partial_capability": "moderate_risk",
+        "specialist_gap": "high_risk",
+        "unsupported_locally": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Institution has routine software and staff capability", "points": 0},
+        {"id": "moderate_risk", "label": "Capability exists but depends on limited staff, tooling or manual intervention", "points": 1},
+        {"id": "high_risk", "label": "Required capability is absent or depends on unavailable specialist resources", "points": 2},
+        {"id": "unknown", "label": "Institutional evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_migration_pathways",
+      "label": "Are established migration pathways and tools available?",
+      "domain_id": "local_institutional_feasibility",
+      "domain_label": "Local Institutional Feasibility",
+      "definition": "Assesses whether tested preservation actions and tools exist for moving the format to sustainable alternatives when necessary.",
+      "guidance": "Prefer tested local pathways or evidence from preservation action registries over hypothetical conversions.",
+      "aliases": ["migration pathway", "conversion tools", "preservation action registry"],
+      "critical": true,
+      "evidence_fields": ["local.migration_pathways"],
+      "evidence_value_map": {
+        "tested_pathway": "low_risk",
+        "multiple_tested_pathways": "low_risk",
+        "unverified_pathway": "moderate_risk",
+        "manual_only": "moderate_risk",
+        "no_known_pathway": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "A tested migration pathway is available", "points": 0},
+        {"id": "moderate_risk", "label": "A plausible pathway exists but requires testing or manual controls", "points": 1},
+        {"id": "high_risk", "label": "No viable migration pathway is known", "points": 2},
+        {"id": "unknown", "label": "Evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    },
+    {
+      "id": "q_storage_overhead",
+      "label": "Are storage and network overheads operationally sustainable for long-term preservation?",
+      "domain_id": "local_institutional_feasibility",
+      "domain_label": "Local Institutional Feasibility",
+      "definition": "Assesses whether typical file sizes and preservation derivatives create material repository storage, transfer or processing constraints.",
+      "guidance": "Evaluate against institutional capacity and collection scale; large files are not intrinsically high risk if capacity is adequate.",
+      "aliases": ["storage overhead", "file size", "network capacity", "repository capacity"],
+      "evidence_fields": ["local.storage_overhead"],
+      "evidence_value_map": {
+        "within_capacity": "low_risk",
+        "manageable": "low_risk",
+        "material_overhead": "moderate_risk",
+        "capacity_constrained": "high_risk",
+        "operationally_unsustainable": "high_risk"
+      },
+      "answers": [
+        {"id": "low_risk", "label": "Storage, network and processing overheads are comfortably within institutional capacity", "points": 0},
+        {"id": "moderate_risk", "label": "Overheads are material and require planning or optimization", "points": 1},
+        {"id": "high_risk", "label": "Overheads exceed or threaten sustainable institutional capacity", "points": 2},
+        {"id": "unknown", "label": "Institutional evidence is unavailable or insufficient", "points": 0, "abstention": true}
+      ]
+    }
+  ]
+}
