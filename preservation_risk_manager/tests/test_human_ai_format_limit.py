@@ -37,15 +37,23 @@ def _rows():
     ]
 
 
-def test_ai_config_defaults_human_format_limit_to_ten_and_accepts_override():
-    assert AIProviderConfig.from_dict({"provider": "mock"}).human_ai_format_limit == 10
-    assert AIProviderConfig.from_dict({"provider": "mock", "human_ai_format_limit": 4}).human_ai_format_limit == 4
+def test_ai_config_defaults_human_assessment_limit_to_ten_and_accepts_old_alias():
+    assert AIProviderConfig.from_dict({"provider": "mock"}).human_format_assessment_limit == 10
+    assert (
+        AIProviderConfig.from_dict(
+            {"provider": "mock", "human_format_assessment_limit": 4}
+        ).human_format_assessment_limit
+        == 4
+    )
+    legacy = AIProviderConfig.from_dict({"provider": "mock", "human_ai_format_limit": 3})
+    assert legacy.human_format_assessment_limit == 3
+    assert legacy.human_ai_format_limit == 3
 
     with pytest.raises(AIConfigurationError):
-        AIProviderConfig.from_dict({"provider": "mock", "human_ai_format_limit": 0})
+        AIProviderConfig.from_dict({"provider": "mock", "human_format_assessment_limit": 0})
 
 
-def test_broad_human_query_limits_ai_to_configured_number_but_keeps_all_deterministic(monkeypatch):
+def test_broad_human_query_assesses_only_configured_number_and_leaves_rest_unassessed(monkeypatch):
     reader = FakeReader(_rows())
     request = {
         "action": "assess_format",
@@ -117,19 +125,21 @@ def test_broad_human_query_limits_ai_to_configured_number_but_keeps_all_determin
         provider=FakeProvider(),
         ai_mode="review-all",
         max_evidence_items=20,
-        ai_format_limit=2,
+        human_format_assessment_limit=2,
     )
 
-    assert deterministic_calls == ["puid-fmt-18", "puid-fmt-19", "puid-fmt-20"]
+    assert deterministic_calls == ["puid-fmt-18", "puid-fmt-19"]
     assert ai_calls == ["puid-fmt-18", "puid-fmt-19"]
     assert response["matched_puid_count"] == 3
-    assert response["ai_format_limit"] == 2
-    assert response["ai_format_limit_applied"] is True
-    assert response["ai_formats_assessed"] == 2
-    assert response["ai_formats_skipped"] == 1
-    assert response["assessments"][2]["ai_risk_assessment"]["status"] == "skipped_format_limit"
+    assert response["assessed_puid_count"] == 2
+    assert response["unassessed_puid_count"] == 1
+    assert response["human_format_assessment_limit"] == 2
+    assert response["human_format_assessment_limit_applied"] is True
+    assert response["assessed_puids"] == ["fmt/18", "fmt/19"]
+    assert response["unassessed_puids"] == ["fmt/20"]
+    assert len(response["assessments"]) == 2
 
     rendered = render_human_response(response)
-    assert "More than 2 matching formats were found" in rendered
-    assert "first 2 PUIDs" in rendered
-    assert "remaining 1 PUIDs" in rendered
+    assert "2 of 3 matched PRONOM PUIDs" in rendered
+    assert "only the first 2 PUIDs were assessed" in rendered
+    assert "remaining 1 PUIDs were not assessed" in rendered
