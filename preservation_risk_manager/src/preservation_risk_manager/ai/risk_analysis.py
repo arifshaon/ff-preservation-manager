@@ -71,20 +71,23 @@ def question_evidence(
     deterministic_result: dict[str, Any],
     *,
     max_items: int = 20,
+    prefer_deterministic_evidence: bool = True,
 ) -> list[dict[str, Any]]:
     """Return bounded, reference-addressable evidence for one framework question.
 
-    Explicit deterministic matches are preferred. If none exist, evidence with a
-    matching criterion/field is used. As a final fallback, the bounded evidence
-    pack is exposed so AI can interpret descriptive evidence that has not yet
-    been normalized into a criterion claim. The model is still forbidden from
-    using facts outside these supplied items.
+    Fill-gaps mode may prefer evidence already matched by deterministic derivation.
+    Independent review mode disables that preference and selects evidence only by
+    the question's declared evidence fields. If neither path finds matching
+    evidence, the bounded evidence pack is exposed as a final fallback. The
+    model remains forbidden from using facts outside these supplied items.
     """
-    preferred = [
-        item
-        for item in deterministic_result.get("evidence_claims", [])
-        if isinstance(item, dict)
-    ]
+    preferred: list[dict[str, Any]] = []
+    if prefer_deterministic_evidence:
+        preferred = [
+            item
+            for item in deterministic_result.get("evidence_claims", [])
+            if isinstance(item, dict)
+        ]
     all_items = evidence_items(evidence_pack)
     matching = [item for item in all_items if _claim_matches_question(item, question)]
     selected = _dedupe_evidence(preferred + matching)
@@ -132,8 +135,10 @@ def _question_prompt(
     evidence_pack: dict[str, Any],
     deterministic_result: dict[str, Any],
     referenced_evidence: list[dict[str, Any]],
+    *,
+    include_deterministic_context: bool = True,
 ) -> str:
-    context = {
+    context: dict[str, Any] = {
         "framework": {
             "framework_id": framework.framework_id,
             "version": framework.version,
@@ -156,13 +161,14 @@ def _question_prompt(
                 for answer in question.answers
             ],
         },
-        "deterministic_result": {
+        "evidence": referenced_evidence,
+    }
+    if include_deterministic_context:
+        context["deterministic_result"] = {
             "answer_id": deterministic_result.get("answer_id"),
             "status": deterministic_result.get("status"),
             "conflicting_answer_ids": deterministic_result.get("conflicting_answer_ids", []),
-        },
-        "evidence": referenced_evidence,
-    }
+        }
     return (
         "Interpret the supplied evidence for this one framework question. "
         "Return only the required structured response. For a non-abstention answer, "
@@ -243,12 +249,15 @@ def interpret_question_with_ai(
     deterministic_result: dict[str, Any],
     *,
     max_evidence_items: int = 20,
+    include_deterministic_context: bool = True,
+    prefer_deterministic_evidence: bool = True,
 ) -> dict[str, Any]:
     referenced_evidence = question_evidence(
         question,
         evidence_pack,
         deterministic_result,
         max_items=max_evidence_items,
+        prefer_deterministic_evidence=prefer_deterministic_evidence,
     )
     if not referenced_evidence:
         return {
@@ -268,6 +277,7 @@ def interpret_question_with_ai(
                     evidence_pack,
                     deterministic_result,
                     referenced_evidence,
+                    include_deterministic_context=include_deterministic_context,
                 ),
             ),
         ),
