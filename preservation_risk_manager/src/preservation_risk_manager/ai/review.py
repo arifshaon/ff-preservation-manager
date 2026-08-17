@@ -13,6 +13,7 @@ _EVIDENCE_SECTIONS = (
     "institution_evidence",
     "migration_pathway_evidence",
     "local_migration_readiness",
+    "ai_source_evidence",
 )
 
 # Review-all is intended to validate deterministic mappings independently. Only
@@ -22,15 +23,20 @@ _EVIDENCE_SECTIONS = (
 _RAW_REVIEW_EVIDENCE_KEYS = (
     "canonical_id",
     "criterion_id",
+    "evidence_field",
+    "evidence_kind",
+    "native_field",
     "source_id",
     "source_type",
     "source_record_id",
+    "source_name",
     "source_field",
     "source_value",
     "native_vocabulary",
     "institution_id",
     "source_independence",
     "evidence_section",
+    "link_basis",
     "observed_at",
     "current",
     "source_url",
@@ -76,7 +82,8 @@ def _raw_review_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
     The format identity, scope, institution, and question-matching criterion IDs
     are retained, but deterministic normalization/mapping outputs are stripped.
     Evidence items without a surviving raw payload are omitted rather than
-    allowing the model to infer from a normalized stub.
+    allowing the model to infer from a normalized stub. Linked source-native
+    evidence keeps only its source payload and provenance/link basis.
     """
     sanitized: dict[str, Any] = {
         "scope": evidence_pack.get("scope", "global"),
