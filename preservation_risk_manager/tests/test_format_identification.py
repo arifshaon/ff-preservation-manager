@@ -37,6 +37,12 @@ class FakeProvider(AIProvider):
         )
 
 
+class FailingProvider(FakeProvider):
+    def generate(self, request):
+        self.calls.append(request)
+        raise RuntimeError("provider unavailable")
+
+
 def _rows():
     return [
         {
@@ -129,3 +135,30 @@ def test_low_confidence_ai_match_is_rejected():
     assert not result.resolved
     assert result.ai_attempted
     assert result.ai_metadata["accepted"] is False
+
+
+def test_bare_extension_ambiguity_is_not_sent_to_ai():
+    provider = FakeProvider({
+        "status": "match",
+        "candidate_canonical_id": "fmt-pdf-14",
+        "confidence": 0.99,
+        "rationale": "would be unsafe",
+    })
+    plugin = AIFormatIdentificationPlugin(provider)
+    result = IdentificationResolver(FakeReader(_rows()), plugin=plugin).resolve(".pdf")
+    assert not result.resolved
+    assert result.resolution.ambiguous
+    assert result.method == "programmatic_ambiguity_requires_review"
+    assert result.ai_attempted is False
+    assert provider.calls == []
+
+
+def test_ai_provider_failure_retains_programmatic_result():
+    provider = FailingProvider({})
+    plugin = AIFormatIdentificationPlugin(provider)
+    result = IdentificationResolver(FakeReader(_rows()), plugin=plugin).resolve("old adobe flash movie")
+    assert not result.resolved
+    assert result.ai_attempted is True
+    assert result.method == "ai_fallback_error_programmatic_result_retained"
+    assert result.ai_metadata["accepted"] is False
+    assert result.ai_metadata["error_type"] == "RuntimeError"
