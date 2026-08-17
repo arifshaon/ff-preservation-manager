@@ -106,6 +106,16 @@ def _raw_review_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def raw_review_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    """Public accessor for the review-all evidence view.
+
+    Training-corpus construction must show the model exactly what independent
+    review shows it, so the sanitized view needs one shared definition rather
+    than a second implementation that can drift from this one.
+    """
+    return _raw_review_evidence_pack(evidence_pack)
+
+
 def _compact_cited_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [
         {key: item[key] for key in _AUDIT_EVIDENCE_KEYS if key in item and item[key] is not None}
