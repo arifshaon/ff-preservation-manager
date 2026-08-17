@@ -5,6 +5,7 @@ from typing import Any, Iterable
 
 from preservation_risk_manager.answer_derivation import derive_answers
 from preservation_risk_manager.data_access import RegistryReader
+from preservation_risk_manager.evidence_gaps import diagnose_format_evidence_gaps, summarize_evidence_gaps
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import RiskFramework
@@ -16,6 +17,7 @@ SUPPORTED_ACTIONS = (
     "search_formats",
     "assess_format_family",
     "list_at_risk_formats",
+    "list_evidence_gaps",
 )
 DEFAULT_AT_RISK_BANDS = ("Moderate", "High")
 
@@ -103,14 +105,6 @@ def _searchable_values(format_doc: dict[str, Any]) -> list[str]:
 
 
 def _family_searchable_values(format_doc: dict[str, Any]) -> tuple[list[str], bool]:
-    """Return values suitable for family membership discovery.
-
-    Explicit family metadata is authoritative when present. Until the registry
-    carries explicit family relationships consistently, fall back only to
-    human-readable names/aliases. Extensions, MIME types and authority IDs are
-    deliberately excluded because sharing `.pdf` or mentioning PDF in an
-    identifier does not make another format a PDF-family member.
-    """
     explicit: list[str] = []
     for key in ("family", "format_family", "family_id", "parent_family", "member_of"):
         for value in _as_list(format_doc.get(key)):
@@ -144,12 +138,7 @@ def _family_searchable_values(format_doc: dict[str, Any]) -> tuple[list[str], bo
 
 def _strong_identifiers(format_doc: dict[str, Any]) -> set[tuple[str, str]]:
     values: set[tuple[str, str]] = set()
-    direct = {
-        "puid": "puids",
-        "loc": "loc_ids",
-        "nara": "nara_ids",
-    }
-    for kind, field in direct.items():
+    for kind, field in {"puid": "puids", "loc": "loc_ids", "nara": "nara_ids"}.items():
         for value in _as_list(format_doc.get(field)):
             text = str(value).strip().lower()
             if text:
@@ -174,13 +163,9 @@ def _canonical_preference(format_doc: dict[str, Any]) -> int:
 
 
 def _dedupe_format_docs(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Prefer aggregate canonical records over source aliases sharing strong IDs."""
     ordered = sorted(
         rows,
-        key=lambda row: (
-            -_canonical_preference(row),
-            (_format_label(row) or _format_id(row) or "").lower(),
-        ),
+        key=lambda row: (-_canonical_preference(row), (_format_label(row) or _format_id(row) or "").lower()),
     )
     kept: list[dict[str, Any]] = []
     seen_strong_ids: set[tuple[str, str]] = set()
@@ -199,54 +184,33 @@ def _dedupe_format_docs(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return kept
 
 
-def search_format_docs(
-    reader: RegistryReader,
-    query: str,
-    *,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
+def search_format_docs(reader: RegistryReader, query: str, *, limit: int | None = None) -> list[dict[str, Any]]:
     """Return current canonical formats matching a general discovery term."""
     needle = str(query or "").strip().lower()
     if not needle:
         return []
     ranked: list[tuple[int, str, dict[str, Any]]] = []
     for row in reader.list_canonical_formats():
-        values = _searchable_values(row)
-        normalized = [value.lower() for value in values]
+        normalized = [value.lower() for value in _searchable_values(row)]
         exact = needle in normalized
         contains = any(needle in value for value in normalized)
         if not exact and not contains:
             continue
-        score = 2 if exact else 1
-        label = (_format_label(row) or _format_id(row) or "").lower()
-        ranked.append((score, label, row))
+        ranked.append((2 if exact else 1, (_format_label(row) or _format_id(row) or "").lower(), row))
 
     deduped = _dedupe_format_docs(item[2] for item in ranked)
-    score_by_id = {
-        (_format_id(item[2]) or ""): item[0]
-        for item in ranked
-    }
-    deduped.sort(
-        key=lambda row: (
-            -score_by_id.get(_format_id(row) or "", 0),
-            (_format_label(row) or _format_id(row) or "").lower(),
-        )
-    )
+    score_by_id = {(_format_id(item[2]) or ""): item[0] for item in ranked}
+    deduped.sort(key=lambda row: (-score_by_id.get(_format_id(row) or "", 0), (_format_label(row) or _format_id(row) or "").lower()))
     rows = [deepcopy(row) for row in deduped]
     return rows[:limit] if limit is not None else rows
 
 
-def search_family_docs(
-    reader: RegistryReader,
-    family: str,
-    *,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    """Return formats that are plausible members of a requested format family.
+def search_family_docs(reader: RegistryReader, family: str, *, limit: int | None = None) -> list[dict[str, Any]]:
+    """Return plausible members of a requested format family.
 
-    Explicit family fields are preferred. With no explicit family metadata, the
-    fallback is constrained to names and aliases only. This is intentionally
-    narrower than `search_format_docs`.
+    Explicit family metadata wins. Without it, only names and aliases are used;
+    extensions, MIME types and authority identifiers cannot establish family
+    membership.
     """
     needle = str(family or "").strip().lower()
     if not needle:
@@ -260,17 +224,11 @@ def search_family_docs(
         if not exact and not contains:
             continue
         score = (4 if exact else 3) if explicit else (2 if exact else 1)
-        label = (_format_label(row) or _format_id(row) or "").lower()
-        ranked.append((score, label, row))
+        ranked.append((score, (_format_label(row) or _format_id(row) or "").lower(), row))
 
     deduped = _dedupe_format_docs(item[2] for item in ranked)
     score_by_id = {(_format_id(item[2]) or ""): item[0] for item in ranked}
-    deduped.sort(
-        key=lambda row: (
-            -score_by_id.get(_format_id(row) or "", 0),
-            (_format_label(row) or _format_id(row) or "").lower(),
-        )
-    )
+    deduped.sort(key=lambda row: (-score_by_id.get(_format_id(row) or "", 0), (_format_label(row) or _format_id(row) or "").lower()))
     rows = [deepcopy(row) for row in deduped]
     return rows[:limit] if limit is not None else rows
 
@@ -280,9 +238,7 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         raise RequestValidationError("Request must be a JSON object.")
     action = str(request.get("action") or "").strip()
     if action not in SUPPORTED_ACTIONS:
-        raise RequestValidationError(
-            f"Unsupported action '{action}'. Allowed actions: {', '.join(SUPPORTED_ACTIONS)}"
-        )
+        raise RequestValidationError(f"Unsupported action '{action}'. Allowed actions: {', '.join(SUPPORTED_ACTIONS)}")
 
     filters = request.get("filters") or {}
     if not isinstance(filters, dict):
@@ -302,9 +258,8 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     if scope == "institution" and not institution_id:
         raise RequestValidationError("institution_id is required when scope is 'institution'.")
 
-    limit_raw = request.get("limit", 100)
     try:
-        limit = int(limit_raw)
+        limit = int(request.get("limit", 100))
     except (TypeError, ValueError) as exc:
         raise RequestValidationError("limit must be an integer.") from exc
     if limit <= 0 or limit > 5000:
@@ -329,6 +284,8 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         raise RequestValidationError("query is required for search_formats.")
     if action == "assess_format_family" and not normalized["filters"]["family"]:
         raise RequestValidationError("filters.family is required for assess_format_family.")
+    if action == "list_evidence_gaps" and not (normalized["format"] or normalized["filters"]["family"]):
+        raise RequestValidationError("format or filters.family is required for list_evidence_gaps.")
     return normalized
 
 
@@ -340,11 +297,7 @@ def _assessment_for_doc(
     institution_id: str | None,
 ) -> dict[str, Any]:
     claims = reader.get_criterion_claims_for_format(format_doc, institution_id=institution_id)
-    pack = build_evidence_pack(
-        format_doc,
-        institution_id=institution_id,
-        criterion_claims=claims,
-    )
+    pack = build_evidence_pack(format_doc, institution_id=institution_id, criterion_claims=claims)
     answers = derive_answers(framework, pack)
     analysis = score_answers(framework, answers.get("scoring_answers") or answers["answers"])
     main_risk_factors = [
@@ -381,11 +334,7 @@ def _band_rank(band: Any) -> int:
 def _rank_assessments(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
         rows,
-        key=lambda row: (
-            -_band_rank(row.get("risk_band")),
-            -float(row.get("score") or 0),
-            str((row.get("format") or {}).get("label") or ""),
-        ),
+        key=lambda row: (-_band_rank(row.get("risk_band")), -float(row.get("score") or 0), str((row.get("format") or {}).get("label") or "")),
     )
 
 
@@ -431,20 +380,24 @@ def _base_response(request: dict[str, Any], framework: RiskFramework) -> dict[st
     return {
         "status": "ok",
         "request": deepcopy(request),
-        "framework": {
-            "framework_id": framework.framework_id,
-            "version": framework.version,
-        },
+        "framework": {"framework_id": framework.framework_id, "version": framework.version},
         "scope": request["scope"],
         "institution_id": request.get("institution_id"),
     }
 
 
-def execute_request(
-    reader: RegistryReader,
-    framework: RiskFramework,
-    request: dict[str, Any],
-) -> dict[str, Any]:
+def _resolution_failure(result: dict[str, Any], resolution: Any) -> dict[str, Any]:
+    result["status"] = resolution.status
+    result["resolution"] = {
+        "query": resolution.query,
+        "status": resolution.status,
+        "match_type": resolution.match_type,
+        "matches": [_format_identity(row) for row in resolution.matches],
+    }
+    return result
+
+
+def execute_request(reader: RegistryReader, framework: RiskFramework, request: dict[str, Any]) -> dict[str, Any]:
     """Execute one canonical human/system request and always return JSON-safe data."""
     request = normalize_request(request)
     result = _base_response(request, framework)
@@ -453,29 +406,22 @@ def execute_request(
 
     if action == "search_formats":
         matches = search_format_docs(reader, request["query"], limit=request["limit"])
-        result.update({
-            "results": [_format_identity(row) for row in matches],
-            "result_count": len(matches),
-        })
+        result.update({"results": [_format_identity(row) for row in matches], "result_count": len(matches)})
         return result
 
-    if action == "assess_format":
+    if action in {"assess_format", "list_evidence_gaps"} and request.get("format"):
         resolution = FormatResolver(reader).resolve(request["format"])
         if not resolution.resolved or not resolution.format_doc:
-            result["status"] = resolution.status
-            result["resolution"] = {
-                "query": resolution.query,
-                "status": resolution.status,
-                "match_type": resolution.match_type,
-                "matches": [_format_identity(row) for row in resolution.matches],
-            }
-            return result
-        result["result"] = _assessment_for_doc(
-            reader,
-            framework,
-            resolution.format_doc,
-            institution_id=institution_id,
-        )
+            return _resolution_failure(result, resolution)
+        if action == "assess_format":
+            result["result"] = _assessment_for_doc(reader, framework, resolution.format_doc, institution_id=institution_id)
+        else:
+            result["result"] = diagnose_format_evidence_gaps(
+                reader,
+                framework,
+                resolution.format_doc,
+                institution_id=institution_id,
+            )
         result["result_count"] = 1
         return result
 
@@ -484,17 +430,37 @@ def execute_request(
         candidates = search_family_docs(reader, family, limit=request["limit"])
     else:
         candidates = _dedupe_format_docs(reader.list_canonical_formats())[: request["limit"]]
+
+    if action == "list_evidence_gaps":
+        diagnostics = [
+            diagnose_format_evidence_gaps(reader, framework, row, institution_id=institution_id)
+            for row in candidates
+        ]
+        gap_results = [row for row in diagnostics if int(row.get("gap_count") or 0) > 0]
+        status_rank = {"Needs Assessment": 3, "Not Assessed": 2, "Partially Assessed": 1, "Assessed": 0}
+        gap_results.sort(
+            key=lambda row: (
+                -status_rank.get(str(row.get("analysis_status")), 0),
+                -int(row.get("gap_count") or 0),
+                str((row.get("format") or {}).get("label") or ""),
+            )
+        )
+        result.update({
+            "filters": deepcopy(request["filters"]),
+            "candidate_count": len(candidates),
+            "gap_summary": summarize_evidence_gaps(gap_results, candidate_count=len(candidates)),
+            "results": gap_results,
+            "result_count": len(gap_results),
+        })
+        return result
+
     all_assessments = [
         _assessment_for_doc(reader, framework, row, institution_id=institution_id)
         for row in candidates
     ]
     all_assessments = _rank_assessments(all_assessments)
     assessment_summary = _assessment_summary(all_assessments)
-    unbanded_results = [
-        _compact_unbanded(row)
-        for row in all_assessments
-        if row.get("risk_band") is None
-    ]
+    unbanded_results = [_compact_unbanded(row) for row in all_assessments if row.get("risk_band") is None]
 
     assessments = all_assessments
     if action == "list_at_risk_formats":
