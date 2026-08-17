@@ -19,7 +19,7 @@ from preservation_risk_manager.format_identification import AIFormatIdentificati
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.human_renderer import render_human_response
-from preservation_risk_manager.request_api import RequestValidationError, execute_request
+from preservation_risk_manager.request_api import RequestValidationError, execute_request, normalize_request
 from preservation_risk_manager.scoring import score_answers
 
 
@@ -200,6 +200,42 @@ def _resolve_request_format(
     return prepared, metadata
 
 
+def _identification_ambiguity_response(framework, request: dict[str, Any], identification: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep a real identification ambiguity from being overwritten as not_found."""
+    if not identification or identification.get("status") != "ambiguous":
+        return None
+    normalized_request = normalize_request(request)
+    ai = identification.get("ai") or {}
+    wanted = {str(value) for value in ai.get("candidate_canonical_ids") or [] if str(value).strip()}
+    candidates = [
+        candidate
+        for candidate in ai.get("candidates") or []
+        if isinstance(candidate, dict) and (not wanted or str(candidate.get("canonical_id") or "") in wanted)
+    ]
+    return {
+        "status": "ambiguous",
+        "request": normalized_request,
+        "framework": {
+            "framework_id": framework.framework_id,
+            "version": framework.version,
+            "calibration_status": framework.calibration_status,
+            "banding_enabled": framework.banding_enabled,
+        },
+        "scope": normalized_request["scope"],
+        "institution_id": normalized_request.get("institution_id"),
+        "resolution": {
+            "query": identification.get("input"),
+            "status": "ambiguous",
+            "match_type": identification.get("match_type") or "ai_candidate_ambiguity",
+            "matches": candidates,
+        },
+        "risk_assessment": {
+            "status": "not_run",
+            "reason": "canonical_format_not_uniquely_resolved",
+        },
+    }
+
+
 def _apply_ai_risk_assessment(
     reader: RegistryReader,
     framework,
@@ -244,15 +280,8 @@ def _apply_ai_risk_assessment(
         return response
 
     institution_id = response.get("institution_id") if response.get("scope") == "institution" else None
-    claims = reader.get_criterion_claims_for_format(
-        resolution.format_doc,
-        institution_id=institution_id,
-    )
-    pack = build_evidence_pack(
-        resolution.format_doc,
-        institution_id=institution_id,
-        criterion_claims=claims,
-    )
+    claims = reader.get_criterion_claims_for_format(resolution.format_doc, institution_id=institution_id)
+    pack = build_evidence_pack(resolution.format_doc, institution_id=institution_id, criterion_claims=claims)
     deterministic_answers = derive_answers(framework, pack)
     deterministic_analysis = score_answers(
         framework,
@@ -276,10 +305,7 @@ def _apply_ai_risk_assessment(
                 deterministic_answers,
                 max_evidence_items=max_items,
             )
-        ai_analysis = score_answers(
-            framework,
-            ai_answers.get("scoring_answers") or ai_answers["answers"],
-        )
+        ai_analysis = score_answers(framework, ai_answers.get("scoring_answers") or ai_answers["answers"])
         response["ai_risk_assessment"] = {
             "status": "ok",
             "ai_mode": ai_mode,
@@ -322,20 +348,19 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
     )
     plugin = _identification_plugin(args, existing_provider=provider)
     prepared_request, identification = _resolve_request_format(reader, routed["request"], plugin=plugin)
-    response = execute_request(reader, framework, prepared_request)
-    response = _apply_ai_risk_assessment(
-        reader,
-        framework,
-        prepared_request,
-        response,
-        provider=provider,
-        ai_mode=args.ai_mode,
-        max_evidence_items=args.max_ai_evidence_items,
-    )
-    response["input"] = {
-        "mode": "human_prompt",
-        "prompt": args.question,
-    }
+    response = _identification_ambiguity_response(framework, routed["request"], identification)
+    if response is None:
+        response = execute_request(reader, framework, prepared_request)
+        response = _apply_ai_risk_assessment(
+            reader,
+            framework,
+            prepared_request,
+            response,
+            provider=provider,
+            ai_mode=args.ai_mode,
+            max_evidence_items=args.max_ai_evidence_items,
+        )
+    response["input"] = {"mode": "human_prompt", "prompt": args.question}
     response["router"] = routed["router"]
     if identification is not None:
         response["identification"] = identification
@@ -349,17 +374,19 @@ def _query_json(args: argparse.Namespace) -> dict[str, Any]:
     provider = _provider_for_enabled_ai(args)
     plugin = _identification_plugin(args, existing_provider=provider)
     prepared_request, identification = _resolve_request_format(reader, request, plugin=plugin)
-    response = execute_request(reader, framework, prepared_request)
-    if args.ai_mode != "off":
-        response = _apply_ai_risk_assessment(
-            reader,
-            framework,
-            prepared_request,
-            response,
-            provider=provider,
-            ai_mode=args.ai_mode,
-            max_evidence_items=args.max_ai_evidence_items,
-        )
+    response = _identification_ambiguity_response(framework, request, identification)
+    if response is None:
+        response = execute_request(reader, framework, prepared_request)
+        if args.ai_mode != "off":
+            response = _apply_ai_risk_assessment(
+                reader,
+                framework,
+                prepared_request,
+                response,
+                provider=provider,
+                ai_mode=args.ai_mode,
+                max_evidence_items=args.max_ai_evidence_items,
+            )
     response["input"] = {"mode": "structured_request"}
     if identification is not None:
         response["identification"] = identification
@@ -372,8 +399,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = _ask(args) if args.command == "ask" else _query_json(args)
     except Exception as exc:
-        # System integration is JSON-only. Human mode uses a concise readable
-        # error unless the caller explicitly requested canonical JSON.
         error = {"status": "error", "error": str(exc)}
         if args.command == "query-json" or getattr(args, "json", False):
             print(json.dumps(error, indent=2, sort_keys=True))
