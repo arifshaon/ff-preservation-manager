@@ -12,6 +12,7 @@ LOC_XML_WITH_SUSTAINABILITY = """<?xml version='1.0' encoding='UTF-8'?>
   <fileExtension>.tst</fileExtension>
   <sustainabilityFactors>
     <disclosure>Fully disclosed. A published specification is available.</disclosure>
+    <documentation>Test Format Specification, Version 8 (2005).</documentation>
     <adoption>Widely used in cultural heritage workflows.</adoption>
     <transparency>Plain text and human-readable.</transparency>
     <selfDocumentation>Includes embedded metadata.</selfDocumentation>
@@ -44,10 +45,11 @@ def test_loc_fdd_xml_extracts_sustainability_factors_as_native_fields(tmp_path):
 
     factors = record.native_fields["sustainability_factors"]
     assert factors["disclosure"].startswith("Fully disclosed")
+    assert factors["documentation"].startswith("Test Format Specification")
     assert factors["adoption"].startswith("Widely used")
     assert factors["transparency"].startswith("Plain text")
     assert factors["self_documentation"].startswith("Includes embedded metadata")
     assert factors["external_dependencies"] == "None."
     assert factors["impact_of_patents"].startswith("No known patent")
     assert factors["technical_protection_mechanisms"] == "None."
-    assert record.evidence[0]["sustainability_factor_count"] == 7
+    assert record.evidence[0]["sustainability_factor_count"] == 8
