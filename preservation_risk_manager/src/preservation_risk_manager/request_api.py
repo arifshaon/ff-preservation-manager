@@ -13,14 +13,17 @@ from preservation_risk_manager.evidence_remediation import (
 )
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import RiskFramework
+from preservation_risk_manager.question_assessment import assess_format_questions, list_question_catalog
 from preservation_risk_manager.scoring import score_answers
 
 
 SUPPORTED_ACTIONS = (
     "assess_format",
+    "assess_format_questions",
     "search_formats",
     "assess_format_family",
     "list_at_risk_formats",
+    "list_assessment_questions",
     "list_evidence_gaps",
     "plan_evidence_remediation",
 )
@@ -238,6 +241,14 @@ def search_family_docs(reader: RegistryReader, family: str, *, limit: int | None
     return rows[:limit] if limit is not None else rows
 
 
+def _string_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise RequestValidationError(f"{field_name} must be an array.")
+    return [str(item) for item in value if str(item).strip()]
+
+
 def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(request, dict):
         raise RequestValidationError("Request must be a JSON object.")
@@ -253,8 +264,9 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         risk_bands = list(DEFAULT_AT_RISK_BANDS)
     if risk_bands is None:
         risk_bands = []
-    if not isinstance(risk_bands, list):
-        raise RequestValidationError("filters.risk_bands must be an array.")
+    risk_bands = _string_list(risk_bands, field_name="filters.risk_bands")
+    domains = _string_list(filters.get("domains"), field_name="filters.domains")
+    question_ids = _string_list(filters.get("question_ids"), field_name="filters.question_ids")
 
     scope = str(request.get("scope") or "global").strip().lower()
     if scope not in {"global", "institution"}:
@@ -276,15 +288,18 @@ def normalize_request(request: dict[str, Any]) -> dict[str, Any]:
         "query": str(request.get("query") or "").strip() or None,
         "filters": {
             "family": str(filters.get("family") or "").strip() or None,
-            "risk_bands": [str(value) for value in risk_bands],
+            "risk_bands": risk_bands,
+            "domains": domains,
+            "question_ids": question_ids,
+            "content_type": str(filters.get("content_type") or "").strip() or None,
         },
         "scope": scope,
         "institution_id": str(institution_id).strip() if institution_id else None,
         "limit": limit,
     }
 
-    if action == "assess_format" and not normalized["format"]:
-        raise RequestValidationError("format is required for assess_format.")
+    if action in {"assess_format", "assess_format_questions"} and not normalized["format"]:
+        raise RequestValidationError(f"format is required for {action}.")
     if action == "search_formats" and not normalized["query"]:
         raise RequestValidationError("query is required for search_formats.")
     if action == "assess_format_family" and not normalized["filters"]["family"]:
@@ -321,6 +336,8 @@ def _assessment_for_doc(
         "format": _format_identity(format_doc),
         "risk_band": analysis.get("analysed_band"),
         "band_suppressed_reason": analysis.get("band_suppressed_reason"),
+        "calibration_status": analysis.get("calibration_status"),
+        "banding_enabled": analysis.get("banding_enabled"),
         "score": analysis.get("score"),
         "max_score": analysis.get("max_score"),
         "analysis_status": analysis.get("analysis_status"),
@@ -387,7 +404,12 @@ def _base_response(request: dict[str, Any], framework: RiskFramework) -> dict[st
     return {
         "status": "ok",
         "request": deepcopy(request),
-        "framework": {"framework_id": framework.framework_id, "version": framework.version},
+        "framework": {
+            "framework_id": framework.framework_id,
+            "version": framework.version,
+            "calibration_status": framework.calibration_status,
+            "banding_enabled": framework.banding_enabled,
+        },
         "scope": request["scope"],
         "institution_id": request.get("institution_id"),
     }
@@ -410,18 +432,49 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
     result = _base_response(request, framework)
     institution_id = request.get("institution_id") if request["scope"] == "institution" else None
     action = request["action"]
+    filters = request["filters"]
+
+    if action == "list_assessment_questions":
+        catalog = list_question_catalog(
+            framework,
+            domains=filters.get("domains"),
+            question_ids=filters.get("question_ids"),
+            content_type=filters.get("content_type"),
+        )
+        result.update({
+            "domains": catalog["domains"],
+            "results": catalog["questions"],
+            "result_count": catalog["question_count"],
+        })
+        return result
 
     if action == "search_formats":
         matches = search_format_docs(reader, request["query"], limit=request["limit"])
         result.update({"results": [_format_identity(row) for row in matches], "result_count": len(matches)})
         return result
 
-    if action in {"assess_format", "list_evidence_gaps", "plan_evidence_remediation"} and request.get("format"):
+    single_format_actions = {
+        "assess_format",
+        "assess_format_questions",
+        "list_evidence_gaps",
+        "plan_evidence_remediation",
+    }
+    if action in single_format_actions and request.get("format"):
         resolution = FormatResolver(reader).resolve(request["format"])
         if not resolution.resolved or not resolution.format_doc:
             return _resolution_failure(result, resolution)
         if action == "assess_format":
             result["result"] = _assessment_for_doc(reader, framework, resolution.format_doc, institution_id=institution_id)
+        elif action == "assess_format_questions":
+            result["result"] = assess_format_questions(
+                reader,
+                framework,
+                resolution.format_doc,
+                domains=filters.get("domains"),
+                question_ids=filters.get("question_ids"),
+                content_type=filters.get("content_type"),
+                institution_id=institution_id,
+            )
         else:
             diagnostic = diagnose_format_evidence_gaps(
                 reader,
@@ -437,7 +490,7 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
         result["result_count"] = 1
         return result
 
-    family = request["filters"].get("family")
+    family = filters.get("family")
     if family:
         candidates = search_family_docs(reader, family, limit=request["limit"])
     else:
@@ -457,7 +510,7 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
                 str((row.get("format") or {}).get("label") or ""),
             )
         )
-        result["filters"] = deepcopy(request["filters"])
+        result["filters"] = deepcopy(filters)
         result["candidate_count"] = len(candidates)
         if action == "list_evidence_gaps":
             result["gap_summary"] = summarize_evidence_gaps(gap_results, candidate_count=len(candidates))
@@ -490,11 +543,11 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
 
     assessments = all_assessments
     if action == "list_at_risk_formats":
-        allowed_bands = set(request["filters"].get("risk_bands") or DEFAULT_AT_RISK_BANDS)
+        allowed_bands = set(filters.get("risk_bands") or DEFAULT_AT_RISK_BANDS)
         assessments = [row for row in all_assessments if row.get("risk_band") in allowed_bands]
 
     result.update({
-        "filters": deepcopy(request["filters"]),
+        "filters": deepcopy(filters),
         "candidate_count": len(candidates),
         "assessment_summary": assessment_summary,
         "unbanded_count": len(unbanded_results),
