@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qnl.qa/schemas/unstructured_source_transcription.v1.schema.json",
+  "title": "Unstructured preservation source transcription",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "source_id",
+    "transcribed_from",
+    "transcription_method",
+    "transcribed_by",
+    "review_status",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "unstructured_source_transcription/v1"
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_edition": {
+      "type": ["string", "null"]
+    },
+    "transcribed_from": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_media_type": {
+      "type": ["string", "null"]
+    },
+    "transcription_method": {
+      "enum": ["manual", "ai_assisted", "automated_extraction", "mixed"]
+    },
+    "transcribed_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model_id": {
+      "type": ["string", "null"]
+    },
+    "prompt_version": {
+      "type": ["string", "null"]
+    },
+    "transcribed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "review_status": {
+      "enum": ["draft", "in_review", "reviewed", "rejected", "superseded"]
+    },
+    "reviewed_by": {
+      "type": ["string", "null"]
+    },
+    "reviewed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "review_notes": {
+      "type": ["string", "null"]
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/record"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "review_status": {
+            "const": "reviewed"
+          }
+        },
+        "required": ["review_status"]
+      },
+      "then": {
+        "required": ["reviewed_by", "reviewed_at"],
+        "properties": {
+          "reviewed_by": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reviewed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "record": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "source_record_id",
+        "name",
+        "native_fields"
+      ],
+      "properties": {
+        "source_record_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "extensions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "mime_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "identifiers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "urls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "native_fields": {
+          "type": "object"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "source_page": {
+          "type": ["integer", "string", "null"]
+        },
+        "source_section": {
+          "type": ["string", "null"]
+        },
+        "source_heading": {
+          "type": ["string", "null"]
+        },
+        "source_anchor": {
+          "type": ["string", "null"]
+        },
+        "source_url": {
+          "type": ["string", "null"]
+        },
+        "source_excerpt": {
+          "type": ["string", "null"]
+        },
+        "transcription_notes": {
+          "type": ["string", "null"]
+        },
+        "needs_review": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["source_page"]
+        },
+        {
+          "required": ["source_section"]
+        },
+        {
+          "required": ["source_heading"]
+        },
+        {
+          "required": ["source_anchor"]
+        },
+        {
+          "required": ["source_url"]
+        }
+      ]
+    }
+  }
+}
