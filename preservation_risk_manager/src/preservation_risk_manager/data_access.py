@@ -135,6 +135,51 @@ def _claim_dedupe_key(row: dict[str, Any]) -> str:
     return "|".join(str(part or "") for part in parts)
 
 
+def _read_collection_rows(path: Path, *, collection_name: str) -> list[dict[str, Any]]:
+    """Read a JSON/JSONL collection export into row dictionaries."""
+    if not path.is_file():
+        raise RegistryAccessError(f"Collection export not found: {path.resolve(strict=False)}")
+
+    if path.suffix.lower() == ".jsonl":
+        rows: list[dict[str, Any]] = []
+        for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise RegistryAccessError(f"Invalid JSONL in {path} at line {line_number}: {exc}") from exc
+            if not isinstance(item, dict):
+                raise RegistryAccessError(f"{path} line {line_number} must contain a JSON object")
+            rows.append(item)
+        return rows
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RegistryAccessError(f"Invalid JSON in {path}: {exc}") from exc
+
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    if isinstance(data, dict):
+        candidate = data.get(collection_name) or data.get("rows") or data.get("items")
+        if isinstance(candidate, list):
+            return [item for item in candidate if isinstance(item, dict)]
+    raise RegistryAccessError(f"{path} does not contain a {collection_name} row list")
+
+
+def _merge_claim_rows(existing: list[dict[str, Any]], additional: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in [*existing, *additional]:
+        key = _claim_dedupe_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(row)
+    return merged
+
+
 def load_storage_config(path: str | Path) -> dict[str, Any]:
     """Load a registry-builder storage config from JSON.
 
@@ -158,17 +203,34 @@ def load_storage_config(path: str | Path) -> dict[str, Any]:
 
 
 class JsonRegistryStore:
-    """Read a registry JSON export through the RegistryStore query contract."""
+    """Read registry-builder exports through the RegistryStore query contract."""
 
     def __init__(self, collections: dict[str, list[dict[str, Any]]]) -> None:
         self.collections = collections
 
     @classmethod
-    def from_registry_json(cls, path: str | Path) -> "JsonRegistryStore":
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    def from_registry_json(
+        cls,
+        path: str | Path,
+        *,
+        criterion_claims_path: str | Path | None = None,
+    ) -> "JsonRegistryStore":
+        """Load registry.json and the criterion-claim export that belongs with it.
+
+        Registry-builder normally exports canonical formats to ``registry.json``
+        and normalized claims to a sibling ``criterion_claims.jsonl`` (or JSON)
+        file. Earlier risk-manager behavior loaded only registry.json, which made
+        a documented file-export handoff silently lose the claims needed for risk
+        assessment. The reader now auto-discovers the sibling claims export.
+
+        ``criterion_claims_path`` can be supplied when claims live elsewhere.
+        Embedded ``criterion_claims`` inside registry.json remain supported.
+        """
+        registry_path = Path(path)
+        data = json.loads(registry_path.read_text(encoding="utf-8"))
         if isinstance(data, list):
             canonical_formats = [item for item in data if isinstance(item, dict)]
-            collections = {"canonical_formats": canonical_formats}
+            collections: dict[str, list[dict[str, Any]]] = {"canonical_formats": canonical_formats}
         elif isinstance(data, dict):
             rows = data.get("canonical_formats") or data.get("formats") or data.get("registry") or []
             if not isinstance(rows, list):
@@ -181,6 +243,24 @@ class JsonRegistryStore:
                     collections[collection_name] = [item for item in collection_rows if isinstance(item, dict)]
         else:
             raise RegistryAccessError(f"Registry JSON {path} must be a list or object")
+
+        claims_export: Path | None = None
+        if criterion_claims_path is not None:
+            claims_export = Path(criterion_claims_path)
+        else:
+            for candidate_name in ("criterion_claims.jsonl", "criterion_claims.json"):
+                candidate = registry_path.parent / candidate_name
+                if candidate.is_file():
+                    claims_export = candidate
+                    break
+
+        if claims_export is not None:
+            additional_claims = _read_collection_rows(claims_export, collection_name="criterion_claims")
+            collections["criterion_claims"] = _merge_claim_rows(
+                collections.get("criterion_claims", []),
+                additional_claims,
+            )
+
         return cls(collections)
 
     def query(self, collection: str, filt: dict[str, Any] | None = None) -> list[dict[str, Any]]:
