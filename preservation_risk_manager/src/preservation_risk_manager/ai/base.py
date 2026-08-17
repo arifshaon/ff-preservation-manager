@@ -87,6 +87,7 @@ class AIToolDefinition:
 class AIRequest:
     messages: tuple[AIMessage, ...]
     tools: tuple[AIToolDefinition, ...] = ()
+    required_tool_name: str | None = None
     response_schema: dict[str, Any] | None = None
     response_schema_name: str = "assistant_response"
     temperature: float | None = None
@@ -97,6 +98,12 @@ class AIRequest:
             raise ValueError("AIRequest requires at least one message.")
         if self.max_output_tokens is not None and self.max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be greater than zero.")
+        if self.required_tool_name:
+            tool_names = {tool.name for tool in self.tools}
+            if self.required_tool_name not in tool_names:
+                raise ValueError(
+                    f"required_tool_name '{self.required_tool_name}' is not present in request tools."
+                )
 
 
 @dataclass(frozen=True)
