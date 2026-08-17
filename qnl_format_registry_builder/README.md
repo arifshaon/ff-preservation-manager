@@ -1,153 +1,145 @@
 # QNL File Format Registry Builder
 
-This project is a **registry-building system**, not a manually curated static registry.
+`qnl_format_registry_builder` is the **evidence-ingestion and registry-construction module** in the File Format Preservation Manager repository.
 
-It builds a local file-format preservation registry by running a repeatable pipeline over configured evidence sources such as NARA, PRONOM, LOC FDD, institutional policy spreadsheets, and future adapters.
+It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, or other configured sources change.
 
-The registry is the output of the process. The reusable workflow is the deliverable.
+At repository level:
 
-## What the pipeline does
+```text
+sources
+  -> qnl_format_registry_builder
+  -> common RegistryStore / evidence model
+  -> preservation_risk_manager
+```
+
+See the repository architecture and shared data model first if you are working across modules:
+
+- [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
+- [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+
+## What this module does
 
 ```text
 Source acquisition
-  -> source snapshots
-  -> extraction/parsing
+  -> content-addressed snapshots
+  -> adapter extraction
+  -> RawFormatRecord
   -> normalization
-  -> identifier reconciliation
-  -> canonical registry records
-  -> storage
-  -> assessment/change detection
+  -> verified identifier reconciliation
+  -> CanonicalFormat
+  -> source-native evidence retention
+  -> declarative criterion mapping
+  -> criterion_claims
+  -> RegistryStore persistence
+  -> change detection
   -> optional exports/reports
 ```
 
-The system keeps these things separate:
+The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction.
 
-- external source evidence;
-- institutional policy and local decisions;
-- hazard/risk assessment;
-- trend evidence;
-- readiness/method coverage;
-- change events and review actions;
-- optional export files.
+## Main capabilities
 
-## Documentation map
+- NARA Digital Preservation Framework acquisition and parsing.
+- PRONOM registry and DROID/signature evidence.
+- Library of Congress FDD XML evidence.
+- Structured JSON source packages.
+- Institutional policy workbook ingestion.
+- QNL institutional format evidence.
+- Content-addressed source snapshot cache and offline replay.
+- Conservative reconciliation using configured identifier authority rules.
+- Source-by-source incremental augmentation against a persistent store.
+- Declarative source-to-criterion mappings with review status/versioning.
+- Criterion-claim audit and backfill workflows.
+- Institutional evidence and policy overlays kept separate from global facts.
+- Preservation method/readiness/trend evidence support.
+- Change detection between registry states.
+- Pluggable source adapters, storage backends, and exporters.
+- Storage backends: memory, file/JSON, MongoDB, and trusted external plugins.
+- Optional JSON, JSONL, CSV, SQLite, and Markdown outputs.
 
-Start with [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md). It tells each audience where to go.
+## Start here
 
-Key documents:
+For installation, setup, and every supported operator mode, use:
 
-| Need | Read |
-| --- | --- |
-| Add or run a data source, including downloaded files, JSON, CSV, archives, and individual NARA/PRONOM/LOC runs | [`docs/ADDING_AND_RUNNING_DATA_SOURCES.md`](docs/ADDING_AND_RUNNING_DATA_SOURCES.md) |
-| Interpret generated registry outputs | [`docs/READING_THE_REGISTRY.md`](docs/READING_THE_REGISTRY.md) |
-| Understand architecture and adapter boundaries | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Understand source-by-source augmentation | [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md) |
-| Understand identifier matching and verified keys | [`docs/IDENTIFIER_RECONCILIATION.md`](docs/IDENTIFIER_RECONCILIATION.md) |
-| Configure existing adapters | [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md) |
-| Build a new adapter | [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
-| Configure storage and exports | [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md) |
-| Understand MongoDB collections and fields | [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md) |
-| Understand institutional overlays | [`docs/INSTITUTIONAL_OVERLAYS.md`](docs/INSTITUTIONAL_OVERLAYS.md) |
-| Review remaining roadmap | [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) |
+**[`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md)**
+
+For the full builder documentation map:
+
+**[`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md)**
 
 ## Installation
 
-Requires Python 3.10 or later.
+Python 3.10 or later is required.
 
-```bash
+```powershell
 cd qnl_format_registry_builder
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,mongo]"
-pytest
+pytest -q
 ```
 
-## Quickstart: run a real multi-source registry build
+If MongoDB is not required:
 
-The default config now enables three real evidence sources:
-
-```text
-NARA   -> pinned external preservation hazard evidence
-PRONOM -> verified PUID and format-identity evidence
-LOC    -> FDD XML sustainability/evidence records
+```powershell
+python -m pip install -e ".[dev]"
 ```
 
-NARA is required in the sample config. PRONOM and LOC are enabled but optional, so a temporary network or upstream issue is recorded in `run_report.json` without destroying the baseline run.
+## Quick run
 
-Full PRONOM acquisition uses one GitHub archive snapshot and extracts JSON records from it. It should not create thousands of per-record source snapshot files.
-
-```bash
-python -m registry_builder run \
-  --config config/sources.example.json \
-  --workdir work \
+```powershell
+python -m registry_builder run `
+  --config config\sources.example.json `
+  --workdir work `
   --out output
 ```
 
-On success, check the summary printed by the CLI and the report at:
+The default/example workflow demonstrates multi-source registry construction. Exact record counts depend on the configured/pinned/current upstream data.
+
+Offline replay after snapshots have been cached:
+
+```powershell
+python -m registry_builder run `
+  --config config\sources.example.json `
+  --workdir work `
+  --out output `
+  --offline
+```
+
+## Common CLI modes
+
+| Command | Purpose |
+| --- | --- |
+| `registry_builder run` | Run source acquisition, reconciliation, mapping, persistence, change detection, and exports. |
+| `registry_builder validate` | Validate an exported `registry.json`. |
+| `registry_builder collision-report` | Inspect identifier collisions/heuristic bridges. |
+| `registry_builder criterion-evidence-audit` | Read-only audit of source fields and projected criterion coverage. |
+| `registry_builder mapping validate` | Validate criterion-mapping configuration. |
+| `registry_builder criterion-claims backfill` | Rebuild criterion claims from existing stored evidence without reacquiring all sources. |
+
+Full commands and examples: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
+
+## Storage and the common interface
+
+All persistence is behind `RegistryStore`.
+
+A full backend implements:
+
+```python
+upsert(collection, key, document)
+query(collection, filter)
+```
+
+Built-in names:
 
 ```text
-output/run_report.json
-output/coverage_report.md
-output/registry.csv
-output/registry.json
+memory
+file / json_file
+mongodb
 ```
 
-The exact count depends on the pinned NARA release and the current PRONOM/LOC data. The run should produce a real external-evidence registry, not a two-record toy example.
-
-Read the outputs with:
-
-```text
-docs/READING_THE_REGISTRY.md
-```
-
-For source-specific examples, including MongoDB configs for NARA-only, PRONOM-only, LOC-only, downloaded files, JSON, CSV, archives, and temporary many-file acquisition, read:
-
-```text
-docs/ADDING_AND_RUNNING_DATA_SOURCES.md
-```
-
-## What `--workdir` and `--out` mean
-
-```text
---workdir work
-```
-
-Working/cache directory. Source snapshots are stored under `work/snapshots/<source_id>/` with hashes so acquisition is auditable and replayable.
-
-For large bundled sources such as PRONOM and LOC, the snapshot should be one ZIP/archive, not thousands of individual files.
-
-```text
---out output
-```
-
-Export/report directory. When `exports.enabled` is true, the pipeline writes files such as `registry.csv`, `registry.json`, `run_report.json`, and `coverage_report.md` there.
-
-If the selected storage backend is MongoDB, MongoDB remains the registry store; `output/` is only the export/report folder.
-
-## Add an institutional workbook after the external-evidence quickstart
-
-The default NARA + PRONOM + LOC run shows that the pipeline works with real external evidence.
-
-To make it institutional, enable the institutional workbook source in `config/sources.example.json` or in a local copied config:
-
-```json
-{
-  "id": "qnl_policy_current",
-  "type": "institution_policy_xlsx",
-  "enabled": true,
-  "institution_id": "qnl",
-  "institution_name": "Qatar National Library",
-  "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"]
-}
-```
-
-Copy the workbook into `input/`, then rerun the pipeline. The workbook data is imported as `institution_policy_overlays` attached to canonical format records.
-
-For another institution, use the same adapter with that institution's own field mapping and terminology.
-
-## Run with local MongoDB
-
-Start MongoDB locally, then use a config with this storage block:
+Example MongoDB block:
 
 ```json
 {
@@ -155,85 +147,67 @@ Start MongoDB locally, then use a config with this storage block:
     "type": "mongodb",
     "uri": "mongodb://localhost:27017",
     "database": "format_registry"
-  },
-  "exports": {
-    "enabled": true
   }
 }
 ```
 
-Run:
+The sibling risk manager reuses the same configured store through `RegistryReader`; it does not duplicate MongoDB access logic.
 
-```bash
-python -m registry_builder run \
-  --config config/sources.example.json \
-  --workdir work \
-  --out output
-```
+Read:
 
-MongoDB collections populated by the pipeline:
-
-```text
-runs
-source_snapshots
-source_records
-canonical_formats
-format_identifiers
-institution_policy_overlays
-hazard_assessments
-readiness_assessments
-trend_observations
-assessment_changes
-```
-
-See [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md) for fields, indexes, and verification queries.
+- shared logical model/interface: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- builder storage/export config: [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
+- MongoDB physical schema: [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
 
 ## Source-by-source augmentation
 
-The default behavior supports running sources one by one against the same store.
-
-Example:
+A persistent registry can be updated one source at a time:
 
 ```text
-Run NARA
-  -> contributes external preservation hazard evidence
+NARA run
+ -> adds/refreshes NARA source contribution
 
-Run PRONOM later
-  -> contributes verified PUID/format identity evidence
-  -> reuses latest successful NARA evidence
-  -> recomputes canonical records from active evidence contributions
+PRONOM run later
+ -> adds/refreshes verified PRONOM identity evidence
+ -> current canonical view is recomputed from active source contributions
 
-Run LOC later
-  -> contributes LOC FDD identifiers and sustainability evidence
-  -> reuses latest successful NARA and PRONOM evidence
+LOC run later
+ -> adds/refreshes LOC FDD sustainability evidence
 ```
 
-Earlier source records remain in storage as provenance/history. The current canonical view uses the active contribution from each source.
+Earlier source records remain available for provenance/history. The current view uses active source contributions rather than blindly appending duplicates.
 
-Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md) before changing this behavior.
+Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md).
 
-## External plugin loading
+## Criterion claims
 
-Built-in adapters and storage backends can be referenced by short names:
+Source adapters should retain source-native vocabulary. Declarative mapping files then convert relevant source fields into neutral `criterion_claims` with provenance.
+
+This is the bridge used by `preservation_risk_manager`:
+
+```text
+source-native field/value
+ -> approved mapping rule
+ -> criterion_claim
+ -> framework question
+ -> deterministic answer/risk analysis
+```
+
+Read [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md).
+
+## Adding sources/backends
+
+Built-in adapters use short names. External trusted packages can use explicit plugin paths:
 
 ```json
 {
-  "type": "nara_digital_preservation_framework"
+  "id": "future_source",
+  "type": "mypkg.adapters.future:FutureAdapter",
+  "enabled": true
 }
 ```
 
-External packages can be referenced with an explicit `module:ClassName` plugin path:
-
-```json
-{
-  "id": "dpc_bit_list",
-  "type": "mypkg.adapters.dpc:DpcBitListAdapter",
-  "enabled": true,
-  "required": false
-}
-```
-
-External storage backends use the same pattern:
+Storage plugins use the same pattern:
 
 ```json
 {
@@ -243,56 +217,40 @@ External storage backends use the same pattern:
 }
 ```
 
-Plugin paths are trusted-code configuration. Importing a plugin executes the plugin module's top-level Python code, so plugin paths should come only from reviewed packages and trusted configuration.
+Plugin imports execute trusted code. Use only reviewed packages/configuration.
 
-The resolver validates source plugins as `SourceAdapter` subclasses and storage plugins as `RegistryStore` subclasses.
+Read:
 
-## Identifier rules
+- [`docs/ADDING_AND_RUNNING_DATA_SOURCES.md`](docs/ADDING_AND_RUNNING_DATA_SOURCES.md)
+- [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md)
+- [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md)
 
-New identifier namespaces are configured, not hardcoded:
+## Generated data
 
-```json
-{
-  "identifier_kinds": {
-    "dpc": {
-      "strength": "strong",
-      "verified_from": ["dpc_bit_list"]
-    }
-  }
-}
-```
+Normal runtime/export directories are not source documentation and should not be committed as ordinary generated output.
 
-A third-party adapter can emit a DPC identifier claim without core model edits. Reconciliation will treat it according to the configured identifier rules.
-
-Read [`docs/IDENTIFIER_RECONCILIATION.md`](docs/IDENTIFIER_RECONCILIATION.md) before changing matching behavior.
-
-## Generated outputs are not committed
-
-`output/` is ignored. It is a runtime/export directory.
-
-Do not commit normal generated files such as:
+Source snapshots belong under the configured work directory, commonly:
 
 ```text
-registry.json
-registry.jsonl
-registry.csv
-registry.sqlite
-raw_records.jsonl
-source_snapshots.json
-run_report.json
-coverage_report.md
+work/snapshots/<source_id>/
 ```
 
-If a sample is needed for documentation, commit it deliberately under `docs/examples/` and state which config and command produced it.
+Optional review exports commonly appear under `output/` or `out/`.
 
-## Tests and contribution rules
+## Tests
 
-Before pushing or merging:
+Before pushing changes:
 
-```bash
+```powershell
 cd qnl_format_registry_builder
 python -m pip install -e ".[dev,mongo]"
-pytest
+pytest -q
 ```
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). GitHub Actions also runs `pytest` on pushes to `main` and pull requests.
+For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report.
+
+## Related module
+
+Once evidence is in the registry, `preservation_risk_manager` can perform deterministic or AI-assisted assessment without duplicating the ingestion/storage logic.
+
+Start at [`../preservation_risk_manager/README.md`](../preservation_risk_manager/README.md).
