@@ -87,6 +87,99 @@ def _run_heartbeat(stop_event: threading.Event, *, interval: int) -> None:
 
 def _format_progress(event: dict[str, Any]) -> str:
     name = event.get("event")
+    if name == "config_load_started":
+        return f"[registry-builder] loading config {event.get('config_path')}..."
+    if name == "config_load_completed":
+        return f"[registry-builder] config loaded; sources={event.get('sources', 0)}"
+    if name == "criterion_mapping_loaded":
+        return f"[registry-builder] criterion mapping loaded; enabled={event.get('enabled')}; mappings={event.get('mappings', 0)}"
+    if name == "storage_open_started":
+        return f"[registry-builder] opening {event.get('storage_type', 'storage')} storage..."
+    if name == "storage_open_completed":
+        return (
+            f"[registry-builder] storage ready; previous_canonical_formats="
+            f"{event.get('previous_canonical_formats', 0)}"
+        )
+    if name == "source_skipped":
+        return f"[registry-builder] source {event.get('source_id')} skipped; status={event.get('status')}"
+    if name == "source_started":
+        return f"[registry-builder] source {event.get('source_id')} starting; type={event.get('source_type')}"
+    if name == "source_acquire_started":
+        return f"[registry-builder] source {event.get('source_id')} acquiring snapshots..."
+    if name == "source_acquire_completed":
+        return (
+            f"[registry-builder] source {event.get('source_id')} acquired {event.get('snapshots', 0)} snapshot(s); "
+            f"changed={event.get('snapshots_changed', 0)}, unchanged={event.get('snapshots_unchanged', 0)}, "
+            f"cached={event.get('snapshots_from_cache', 0)}"
+        )
+    if name == "source_extract_started":
+        return f"[registry-builder] source {event.get('source_id')} extracting from {event.get('snapshots', 0)} snapshot(s)..."
+    if name == "source_extract_completed":
+        return f"[registry-builder] source {event.get('source_id')} extracted {event.get('records_extracted', 0)} record(s)"
+    if name == "source_normalize_started":
+        return f"[registry-builder] source {event.get('source_id')} normalizing {event.get('records', 0)} record(s)..."
+    if name == "source_normalize_completed":
+        return f"[registry-builder] source {event.get('source_id')} normalized {event.get('records', 0)} record(s)"
+    if name == "source_completed":
+        return (
+            f"[registry-builder] source {event.get('source_id')} completed; status={event.get('status')}; "
+            f"snapshots={event.get('snapshots', 0)}; records={event.get('records_extracted', 0)}"
+        )
+    if name == "source_failed":
+        return f"[registry-builder] source {event.get('source_id')} failed; {event.get('error_type')}: {event.get('error')}"
+    if name == "stored_source_records_started":
+        return "[registry-builder] loading latest stored source records for augmentation..."
+    if name == "stored_source_records_completed":
+        return f"[registry-builder] loaded {event.get('records', 0)} stored source record(s) for augmentation"
+    if name == "active_source_records_ready":
+        return (
+            f"[registry-builder] active source records ready; extracted={event.get('raw_records_extracted', 0)}, "
+            f"stored={event.get('stored_records', 0)}, active={event.get('active_source_records', 0)}"
+        )
+    if name == "reconcile_started":
+        return f"[registry-builder] reconciling {event.get('active_source_records', 0)} active source record(s)..."
+    if name == "reconcile_completed":
+        return f"[registry-builder] reconciliation complete; canonical_formats={event.get('canonical_formats', 0)}"
+    if name == "method_profiles_started":
+        return f"[registry-builder] assigning method profiles; enabled={event.get('enabled')}..."
+    if name == "method_profiles_completed":
+        return f"[registry-builder] method profiles complete; version={event.get('version')}"
+    if name == "validation_started":
+        return f"[registry-builder] validating {event.get('canonical_formats', 0)} canonical format(s)..."
+    if name == "validation_completed":
+        return f"[registry-builder] validation complete; errors={event.get('errors', 0)}, warnings={event.get('warnings', 0)}"
+    if name == "criterion_claims_started":
+        return (
+            f"[registry-builder] building criterion claims from {event.get('canonical_formats', 0)} canonical format(s), "
+            f"{event.get('source_records', 0)} source record(s), {event.get('mappings', 0)} mapping file(s)..."
+        )
+    if name == "criterion_claims_completed":
+        return f"[registry-builder] criterion claims built; claims={event.get('claims', 0)}"
+    if name == "change_detection_started":
+        return (
+            f"[registry-builder] detecting changes; previous={event.get('previous_formats', 0)}, "
+            f"current={event.get('current_formats', 0)}..."
+        )
+    if name == "change_detection_completed":
+        return f"[registry-builder] change detection complete; run_kind={event.get('run_kind')}; changes={event.get('total_changes', 0)}"
+    if name == "persistence_started":
+        return (
+            f"[registry-builder] persisting registry; snapshots={event.get('snapshots', 0)}, "
+            f"source_records={event.get('raw_records', 0)}, canonical_formats={event.get('canonical_formats', 0)}, "
+            f"criterion_claims={event.get('criterion_claims', 0)}..."
+        )
+    if name == "persistence_completed":
+        return "[registry-builder] persistence complete"
+    if name == "exports_started":
+        return f"[registry-builder] writing file exports to {event.get('outdir')}..."
+    if name == "exports_completed":
+        return f"[registry-builder] exports complete; outputs={event.get('outputs', 0)}"
+    if name == "run_completed":
+        return (
+            f"[registry-builder] run complete; canonical_formats={event.get('canonical_formats', 0)}, "
+            f"active_source_records={event.get('active_source_records', 0)}, "
+            f"criterion_claims={event.get('criterion_claims', 0)}"
+        )
     if name == "validate_mappings_started":
         return f"[criterion-claims] validating {event.get('mappings', 0)} mapping file(s)..."
     if name == "validate_mappings_completed":
@@ -132,7 +225,7 @@ def _format_progress(event: dict[str, Any]) -> str:
         return f"[criterion-claims] write complete; claims_written={event.get('claims_written', 0)}"
     if name == "backfill_completed":
         return f"[criterion-claims] completed; status={event.get('status')}; claims={event.get('claims_generated', 0)}"
-    return "[criterion-claims] " + json.dumps(event, ensure_ascii=False, sort_keys=True)
+    return "[progress] " + json.dumps(event, ensure_ascii=False, sort_keys=True)
 
 
 def _progress_reporter(enabled: bool):
@@ -251,6 +344,7 @@ def main() -> None:
 
     if args.command == "run":
         progress = _progress_enabled(args)
+        reporter = _progress_reporter(progress)
         stop_event: threading.Event | None = None
         heartbeat: threading.Thread | None = None
         if progress:
@@ -267,7 +361,7 @@ def main() -> None:
             )
             heartbeat.start()
         try:
-            report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline)
+            report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline, progress=reporter)
         finally:
             if stop_event is not None:
                 stop_event.set()
