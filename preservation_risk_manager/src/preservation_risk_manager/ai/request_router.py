@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from preservation_risk_manager.ai.base import AIMessage, AIProvider, AIProviderError, AIRequest
+from preservation_risk_manager.frameworks import RiskFramework
 from preservation_risk_manager.request_api import SUPPORTED_ACTIONS, normalize_request
 
 
@@ -13,18 +14,22 @@ REQUEST_ROUTER_SYSTEM_PROMPT = (
     "Your only job is to convert the user's natural-language question into one supported "
     "structured action. Do not answer the preservation question, do not estimate risk, do not "
     "invent formats, and do not use general preservation knowledge. The application will execute "
-    "the request against its registry and deterministic framework. Use assess_format for one format, "
+    "the request against its registry and deterministic framework. Use assess_format for the overall "
+    "assessment of one format. Use assess_format_questions when the user asks about one or more named "
+    "assessment domains or specific preservation-risk questions for a format, such as software "
+    "dependencies, governance, DRM, metadata, essential characteristics, or local feasibility. Use "
+    "list_assessment_questions when the user asks what questions/domains the framework contains. Use "
     "search_formats only for format discovery, assess_format_family for assessing all matching family "
     "members, list_at_risk_formats when the user asks which formats are risky, concerning, at risk, "
     "Moderate, High, or should be worried about, list_evidence_gaps when the user asks why a format "
     "cannot be assessed, which formats need more evidence, what evidence is missing, or which formats "
     "are unassessed/partially assessed, and plan_evidence_remediation when the user asks what should be "
-    "fixed, prioritized, mapped, enriched, or done next to improve assessment coverage. For family-level "
-    "list_at_risk_formats, list_evidence_gaps, or plan_evidence_remediation, put the family term in "
-    "filters.family, not query. For a single-format evidence-gap or remediation question, put the format "
-    "in format. If the user asks for at-risk formats without bands, use Moderate and High. If the user "
-    "explicitly mentions QNL as the assessment scope, use scope institution with institution_id qnl; "
-    "otherwise use global unless another institution ID is explicitly supplied."
+    "fixed, prioritized, mapped, enriched, or done next to improve assessment coverage. Use only domain "
+    "and question IDs supplied in framework_question_catalog. For family-level list_at_risk_formats, "
+    "list_evidence_gaps, or plan_evidence_remediation, put the family term in filters.family, not query. "
+    "For a single-format question, put the format in format. If the user asks for at-risk formats without "
+    "bands, use Moderate and High. If the user explicitly mentions QNL as the assessment scope, use scope "
+    "institution with institution_id qnl; otherwise use global unless another institution ID is explicitly supplied."
 )
 
 
@@ -43,8 +48,11 @@ def request_router_schema() -> dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string", "enum": ["Low", "Moderate", "High"]},
                     },
+                    "domains": {"type": "array", "items": {"type": "string"}},
+                    "question_ids": {"type": "array", "items": {"type": "string"}},
+                    "content_type": {"type": ["string", "null"]},
                 },
-                "required": ["family", "risk_bands"],
+                "required": ["family", "risk_bands", "domains", "question_ids", "content_type"],
                 "additionalProperties": False,
             },
             "scope": {"type": "string", "enum": ["global", "institution"]},
@@ -77,6 +85,11 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
     if not isinstance(risk_bands, list):
         risk_bands = []
         filters["risk_bands"] = risk_bands
+    for field in ("domains", "question_ids"):
+        if not isinstance(filters.get(field), list):
+            filters[field] = []
+    if "content_type" not in filters:
+        filters["content_type"] = None
 
     action = str(repaired.get("action") or "")
     query = str(repaired.get("query") or "").strip() or None
@@ -106,21 +119,58 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
             repairs.append(f"{action}.filters.family<-query_or_format")
             family = inferred_family
 
-    # Evidence diagnostic/remediation requests support either one format or a
-    # family. An otherwise unscoped subject in query is treated as one format;
-    # family prompts are instructed to use filters.family and bypass this repair.
     if action in {"list_evidence_gaps", "plan_evidence_remediation"} and not family and not format_value and query:
         repaired["format"] = query
         repaired["query"] = None
         repairs.append(f"{action}.format<-query")
+        format_value = query
+
+    has_question_selection = bool(filters.get("domains") or filters.get("question_ids") or filters.get("content_type"))
+    if action == "assess_format" and has_question_selection:
+        repaired["action"] = "assess_format_questions"
+        repairs.append("assess_format_with_question_filters->assess_format_questions")
+        action = "assess_format_questions"
+
+    if action == "assess_format_questions" and not format_value and query:
+        repaired["format"] = query
+        repaired["query"] = None
+        repairs.append("assess_format_questions.format<-query")
 
     return repaired, repairs
+
+
+def _framework_catalog(framework: RiskFramework | None) -> dict[str, Any] | None:
+    if framework is None:
+        return None
+    domains: dict[str, str | None] = {}
+    questions: list[dict[str, Any]] = []
+    for question in framework.questions:
+        if question.domain_id:
+            domains[question.domain_id] = question.domain_label
+        questions.append({
+            "question_id": question.id,
+            "label": question.label,
+            "domain_id": question.domain_id,
+            "domain_label": question.domain_label,
+            "aliases": list(question.aliases),
+            "applicability": list(question.applicability),
+        })
+    return {
+        "framework_id": framework.framework_id,
+        "calibration_status": framework.calibration_status,
+        "domains": [
+            {"domain_id": domain_id, "label": domains[domain_id]}
+            for domain_id in sorted(domains)
+        ],
+        "questions": questions,
+    }
 
 
 def route_natural_language_request(
     provider: AIProvider,
     prompt: str,
     *,
+    framework: RiskFramework | None = None,
     default_scope: str = "global",
     default_institution_id: str | None = None,
     default_limit: int = 100,
@@ -138,6 +188,7 @@ def route_natural_language_request(
             "limit": default_limit,
         },
         "supported_actions": list(SUPPORTED_ACTIONS),
+        "framework_question_catalog": _framework_catalog(framework),
     }
     request = AIRequest(
         messages=(
