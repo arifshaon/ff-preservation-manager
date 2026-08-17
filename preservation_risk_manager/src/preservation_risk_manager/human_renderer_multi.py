@@ -17,8 +17,19 @@ def _render_multi_puid(response: dict[str, Any]) -> str:
     lines = [
         f"Preservation-risk assessments for {len(assessments)} matched PRONOM PUIDs",
         "",
-        "Each matched PUID was assessed independently; no family-level risk score was invented.",
     ]
+
+    if response.get("ai_format_limit_applied"):
+        limit = int(response.get("ai_format_limit") or 0)
+        assessed = int(response.get("ai_formats_assessed") or 0)
+        skipped = int(response.get("ai_formats_skipped") or 0)
+        lines.extend([
+            f"More than {limit} matching formats were found. AI risk assessment was limited to the first {assessed} PUIDs; "
+            f"the remaining {skipped} PUIDs were assessed deterministically only.",
+            "",
+        ])
+
+    lines.append("Each matched PUID was assessed independently; no family-level risk score was invented.")
 
     for index, assessment in enumerate(assessments, start=1):
         puid = _display(assessment.get("matched_puid"), "PUID unknown")
