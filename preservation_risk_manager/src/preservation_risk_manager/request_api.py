@@ -58,15 +58,34 @@ def _format_label(format_doc: dict[str, Any]) -> str | None:
     return str(value) if value is not None else None
 
 
+def _identifier_bucket(format_doc: dict[str, Any], kind: str, *direct_fields: str) -> list[str]:
+    values: list[str] = []
+    for field in direct_fields:
+        for value in _as_list(format_doc.get(field)):
+            text = str(value).strip()
+            if text and text not in values:
+                values.append(text)
+    identifiers = format_doc.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        for value in _as_list(identifiers.get(kind)):
+            text = str(value).strip()
+            if text and text not in values:
+                values.append(text)
+    return values
+
+
 def _format_identity(format_doc: dict[str, Any]) -> dict[str, Any]:
-    return {
+    identity = {
         "format_id": _format_id(format_doc),
         "label": _format_label(format_doc),
-        "extensions": [str(value) for value in _as_list(format_doc.get("extensions") or format_doc.get("file_extensions"))],
-        "mime_types": [str(value) for value in _as_list(format_doc.get("mime_types") or format_doc.get("mime_type"))],
-        "puids": [str(value) for value in _as_list(format_doc.get("puids"))],
-        "loc_ids": [str(value) for value in _as_list(format_doc.get("loc_ids"))],
+        "extensions": _identifier_bucket(format_doc, "extension", "extensions", "file_extensions", "extension"),
+        "mime_types": _identifier_bucket(format_doc, "mime", "mime_types", "mime_type"),
+        "puids": _identifier_bucket(format_doc, "puid", "puids"),
+        "loc_ids": _identifier_bucket(format_doc, "loc", "loc_ids"),
     }
+    if format_doc.get("version") is not None:
+        identity["version"] = str(format_doc.get("version"))
+    return identity
 
 
 def _searchable_values(format_doc: dict[str, Any]) -> list[str]:
