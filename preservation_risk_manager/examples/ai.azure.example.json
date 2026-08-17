@@ -1,0 +1,12 @@
+{
+  "ai": {
+    "provider": "azure_openai",
+    "endpoint": "https://qnl-openai-qadc-prod-001.openai.azure.com/",
+    "api_key": "<QNL_AZURE_OPENAI_API_KEY>",
+    "api_version": "2024-10-21",
+    "deployment": "<AZURE_OPENAI_DEPLOYMENT_NAME>",
+    "temperature": 0.0,
+    "max_output_tokens": 1200,
+    "timeout_seconds": 60
+  }
+}

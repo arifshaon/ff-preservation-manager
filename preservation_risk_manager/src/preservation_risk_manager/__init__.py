@@ -8,6 +8,7 @@ action recommendations.
 
 __all__ = [
     "actions",
+    "ai",
     "answer_derivation",
     "cli",
     "currency",
@@ -16,6 +17,7 @@ __all__ = [
     "evidence_packs",
     "format_resolver",
     "frameworks",
+    "policy_proposals",
     "posture",
     "responses",
     "scoring",
