@@ -79,6 +79,11 @@ class AzureOpenAIProvider(AIProvider):
         if request.tools:
             payload["tools"] = [tool.to_openai_tool() for tool in request.tools]
             payload["parallel_tool_calls"] = False
+            if request.required_tool_name:
+                payload["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": request.required_tool_name},
+                }
 
         if request.response_schema is not None:
             payload["response_format"] = {
