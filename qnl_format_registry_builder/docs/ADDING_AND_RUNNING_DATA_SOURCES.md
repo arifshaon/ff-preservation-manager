@@ -2,6 +2,14 @@
 
 This runbook explains how to plug a new data source into the registry builder and how to run existing sources such as NARA, PRONOM, and LOC either together or individually.
 
+For the shortest end-to-end source-onboarding route—from source boundary through criterion mapping and risk-manager verification—start with:
+
+[`../../docs/HOW_TO_ADD_A_SOURCE.md`](../../docs/HOW_TO_ADD_A_SOURCE.md)
+
+For narrative/PDF/unstructured sources, also read:
+
+[`../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
+
 The key point is this:
 
 ```text
@@ -9,6 +17,8 @@ A data source is not MongoDB.
 A data source adapter reads source evidence and emits normalized records.
 MongoDB stores the resulting registry state and source-record history.
 ```
+
+A second key point is that **making a source load is not the end of onboarding**. If the source is intended to contribute to framework-driven risk analysis, its source-native observations must also be mapped into reviewed `criterion_claims` and verified through `preservation_risk_manager`.
 
 ## Core concepts
 
@@ -23,6 +33,7 @@ nara_digital_preservation_framework
 pronom_registry
 loc_fdd_xml
 institution_policy_xlsx
+standard_json
 ```
 
 A source adapter implements:
@@ -60,6 +71,7 @@ one JSON file
 one ZIP archive containing many records
 one admin-downloaded local file
 one temporary file read only for extraction
+one reviewed JSON transcription derived from a narrative publication
 ```
 
 Retained snapshots live under:
@@ -82,7 +94,11 @@ A `RawFormatRecord` is the normalized source contribution emitted by an adapter.
 
 A retained source snapshot is useful for audit replay. A temporary snapshot is useful when the source has thousands of small files and retaining all of them would waste disk space. In that case, the adapter should preserve the useful source payload in `RawFormatRecord.raw` before deleting the temporary file.
 
+For sources that will feed criterion mapping, preserve source-native observations in `RawFormatRecord.native_fields` where practical. The mapping layer exists so adapters do not need to hard-code QNL criterion IDs or risk scores.
+
 ## End-to-end pipeline
+
+For a structured source:
 
 ```text
 configured source
@@ -93,8 +109,20 @@ configured source
   -> normalization
   -> identifier reconciliation
   -> canonical registry
+  -> declarative criterion mapping
+  -> criterion_claims
   -> RegistryStore, for example MongoDB
-  -> optional exports
+  -> preservation_risk_manager verification/query
+  -> optional exports/reports
+```
+
+For an unstructured source:
+
+```text
+PDF / HTML / narrative publication
+  -> manual or AI-assisted transcription draft
+  -> human-reviewed versioned JSON artifact
+  -> normal SourceAdapter path above
 ```
 
 The adapter should not write directly to MongoDB. The pipeline does that after normalization and reconciliation.
@@ -291,11 +319,86 @@ pipeline stores RawFormatRecord in MongoDB
 
 This avoids filling disk while keeping the source record available in MongoDB.
 
-## Implementing a new adapter
+### Pattern 5: unstructured or narrative source
+
+Use this when the authority publishes useful preservation evidence as prose rather than as a stable machine-readable feed.
+
+Examples:
+
+```text
+DPC Bit List PDF/HTML
+narrative preservation guidance
+PDF reports
+scanned/OCR'd risk/watch lists
+web pages with prose entries
+```
+
+Do **not** call an LLM inside the production risk calculation and treat its transient answer as source evidence.
+
+Use a reviewable intermediate artifact:
+
+```text
+original PDF/HTML
+ -> manual or AI-assisted transcription draft
+ -> versioned JSON
+ -> human review
+ -> reviewed JSON source artifact
+ -> standard_json or thin source-specific adapter
+ -> normal registry pipeline
+```
+
+The reviewed JSON should preserve:
+
+```text
+source edition
+original source URL/file
+transcription method
+AI model/prompt version when applicable
+human review status/reviewer/date
+stable source_record_id
+source-native fields
+page/section/heading/URL locator for every record
+```
+
+The repository provides:
+
+```text
+../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md
+config/schemas/unstructured_source_transcription.v1.schema.json
+config/prompts/transcribe_unstructured_source/v1.0.md
+config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md
+```
+
+For a reviewed transcription that already fits the standard JSON package shape, the built-in adapter can be used:
+
+```json
+{
+  "id": "dpc_bit_list",
+  "type": "standard_json",
+  "enabled": true,
+  "required": false,
+  "uris": ["sources/dpc_bitlist/2026-08.reviewed.json"]
+}
+```
+
+`standard_json` retains the full source record under `RawFormatRecord.raw`. If transcription-specific fields live in `record.native_fields`, criterion mappings can address them under paths such as:
+
+```text
+raw.native_fields.endangerment_category
+raw.native_fields.trend
+```
+
+A thin source-specific adapter is preferred when you need automatic acquisition, edition handling, source-specific validation, or direct promotion into `RawFormatRecord.native_fields`.
+
+AI transcription is a **drafting mechanism**. A named human/team must review the transcription before it is treated as approved production evidence.
+
+## Seven-step source onboarding path
+
+The original adapter-only workflow is expanded here so onboarding ends with risk-analysis usability, not merely successful parsing.
 
 ### Step 1: decide the source boundary
 
-Name the adapter after the source, not the file representation, unless the representation is truly the source.
+Name the adapter/source after the conceptual source, not the file representation, unless the representation is truly the source.
 
 Good names:
 
@@ -311,11 +414,28 @@ Avoid names like this for a source-level adapter:
 ```text
 nara_csv
 pronom_json
+dpc_pdf
 ```
 
-CSV or JSON is usually a publication format, not the conceptual source.
+CSV, JSON, HTML, or PDF is usually a publication format, not the conceptual authority/source.
 
-### Step 2: create the adapter class
+### Step 2: transcribe if the source is unstructured
+
+Skip this step for stable machine-readable CSV/JSON/XML/API sources.
+
+For narrative/PDF sources:
+
+```text
+source publication
+ -> transcription draft
+ -> human-reviewed structured artifact
+```
+
+Use the transcription guide and schema. Preserve source-native wording and locators. Do not perform criterion mapping during transcription.
+
+See [`../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md).
+
+### Step 3: create the adapter class or use `standard_json`
 
 Minimal JSON adapter skeleton:
 
@@ -361,6 +481,7 @@ class ExampleJsonAdapter(SourceAdapter):
                         identifiers=[
                             Identifier("example", source_record_id, self.type_name, True, source_record_id)
                         ],
+                        native_fields=row.get("native_fields", {}) or {},
                         evidence=[{
                             "type": "example_json_record",
                             "source_file": snap.uri,
@@ -427,6 +548,7 @@ class ExampleCsvAdapter(SourceAdapter):
                             identifiers=[
                                 Identifier("example", source_record_id, self.type_name, True, source_record_id)
                             ] if source_record_id else [],
+                            native_fields=dict(row),
                             evidence=[{
                                 "type": "example_csv_row",
                                 "source_file": snap.uri,
@@ -439,7 +561,7 @@ class ExampleCsvAdapter(SourceAdapter):
         return records
 ```
 
-### Step 3: register the adapter or use a plugin path
+### Step 4: register the adapter and define identifier rules
 
 Built-in adapter registration is in:
 
@@ -460,20 +582,20 @@ For external/internal institutional packages, avoid editing the core and use a p
 }
 ```
 
-### Step 4: define identifier rules
-
-If the source owns an identifier namespace, declare it in config.
+If the source owns an identifier namespace, declare it in config:
 
 ```json
 {
   "identifier_kinds": {
-    "dpc": {
+    "example": {
       "strength": "strong",
-      "verified_from": ["dpc_bit_list"]
+      "verified_from": ["example_source"]
     }
   }
 }
 ```
+
+Only do this when the source genuinely owns/stably defines the namespace.
 
 If the source merely repeats another source's identifier, emit it as a claim but do not treat it as verified unless that source is in `verified_from`.
 
@@ -486,9 +608,45 @@ LOC FDD ID from LOC adapter   -> verified LOC identifier
 LOC URL copied from workbook  -> useful claim, not verified by LOC
 ```
 
-### Step 5: write tests
+### Step 5: define criterion mappings
 
-Every adapter should test:
+If the source should contribute to framework-driven risk analysis, map source-native observations into the neutral criteria vocabulary.
+
+```text
+RawFormatRecord.native_fields / raw
+ -> reviewed mapping JSON
+ -> criterion_claims
+```
+
+Do not force composite source risk bands or recommended actions into primitive sustainability/technical criteria.
+
+Start with:
+
+[`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
+
+Detailed mapping lifecycle:
+
+[`criterion_mapping_workflow.md`](criterion_mapping_workflow.md)
+
+AI may draft the mapping, but it cannot approve it.
+
+### Step 6: validate, review, and generate claims
+
+Run mapping validation:
+
+```powershell
+python -m registry_builder mapping validate `
+  --criteria config\criteria\v1.json `
+  --mappings drafts\my_source.mapping.json
+```
+
+After human review/approval, use an integrated build or criterion-claim backfill.
+
+Verify that `criterion_claims` are generated and preserve source/mapping provenance.
+
+### Step 7: test adapter + risk-manager consumption
+
+Every source should test:
 
 ```text
 acquisition from a fixture or mocked URI
@@ -497,7 +655,12 @@ identifier verification
 snapshot metadata
 large-source snapshot policy, if applicable
 offline/local-file behavior, if applicable
+transcription review behavior, if applicable
+criterion mapping/claim production, if the source is used for framework assessment
+risk-manager visibility for at least one intended criterion/question
 ```
+
+Onboarding is not complete until the evidence can be retrieved by the intended `preservation_risk_manager` query or evidence-gap analysis.
 
 ## Running existing sources together
 
@@ -509,6 +672,8 @@ python -m registry_builder run `
   --workdir work `
   --out output
 ```
+
+Remember: `sources.example.json` is primarily a registry-construction example. If you need criterion claims for the risk manager, use a config with `criterion_mapping.enabled=true`.
 
 For MongoDB, make sure the config has:
 
@@ -757,17 +922,10 @@ If your adapter is in an installed Python package, you can run it without editin
       "type": "mypkg.adapters.dpc:DpcBitListAdapter",
       "enabled": true,
       "required": false,
-      "retrieval_mode": "published_csv",
-      "uris": ["https://example.org/dpc-bit-list.csv"],
+      "uris": ["sources/dpcbitlist/2026-08.reviewed.json"],
       "progress": true
     }
-  ],
-  "identifier_kinds": {
-    "dpc": {
-      "strength": "strong",
-      "verified_from": ["dpc_bit_list"]
-    }
-  }
+  ]
 }
 ```
 
@@ -800,11 +958,14 @@ Before running a source:
 ```text
 1. Decide whether the source should be required or optional.
 2. Decide whether snapshots should be retained or temporary.
-3. Use MongoDB for real registry population.
-4. Use memory only for small smoke tests.
+3. If unstructured, verify the transcription artifact is human-reviewed.
+4. Use persistent storage for real registry population.
 5. Set progress/progress_interval for large sources.
 6. Use a distinct workdir per experimental source run if testing.
 7. Check output/run_report.json after completion.
+8. Audit actual source fields before writing criterion mappings.
+9. Validate/human-review mapping rules.
+10. Verify generated criterion claims in the risk manager.
 ```
 
 Useful MongoDB checks:
@@ -815,9 +976,28 @@ db.runs.find().sort({finished_at: -1}).limit(1).pretty()
 db.source_records.countDocuments({source_id: "pronom_registry"})
 db.source_records.countDocuments({source_id: "loc_fdd_xml"})
 db.canonical_formats.countDocuments({current: {$ne: false}})
+db.criterion_claims.countDocuments()
 ```
 
 ## Common mistakes to avoid
+
+### Mistake: stopping when the adapter loads
+
+A source intended for framework assessment is not fully onboarded until reviewed mappings produce `criterion_claims` and the risk manager can consume them.
+
+### Mistake: using transient AI output as evidence
+
+For narrative sources, do not make the adapter/risk manager depend on a one-off chat response.
+
+Use:
+
+```text
+AI/manual transcription -> versioned draft JSON -> human review -> reviewed JSON -> adapter
+```
+
+### Mistake: mixing transcription and criterion mapping
+
+Transcription preserves what the source says. Criterion mapping translates reviewed source-native fields into the neutral vocabulary. Keep them as separate reviewed artifacts.
 
 ### Mistake: using memory for real source population
 
@@ -825,7 +1005,7 @@ db.canonical_formats.countDocuments({current: {$ne: false}})
 "storage": {"type": "memory"}
 ```
 
-This is only for smoke tests. Use MongoDB for real runs.
+Memory is useful for smoke tests/quickstarts. Use persistent file/MongoDB storage for operational registries.
 
 ### Mistake: using awkward local file URIs on Windows
 
@@ -840,8 +1020,6 @@ Avoid this unless there is a specific reason to use URI syntax:
 ```json
 "zip_uri": "file:///C:/Users/Arif%20Shaon/Downloads/fddXML.zip"
 ```
-
-Plain Windows paths with forward slashes are easier to read and have been confirmed to work with local LOC ZIP runs.
 
 ### Mistake: retaining thousands of individual source files
 
@@ -859,22 +1037,28 @@ or prefer a single archive snapshot when available.
 
 ### Mistake: treating copied identifiers as verified
 
-A PUID copied into NARA or an institutional workbook is a claim. A PUID emitted by PRONOM is verified.
+A PUID copied into NARA/DPC/institutional material is a claim. A PUID emitted by PRONOM is verified.
 
 ### Mistake: confusing exports with storage
 
-`output/` files are review/interchange products. MongoDB is the registry store.
+`output/` files are review/interchange products. Persistent storage backends are the operational registry store.
 
 ## Where to document a new source
 
 When adding a source, update:
 
 ```text
+../../docs/HOW_TO_ADD_A_SOURCE.md
+  only when the source introduces a genuinely new onboarding pattern
+
 docs/ADAPTER_REFERENCE.md
   how to configure and run the adapter
 
 docs/ADDING_AND_RUNNING_DATA_SOURCES.md
   if the source introduces a new acquisition pattern or useful run example
+
+docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md
+  mapping/criterion implications
 
 docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md
   if the source introduces new fallback/offline/local-file behavior
@@ -882,3 +1066,5 @@ docs/SOURCE_RETRIEVAL_AND_FALLBACKS.md
 config/sources.example.json
   only if the source should be part of the default example run
 ```
+
+For an unstructured source, also document the transcription schema/prompt and review expectations.
