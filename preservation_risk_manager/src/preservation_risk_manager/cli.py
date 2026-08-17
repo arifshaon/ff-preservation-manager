@@ -5,6 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from preservation_risk_manager.ai import (
+    AIError,
+    build_ai_provider,
+    derive_answers_with_ai,
+    load_ai_config,
+)
 from preservation_risk_manager.answer_derivation import derive_answers
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
@@ -269,6 +275,7 @@ def _resolved_analysis_context(args: argparse.Namespace) -> dict[str, Any]:
     answer_document = derive_answers(framework, evidence_pack)
     analysis = score_answers(framework, answer_document.get("scoring_answers") or answer_document["answers"])
     return {
+        "framework": framework,
         "resolution": resolution,
         "criterion_claim_canonical_ids": criterion_claim_canonical_ids,
         "criterion_claims": criterion_claims,
@@ -307,6 +314,58 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
             "exposure_level": exposure_level,
             "local_risk_posture": compute_local_risk_posture(
                 context["analysis"].get("analysed_band"),
+                readiness_status,
+                exposure_level=exposure_level,
+            ),
+        })
+    return result
+
+
+def analyze_format_ai(args: argparse.Namespace) -> dict[str, Any]:
+    context = _resolved_analysis_context(args)
+    ai_config = load_ai_config(_require_file(args.ai_config, label="AI config file"))
+    provider = build_ai_provider(ai_config)
+    ai_answer_document = derive_answers_with_ai(
+        provider,
+        context["framework"],
+        context["evidence_pack"],
+        context["answer_document"],
+        max_evidence_items=args.max_ai_evidence_items,
+    )
+    ai_analysis = score_answers(
+        context["framework"],
+        ai_answer_document.get("scoring_answers") or ai_answer_document["answers"],
+    )
+    output_answer_document = (
+        _compact_answer_document(ai_answer_document)
+        if args.compact_evidence
+        else ai_answer_document
+    )
+    result: dict[str, Any] = {
+        "status": "ok",
+        "mode": "ai_assisted",
+        "provider": provider.describe(),
+        "resolution": _resolution_summary(context["resolution"]),
+        "format": context["evidence_pack"].get("format"),
+        "scope": context["evidence_pack"].get("scope", "global"),
+        "evidence_hash": evidence_hash(context["evidence_pack"]),
+        "criterion_claim_canonical_ids": context["criterion_claim_canonical_ids"],
+        "criterion_claims_used": len(context["criterion_claims"]),
+        "derived_answers": output_answer_document,
+        "deterministic_analysis": context["analysis"],
+        "analysis": ai_analysis,
+    }
+    if args.evidence_summary:
+        result["criterion_claims_summary"] = _criterion_claims_summary(context["criterion_claims"])
+
+    if args.institution:
+        readiness_status, exposure_level = _posture_fields_from_args(args)
+        result.update({
+            "institution_id": args.institution,
+            "readiness_status": readiness_status,
+            "exposure_level": exposure_level,
+            "local_risk_posture": compute_local_risk_posture(
+                ai_analysis.get("analysed_band"),
                 readiness_status,
                 exposure_level=exposure_level,
             ),
@@ -356,6 +415,26 @@ def _add_registry_source_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_format_analysis_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--framework", required=True, help="Path to risk framework JSON.")
+    _add_registry_source_args(parser)
+    parser.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
+    parser.add_argument("--institution", help="Optional institution ID for local posture analysis.")
+    parser.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
+    parser.add_argument("--exposure-level", default="Unknown", help="Institution exposure level when --institution is used.")
+    parser.add_argument("--include-unapproved", action="store_true", help="Include draft/rejected/superseded evidence claims.")
+    parser.add_argument(
+        "--evidence-summary",
+        action="store_true",
+        help="Add a compact criterion-claim summary grouped by criterion, source, value, institution, and canonical ID.",
+    )
+    parser.add_argument(
+        "--compact-evidence",
+        action="store_true",
+        help="Suppress long evidence claim bodies in derived_answers while retaining provenance fields.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="preservation_risk_manager")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -373,24 +452,29 @@ def build_parser() -> argparse.ArgumentParser:
         "analyze-format",
         help="Resolve one format from a registry export or registry-builder store and run deterministic risk analysis.",
     )
-    analyze_registry.add_argument("--framework", required=True, help="Path to risk framework JSON.")
-    _add_registry_source_args(analyze_registry)
-    analyze_registry.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
-    analyze_registry.add_argument("--institution", help="Optional institution ID for local posture analysis.")
-    analyze_registry.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
-    analyze_registry.add_argument("--exposure-level", default="Unknown", help="Institution exposure level when --institution is used.")
-    analyze_registry.add_argument("--include-unapproved", action="store_true", help="Include draft/rejected/superseded evidence claims.")
-    analyze_registry.add_argument(
-        "--evidence-summary",
-        action="store_true",
-        help="Add a compact criterion-claim summary grouped by criterion, source, value, institution, and canonical ID.",
-    )
-    analyze_registry.add_argument(
-        "--compact-evidence",
-        action="store_true",
-        help="Suppress long evidence claim bodies in derived_answers while retaining provenance fields.",
-    )
+    _add_format_analysis_args(analyze_registry)
     analyze_registry.set_defaults(func=analyze_format)
+
+    analyze_registry_ai = subparsers.add_parser(
+        "analyze-format-ai",
+        help=(
+            "Run deterministic risk analysis, then use the configured AI provider only for unresolved "
+            "or ambiguous framework questions before deterministic rescoring."
+        ),
+    )
+    _add_format_analysis_args(analyze_registry_ai)
+    analyze_registry_ai.add_argument(
+        "--ai-config",
+        required=True,
+        help="Path to AI provider JSON configuration, for example config/ai.local.json.",
+    )
+    analyze_registry_ai.add_argument(
+        "--max-ai-evidence-items",
+        type=int,
+        default=20,
+        help="Maximum evidence items supplied to AI for each unresolved question.",
+    )
+    analyze_registry_ai.set_defaults(func=analyze_format_ai)
 
     propose = subparsers.add_parser(
         "propose-policy-change",
@@ -418,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = args.func(args)
-    except FileNotFoundError as exc:
+    except (AIError, FileNotFoundError) as exc:
         parser.exit(2, f"error: {exc}\n")
     except CliFailure as exc:
         print(json.dumps(exc.result, indent=2, sort_keys=True))
