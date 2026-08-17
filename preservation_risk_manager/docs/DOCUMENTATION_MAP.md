@@ -13,6 +13,7 @@ For repository-wide architecture and the shared registry/storage model, also rea
 | --- | --- |
 | Understand the module | [`../README.md`](../README.md) |
 | Install, configure, and run every mode | [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md) |
+| Set up periodic source refresh, risk monitoring, Top 10/watchlist reports | [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md) |
 | Understand internal architecture and safety boundaries | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | Ask natural-language preservation questions | [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md) |
 | Integrate using canonical JSON requests | [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md) |
@@ -20,6 +21,7 @@ For repository-wide architecture and the shared registry/storage model, also rea
 | Configure or add AI providers | [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md) |
 | Understand registry collections/storage adapters | [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) |
 | Understand MongoDB physical schema | [`../../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md) |
+| Add/map a new evidence source | [`../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 
 ## Recommended reading paths
 
@@ -36,17 +38,19 @@ For repository-wide architecture and the shared registry/storage model, also rea
 ```text
 ../README.md
  -> INSTALLATION_SETUP_AND_RUN.md
+ -> RISK_MONITORING_AND_REPORTING.md
  -> HUMAN_AND_SYSTEM_QUERIES.md
  -> AI_PROVIDER_INTERFACE.md (when AI is enabled)
 ```
 
-### Integration/API developer
+### Integration/API/reporting developer
 
 ```text
 ../../docs/REPOSITORY_ARCHITECTURE.md
  -> ../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md
  -> ARCHITECTURE.md
  -> HUMAN_AND_SYSTEM_QUERIES.md
+ -> RISK_MONITORING_AND_REPORTING.md
 ```
 
 ### Framework/AI developer
@@ -55,6 +59,7 @@ For repository-wide architecture and the shared registry/storage model, also rea
 ARCHITECTURE.md
  -> PRESERVATION_RISK_QUESTIONS.md
  -> AI_PROVIDER_INTERFACE.md
+ -> ../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md
 ```
 
 ## Live documents
@@ -64,6 +69,7 @@ ARCHITECTURE.md
 | `DOCUMENTATION_MAP.md` | This navigation page. |
 | `ARCHITECTURE.md` | Resolver/evidence/framework/scoring/request/AI/human-rendering architecture. |
 | `INSTALLATION_SETUP_AND_RUN.md` | Installation, storage/AI setup, and commands for every current mode. |
+| `RISK_MONITORING_AND_REPORTING.md` | Periodic source refresh, watchlists, High-risk/Top 10/family/evidence-gap reports, external scheduler/report-service integration, historical snapshot pattern. |
 | `HUMAN_AND_SYSTEM_QUERIES.md` | Natural-language prompts, canonical request actions, JSON examples, scopes, and output behavior. |
 | `PRESERVATION_RISK_QUESTIONS.md` | 8 assessment domains, 22 question IDs, human wording, applicability, and machine filtering. |
 | `AI_PROVIDER_INTERFACE.md` | Provider-neutral AI configuration and capability validation. |
@@ -98,6 +104,19 @@ structured JSON request
  -> same deterministic JSON
 ```
 
+Periodic monitoring normally adds an external orchestration layer:
+
+```text
+scheduler/service
+ -> refresh registry sources
+ -> execute query-json request(s)
+ -> retain dated canonical JSON
+ -> compare with prior result
+ -> render/distribute PDF | email | dashboard | ticket | API result
+```
+
+The external service should not duplicate preservation scoring logic.
+
 ## Current framework files
 
 | File | Purpose |
@@ -106,6 +125,8 @@ structured JSON request
 | `examples/qnl_preservation_risk_questions.framework.draft.json` | Broad 8-domain / 22-question working set for evidence collection and targeted assessment. Overall banding is disabled because calibration is not approved. |
 
 The broader framework is a QNL working synthesis informed by preservation sustainability concepts. It is **not** a verbatim official LOC/NARA questionnaire and is **not** approved QNL policy yet.
+
+This matters for monitoring: the broad draft framework can drive question/evidence-gap reports, but it must not yet be used to present an operational High-risk/Top-10 band ranking as approved QNL risk policy.
 
 ## Interface modes at a glance
 
