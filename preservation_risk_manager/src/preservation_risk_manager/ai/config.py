@@ -37,7 +37,7 @@ class AIProviderConfig:
     max_output_tokens: int | None = None
     timeout_seconds: float = 60.0
     max_retries: int = 0
-    human_ai_format_limit: int = 10
+    human_format_assessment_limit: int = 10
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AIProviderConfig":
@@ -47,9 +47,21 @@ class AIProviderConfig:
         max_retries = int(data.get("max_retries", 0))
         if max_retries < 0:
             raise AIConfigurationError("AI configuration 'max_retries' must be zero or greater.")
-        human_ai_format_limit = int(data.get("human_ai_format_limit", 10))
-        if human_ai_format_limit <= 0:
-            raise AIConfigurationError("AI configuration 'human_ai_format_limit' must be greater than zero.")
+
+        # ``human_ai_format_limit`` was the first name introduced for this
+        # setting. Preserve it as a compatibility alias, but the setting now
+        # caps total human-query assessments (deterministic + optional AI), not
+        # merely the subset sent to AI.
+        raw_human_limit = data.get(
+            "human_format_assessment_limit",
+            data.get("human_ai_format_limit", 10),
+        )
+        human_format_assessment_limit = int(raw_human_limit)
+        if human_format_assessment_limit <= 0:
+            raise AIConfigurationError(
+                "AI configuration 'human_format_assessment_limit' must be greater than zero."
+            )
+
         return cls(
             provider=provider,
             endpoint=_optional_string(data.get("endpoint")),
@@ -66,8 +78,13 @@ class AIProviderConfig:
             ),
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
-            human_ai_format_limit=human_ai_format_limit,
+            human_format_assessment_limit=human_format_assessment_limit,
         )
+
+    @property
+    def human_ai_format_limit(self) -> int:
+        """Backward-compatible alias for the former setting name."""
+        return self.human_format_assessment_limit
 
     def resolve_api_key(self, *, required: bool = True) -> str | None:
         if self.api_key_env:
@@ -104,7 +121,7 @@ class AIProviderConfig:
             "max_output_tokens": self.max_output_tokens,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
-            "human_ai_format_limit": self.human_ai_format_limit,
+            "human_format_assessment_limit": self.human_format_assessment_limit,
         }
 
 
