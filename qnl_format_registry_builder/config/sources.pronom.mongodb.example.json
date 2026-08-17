@@ -17,10 +17,10 @@
     "enabled": true,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings",
+    "mappings": "criterion_mappings/pronom_registry.v1.approved.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "Source-scoped operational config for adding or refreshing PRONOM. Reconciliation still uses latest stored records from other completed sources, such as NARA."
+    "notes": "Mode 3 operational config for adding or refreshing PRONOM. The run acquires PRONOM, reconciles it with latest stored records from previous completed sources such as NARA, and applies only the approved PRONOM criterion mapping."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
