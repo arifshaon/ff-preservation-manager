@@ -22,6 +22,7 @@ _NARA_REPO_API_BASE = "https://api.github.com/repos/usnationalarchives/digital-p
 _NARA_ACTION_DIR = "Digital_Preservation_Plan_Spreadsheet"
 _NARA_RISK_DIR = "Digital_Preservation_Risk_Matrix"
 _DEFAULT_NARA_RELEASE_DATE = "20260320"
+_NARA_PRIMARY_ROW_KIND = "risk_matrix_numbered"
 
 DEFAULT_NARA_URIS = [
     f"{_NARA_REPO_RAW_BASE}/master/{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{_DEFAULT_NARA_RELEASE_DATE}.csv",
@@ -160,6 +161,84 @@ def _kind_from_file_name(value: str) -> str | None:
     if re.search(r"File_Format_Risk_Matrix_20\d{6}_Numbered\.csv$", name):
         return "risk_matrix_numbered"
     return None
+
+
+def _row_kind(snapshot: SourceSnapshot) -> str:
+    metadata = snapshot.metadata or {}
+    return str(metadata.get("kind") or _kind_from_file_name(snapshot.uri) or "unknown")
+
+
+def _group_key(row: dict[str, Any], row_no: int, kind: str) -> str:
+    nara_id = _get(row, "NARA Format ID")
+    if nara_id:
+        return f"nara:{nara_id}"
+    name = _get(row, "Format Name")
+    if name:
+        return f"name:{name.lower()}"
+    return f"{kind}:row:{row_no}"
+
+
+def _preferred_item(items: list[dict[str, Any]]) -> dict[str, Any]:
+    for kind in (_NARA_PRIMARY_ROW_KIND, "preservation_action_plan"):
+        for item in items:
+            if item.get("kind") == kind:
+                return item
+    return items[0]
+
+
+def _merged_row(items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge NARA's companion CSV rows into one source-native row.
+
+    The numbered risk matrix is the primary row because approved criterion
+    mappings use rubric-answer columns. The preservation action plan still
+    contributes action/readiness/planning fields and is retained in raw/evidence.
+    """
+    merged: dict[str, Any] = {}
+    for kind in ("preservation_action_plan", _NARA_PRIMARY_ROW_KIND):
+        for item in items:
+            if item.get("kind") == kind:
+                merged.update(item["row"])
+    for item in items:
+        if item.get("kind") not in {"preservation_action_plan", _NARA_PRIMARY_ROW_KIND}:
+            merged.update(item["row"])
+    return merged
+
+
+def _rubric_answers(row: dict[str, Any]) -> dict[str, Any]:
+    answers: dict[str, Any] = {}
+    for key, value in row.items():
+        match = re.match(r"^(\d+[\.\uff0e]\d+):", str(key))
+        if not match:
+            continue
+        question_id = match.group(1).replace("\uff0e", ".")
+        answers[question_id] = value
+    return answers
+
+
+def _evidence_for_item(item: dict[str, Any]) -> dict[str, Any]:
+    row = item["row"]
+    snap: SourceSnapshot = item["snapshot"]
+    metadata = item["metadata"]
+    return {
+        "type": "nara_preservation_framework_row",
+        "retrieval_mode": "published_csv",
+        "source_file": snap.uri,
+        "source_row": item["row_no"],
+        "snapshot_changed": snap.changed,
+        "snapshot_from_cache": snap.from_cache,
+        "source_location": metadata.get("source_location"),
+        "nara_release_mode": metadata.get("release_mode"),
+        "nara_release_date": metadata.get("release_date"),
+        "nara_file_kind": item.get("kind"),
+        "github_ref": metadata.get("github_ref"),
+        "github_path": metadata.get("github_path"),
+        "github_blob_sha": metadata.get("github_blob_sha"),
+        "admin_supplied": metadata.get("admin_supplied"),
+        "release_resolution_error": metadata.get("release_resolution_error"),
+        "nara_preservation_action": _get(row, "NARA Preservation Action"),
+        "nara_preservation_plan": _get(row, "NARA Proposed Preservation Plan"),
+        "nara_preferred_tools": _get(row, "NARA Preferred Processing and Transformation Tool(s)"),
+    }
 
 
 class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
@@ -350,7 +429,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         sources: list[dict[str, Any]] = []
         for kind, item in (
             ("preservation_action_plan", action_by_date[release_date]),
-            ("risk_matrix_numbered", risk_by_date[release_date]),
+            (_NARA_PRIMARY_ROW_KIND, risk_by_date[release_date]),
         ):
             path = item.get("path")
             uri = item.get("download_url") or self._raw_uri_for_path(path)
@@ -462,9 +541,10 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
         return snapshots
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
-        records: list[RawFormatRecord] = []
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for snap in snapshots:
             metadata = snap.metadata or {}
+            kind = _row_kind(snap)
             with Path(snap.local_path).open("r", encoding="utf-8-sig", newline="") as f:
                 reader = csv.DictReader(f)
                 for row_no, row in enumerate(reader, start=2):
@@ -473,51 +553,64 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                     extensions = split_multi(_get(row, "File Extension(s)"))
                     if not nara_id and not name and not extensions:
                         continue
+                    item = {
+                        "kind": kind,
+                        "row": row,
+                        "row_no": row_no,
+                        "snapshot": snap,
+                        "metadata": metadata,
+                    }
+                    grouped.setdefault(_group_key(row, row_no, kind), []).append(item)
 
-                    pronom_url = _get(row, "PRONOM URL")
-                    loc_url = _get(row, "LOC URL")
-                    wikidata_url = _get(row, "WikiData URL", "Wikidata URL")
-                    action = _get(row, "NARA Preservation Action")
-                    plan = _get(row, "NARA Proposed Preservation Plan")
-                    tools = _get(row, "NARA Preferred Processing and Transformation Tool(s)")
+        records: list[RawFormatRecord] = []
+        for items in grouped.values():
+            primary = _preferred_item(items)
+            primary_kind = str(primary.get("kind") or "unknown")
+            row = _merged_row(items)
+            nara_id = _get(row, "NARA Format ID")
+            pronom_url = _get(row, "PRONOM URL")
+            loc_url = _get(row, "LOC URL")
+            wikidata_url = _get(row, "WikiData URL", "Wikidata URL")
+            evidence = [_evidence_for_item(item) for item in items]
+            rows_by_kind = {str(item.get("kind") or "unknown"): item["row"] for item in items}
+            row_numbers_by_kind = {str(item.get("kind") or "unknown"): item["row_no"] for item in items}
+            snapshot_sha256_by_kind = {
+                str(item.get("kind") or "unknown"): item["snapshot"].sha256 for item in items
+            }
+            release_dates = sorted({
+                str(item["metadata"].get("release_date"))
+                for item in items
+                if item.get("metadata") and item["metadata"].get("release_date")
+            })
 
-                    evidence = [{
-                        "type": "nara_preservation_framework_row",
-                        "retrieval_mode": "published_csv",
-                        "source_file": snap.uri,
-                        "source_row": row_no,
-                        "snapshot_changed": snap.changed,
-                        "snapshot_from_cache": snap.from_cache,
-                        "source_location": metadata.get("source_location"),
-                        "nara_release_mode": metadata.get("release_mode"),
-                        "nara_release_date": metadata.get("release_date"),
-                        "nara_file_kind": metadata.get("kind"),
-                        "github_ref": metadata.get("github_ref"),
-                        "github_path": metadata.get("github_path"),
-                        "github_blob_sha": metadata.get("github_blob_sha"),
-                        "admin_supplied": metadata.get("admin_supplied"),
-                        "release_resolution_error": metadata.get("release_resolution_error"),
-                        "nara_preservation_action": action,
-                        "nara_preservation_plan": plan,
-                        "nara_preferred_tools": tools,
-                    }]
-
-                    records.append(RawFormatRecord(
-                        source_id=self.source_id,
-                        source_type=self.type_name,
-                        source_record_id=nara_id or f"nara-row-{row_no}",
-                        name=name,
-                        category=_get(row, "Category/Plan(s)"),
-                        description=_get(row, "Description and Justification"),
-                        extensions=extensions,
-                        mime_types=split_multi(_get(row, "MIME type(s)")),
-                        puids=re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url),
-                        loc_ids=re.findall(r"\bfdd\d+\b", loc_url, flags=re.I),
-                        nara_ids=[nara_id] if nara_id else [],
-                        wikidata_ids=re.findall(r"\bQ\d{2,}\b", wikidata_url),
-                        urls=_urls(row),
-                        hazard=_hazard(row, self.type_name),
-                        evidence=[x for x in evidence if any(v for v in x.values())],
-                        raw={"snapshot_sha256": snap.sha256, "row": row},
-                    ))
+            records.append(RawFormatRecord(
+                source_id=self.source_id,
+                source_type=self.type_name,
+                source_record_id=nara_id or f"nara-row-{primary['row_no']}",
+                name=_get(row, "Format Name"),
+                category=_get(row, "Category/Plan(s)"),
+                description=_get(row, "Description and Justification"),
+                extensions=split_multi(_get(row, "File Extension(s)")),
+                mime_types=split_multi(_get(row, "MIME type(s)")),
+                puids=re.findall(r"\b(?:fmt|x-fmt)/\d+\b", pronom_url),
+                loc_ids=re.findall(r"\bfdd\d+\b", loc_url, flags=re.I),
+                nara_ids=[nara_id] if nara_id else [],
+                wikidata_ids=re.findall(r"\bQ\d{2,}\b", wikidata_url),
+                urls=_urls(row),
+                hazard=_hazard(row, self.type_name),
+                evidence=[x for x in evidence if any(v for v in x.values())],
+                native_fields={
+                    "primary_nara_file_kind": primary_kind,
+                    "nara_file_kinds": sorted(rows_by_kind),
+                    "nara_release_dates": release_dates,
+                    "rubric_answers": _rubric_answers(row),
+                },
+                raw={
+                    "snapshot_sha256": primary["snapshot"].sha256,
+                    "snapshot_sha256_by_kind": snapshot_sha256_by_kind,
+                    "row": row,
+                    "rows_by_kind": rows_by_kind,
+                    "row_numbers_by_kind": row_numbers_by_kind,
+                },
+            ))
         return records
