@@ -118,9 +118,22 @@ python -m registry_builder run `
   --out output
 ```
 
-A normal monitoring refresh should run online so upstream changes are discovered. The same persistent registry is then queried by `preservation_risk_manager` for watchlists, High-risk/Top-10 reports, family reports, and evidence-gap reports.
+However, **release behavior is source/configuration-specific**. The committed integrated example intentionally pins NARA to a dated release for reproducibility. Rerunning that exact configuration will not automatically advance NARA to a newer release.
 
-See [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md).
+For NARA follow-latest monitoring, the adapter supports:
+
+```json
+"release_mode": "latest"
+```
+
+A production deployment may therefore keep a pinned baseline config and a separate monitoring config whose selected sources follow their latest/current upstream data. A normal upstream monitoring refresh should run online; `--offline` only replays previously acquired evidence.
+
+The persistent registry can then be queried by `preservation_risk_manager` for watchlists, High-risk/Top-10 reports, family reports, and evidence-gap reports.
+
+See:
+
+- NARA release semantics: [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md)
+- monitoring/reporting: [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
 
 ## Common CLI modes
 
