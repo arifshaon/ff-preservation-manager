@@ -11,6 +11,9 @@ preservation-risk-manager = "preservation_risk_manager.cli:main"
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 ai = ["openai>=1.42"]
+# PDF text extraction for the literature corpus. Plain text and OCR output
+# (.txt/.md) are ingested without this extra.
+corpus = ["pypdf>=4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
