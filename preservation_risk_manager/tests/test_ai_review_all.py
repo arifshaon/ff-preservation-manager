@@ -136,6 +136,14 @@ def test_review_all_records_agreement_and_divergence_without_changing_score():
     assert reviewed["ai_audit"]["q_adoption"]["deterministic_answer_id"] == "widely_adopted"
     assert reviewed["ai_audit"]["q_adoption"]["answer_id"] == "niche_or_declining"
 
+    # Independence contract: deterministic outputs are compared only after the
+    # model answers. They must never appear in the model-facing user prompt.
+    for request in provider.requests:
+        prompt = request.messages[1].content or ""
+        assert '"deterministic_result"' not in prompt
+        assert '"deterministic_status"' not in prompt
+        assert '"deterministic_answer_id"' not in prompt
+
 
 def test_review_all_skips_questions_when_evidence_pack_is_empty():
     framework = _framework()
