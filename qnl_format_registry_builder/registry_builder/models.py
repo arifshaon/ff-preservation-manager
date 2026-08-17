@@ -72,6 +72,10 @@ class RawFormatRecord:
     # should put upstream vocabulary here and keep criterion IDs out of adapter code.
     native_fields: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    # Source-declared version/profile discriminator. This is identity metadata,
+    # not a risk criterion. It is intentionally optional because some sources
+    # encode versions in the name while others expose a dedicated field.
+    version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -97,6 +101,8 @@ class CanonicalFormat:
     trend: list[dict[str, Any]] = field(default_factory=list)
     preservation_method: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
+    # Canonical version/profile when source evidence supplies one consistently.
+    version: str | None = None
 
     def add_identifier(
         self,
