@@ -26,10 +26,13 @@ def _answer_for_question(question: Question, supplied_id: str | None, unknown_id
 
 def _band_suppressed_reason(
     *,
+    framework: RiskFramework,
     analysis_status: str,
     evidence_completeness: float,
     min_completeness_for_band: float,
 ) -> str | None:
+    if not framework.banding_enabled:
+        return "framework_not_calibrated"
     if analysis_status == "Not Assessed":
         return "not_assessed"
     if analysis_status == "Needs Assessment":
@@ -44,11 +47,10 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
 
     The scorer accepts only framework-declared answer IDs. Missing answers are
     treated as abstentions when the question provides an unknown/abstention
-    option; otherwise they are recorded as missing with zero points. Derived
-    answer metadata can preserve that an explicit `unknown` answer came from
-    missing registry evidence rather than from an affirmative evidence claim.
-    The LLM, if added later, will only supply controlled answer IDs into this
-    function.
+    option; otherwise they are recorded as missing with zero points. A framework
+    may explicitly disable overall banding while its question set is being
+    calibrated; question-level answers and completeness remain available, but no
+    authoritative Low/Moderate/High band is emitted.
     """
     question_results: list[dict[str, Any]] = []
     total_score = 0.0
@@ -105,6 +107,7 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
         critical_abstention_count=critical_abstention_count,
     )
     band_suppressed_reason = _band_suppressed_reason(
+        framework=framework,
         analysis_status=analysis_status,
         evidence_completeness=evidence_completeness,
         min_completeness_for_band=framework.min_completeness_for_band,
@@ -114,6 +117,8 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
     return {
         "framework_id": framework.framework_id,
         "framework_version": framework.version,
+        "calibration_status": framework.calibration_status,
+        "banding_enabled": framework.banding_enabled,
         "scale_direction": framework.scale_direction,
         "score": total_score,
         "max_score": framework.max_score,
