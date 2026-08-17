@@ -45,6 +45,7 @@ class Question:
     critical: bool = False
     weight: float = 1.0
     evidence_fields: tuple[str, ...] = ()
+    evidence_value_map: tuple[tuple[str, str], ...] = ()
     domain_id: str | None = None
     domain_label: str | None = None
     definition: str | None = None
@@ -69,6 +70,14 @@ class Question:
             raise FrameworkError(f"Question {question_id} has non-numeric weight") from exc
         if weight <= 0:
             raise FrameworkError(f"Question {question_id} weight must be greater than zero")
+        value_map = data.get("evidence_value_map") or {}
+        if not isinstance(value_map, dict):
+            raise FrameworkError(f"Question {question_id} evidence_value_map must be an object")
+        unknown_targets = {str(value) for value in value_map.values()} - set(answer_ids)
+        if unknown_targets:
+            raise FrameworkError(
+                f"Question {question_id} evidence_value_map references unknown answer IDs: {', '.join(sorted(unknown_targets))}"
+            )
         return cls(
             id=question_id,
             label=str(data.get("label") or question_id),
@@ -76,6 +85,7 @@ class Question:
             critical=bool(data.get("critical", False)),
             weight=weight,
             evidence_fields=tuple(str(field) for field in data.get("evidence_fields", [])),
+            evidence_value_map=tuple((str(key), str(value)) for key, value in value_map.items()),
             domain_id=str(data.get("domain_id")) if data.get("domain_id") is not None else None,
             domain_label=str(data.get("domain_label")) if data.get("domain_label") is not None else None,
             definition=data.get("definition"),
@@ -98,6 +108,10 @@ class Question:
             if answer.abstention:
                 return answer
         return None
+
+    def mapped_answer_id(self, normalized_value: str) -> str | None:
+        mapping = dict(self.evidence_value_map)
+        return mapping.get(normalized_value)
 
     def max_non_abstention_points(self) -> float:
         non_abstention = [answer.points for answer in self.answers if not answer.abstention]
