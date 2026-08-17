@@ -17,6 +17,8 @@ For repository-wide architecture/storage, also read:
 | --- | --- |
 | First end-to-end run | [`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md) |
 | Understand the module | [`../README.md`](../README.md) |
+| Resolve PUID/MIME/name/other format observations | [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md) |
+| Enable bounded AI fallback for unresolved format identification | [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md) |
 | Understand evidence → derivation → score → suppression | [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md) |
 | Author/review frameworks and calibration | [`FRAMEWORKS.md`](FRAMEWORKS.md) |
 | Install/configure/run every mode | [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md) |
@@ -36,6 +38,7 @@ For repository-wide architecture/storage, also read:
 
 ```text
 ../README.md
+ -> FORMAT_IDENTIFICATION.md
  -> RISK_ANALYSIS_WORKFLOW.md
  -> PRESERVATION_RISK_QUESTIONS.md
  -> HUMAN_AND_SYSTEM_QUERIES.md
@@ -46,6 +49,7 @@ For repository-wide architecture/storage, also read:
 ```text
 ../../docs/GETTING_STARTED.md
  -> INSTALLATION_SETUP_AND_RUN.md
+ -> FORMAT_IDENTIFICATION.md
  -> CLI_REFERENCE.md
  -> RISK_MONITORING_AND_REPORTING.md
 ```
@@ -55,6 +59,7 @@ For repository-wide architecture/storage, also read:
 ```text
 ../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md
  -> ARCHITECTURE.md
+ -> FORMAT_IDENTIFICATION.md
  -> HUMAN_AND_SYSTEM_QUERIES.md
  -> CLI_REFERENCE.md
 ```
@@ -72,6 +77,7 @@ RISK_ANALYSIS_WORKFLOW.md
 
 ```text
 ARCHITECTURE.md
+ -> FORMAT_IDENTIFICATION.md
  -> AI_ASSISTED_ANALYSIS.md
  -> AI_PROVIDER_INTERFACE.md
  -> MODULE_REFERENCE.md
@@ -84,6 +90,7 @@ ARCHITECTURE.md
 | `DOCUMENTATION_MAP.md` | This navigation page. |
 | `ARCHITECTURE.md` | High-level resolver/evidence/framework/request/AI architecture and safety boundaries. |
 | `MODULE_REFERENCE.md` | Responsibility of each Python module and AI submodule. |
+| `FORMAT_IDENTIFICATION.md` | Programmatic format resolution, conservative normalization, optional AI candidate plugin, safety/failure behavior and integration commands. |
 | `RISK_ANALYSIS_WORKFLOW.md` | Detailed deterministic flow and band-suppression explanations. |
 | `FRAMEWORKS.md` | Framework JSON schema, questions, answers, weights, bands, completeness, calibration and governance. |
 | `INSTALLATION_SETUP_AND_RUN.md` | Installation, storage/AI setup and runnable modes. |
@@ -116,8 +123,11 @@ qnl_format_registry_builder/config/sources.criterion-mapping.quickstart.json
 ## Core runtime boundaries
 
 ```text
-RegistryReader
- -> FormatResolver
+format observation
+ -> IdentificationResolver
+ -> FormatResolver / optional AI fallback plugin
+ -> CanonicalFormat
+ -> RegistryReader
  -> evidence pack
  -> RiskFramework
  -> deterministic answer derivation
@@ -125,11 +135,14 @@ RegistryReader
  -> canonical result
 ```
 
+AI format identification is **opt-in**. Without it, identification is programmatic only. When enabled, AI can select only from local canonical candidates and may abstain; AI failure never replaces the programmatic result.
+
 Human prompt mode adds:
 
 ```text
 human question
  -> AI request router (intent/parameters only)
+ -> optional bounded AI identification fallback
  -> same canonical request executor
  -> same deterministic result
  -> human_renderer
@@ -139,6 +152,8 @@ Machine integration bypasses the router:
 
 ```text
 structured JSON request
+ -> programmatic identification
+ -> optional bounded AI identification fallback
  -> same canonical request executor
  -> canonical JSON
 ```
@@ -163,9 +178,9 @@ The broad framework is a QNL working synthesis, not a verbatim official LOC/NARA
 
 | Mode | Input | Output | AI role |
 | --- | --- | --- | --- |
-| `ask` | Natural-language question | Detailed human-readable answer | Route request only |
-| `ask --json` | Natural-language question | Canonical JSON + router audit metadata | Route request only |
-| `query-json` | Structured request | Canonical JSON | None |
+| `ask` | Natural-language question | Detailed human-readable answer | Route request only; optional identification fallback when explicitly enabled |
+| `ask --json` | Natural-language question | Canonical JSON + router/identification audit metadata | Route request; optional identification fallback |
+| `query-json` | Structured request | Canonical JSON | None by default; optional identification fallback when explicitly enabled |
 | `analyze-format` | Explicit format/framework/store | Deterministic JSON | None |
 | `analyze-format-ai --ai-mode fill-gaps` | Explicit format/framework/store | Deterministic + bounded AI-assisted JSON | Interpret unresolved evidence only |
 | `analyze-format-ai --ai-mode review-all` | Explicit format/framework/store | Deterministic + independent review comparison | Raw-source-only review |
