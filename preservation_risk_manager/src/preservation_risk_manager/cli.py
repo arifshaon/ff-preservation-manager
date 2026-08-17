@@ -20,6 +20,12 @@ from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.policy_proposals import build_policy_change_proposal
 from preservation_risk_manager.posture import compute_local_risk_posture
 from preservation_risk_manager.scoring import score_answers
+from preservation_risk_manager.training_corpus import (
+    VALID_TIERS,
+    CorpusSettings,
+    TrainingCorpusError,
+    build_training_corpus,
+)
 
 
 class CliFailure(Exception):
@@ -419,6 +425,68 @@ def propose_policy_change(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return parsed
+
+
+def _tier_list(value: str) -> tuple[str, ...]:
+    tiers = tuple(item.strip().upper() for item in str(value).split(",") if item.strip())
+    unknown = [tier for tier in tiers if tier not in VALID_TIERS]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"unknown tier(s): {', '.join(unknown)}. Allowed: {', '.join(VALID_TIERS)}"
+        )
+    if not tiers:
+        raise argparse.ArgumentTypeError("at least one tier is required")
+    return tiers
+
+
+def _unit_interval(value: str) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not 0 <= parsed < 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
+def build_corpus(args: argparse.Namespace) -> dict[str, Any]:
+    """Build a versioned fine-tuning corpus and fail the build on a gate violation."""
+    framework = load_framework(_require_file(args.framework, label="Framework file"))
+    reader = _registry_reader_from_args(args)
+    try:
+        settings = CorpusSettings(
+            corpus_version=args.corpus_version,
+            tiers=args.tiers,
+            abstention_share=args.abstention_share,
+            abstention_tolerance=args.abstention_tolerance,
+            split_seed=args.split_seed,
+            test_share=args.test_share,
+            val_share=args.val_share,
+            max_evidence_items=args.max_evidence_items,
+            min_test_examples_per_question=args.min_test_examples_per_question,
+            max_answer_share=args.max_answer_share,
+            institution_id=args.institution,
+            max_formats=args.max_formats,
+        )
+    except TrainingCorpusError as exc:
+        raise CliFailure({"status": "invalid_corpus_settings", "error": str(exc)}) from exc
+
+    result = build_training_corpus(reader, framework, settings, Path(args.out))
+    if not result["quality_gates"]["passed"]:
+        # The corpus is written before this raises so a failed build can be
+        # inspected. A gate failure means the corpus must not be trained on.
+        raise CliFailure(result)
+    return result
+
+
 def _add_registry_source_args(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--registry-json", help="Path to registry_builder registry.json export.")
@@ -516,6 +584,61 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress long evidence claim bodies in the LLM context while retaining provenance fields.",
     )
     propose.set_defaults(func=propose_policy_change)
+
+    corpus = subparsers.add_parser(
+        "build-training-corpus",
+        help="Build a versioned, leakage-gated fine-tuning corpus for the risk-answer interpreter.",
+    )
+    corpus.add_argument("--framework", required=True, help="Path to risk framework JSON.")
+    _add_registry_source_args(corpus)
+    corpus.add_argument("--out", required=True, help="Output root directory; the corpus is written to <out>/<corpus-version>/.")
+    corpus.add_argument("--corpus-version", required=True, help="Corpus version label, for example 2026-09.")
+    corpus.add_argument(
+        "--tiers",
+        type=_tier_list,
+        default=VALID_TIERS,
+        help="Comma-separated tiers to build. A=no NARA evidence, B=leave-one-out, C=abstention. Default: A,B,C.",
+    )
+    corpus.add_argument(
+        "--abstention-share",
+        type=_unit_interval,
+        default=0.12,
+        help="Target share of Tier C abstention examples in the corpus. Default: 0.12.",
+    )
+    corpus.add_argument(
+        "--abstention-tolerance",
+        type=_unit_interval,
+        default=0.03,
+        help="Allowed deviation from --abstention-share before the build fails. Default: 0.03.",
+    )
+    corpus.add_argument("--split-seed", type=int, default=20260901, help="Seed for the deterministic format-level split.")
+    corpus.add_argument("--test-share", type=_unit_interval, default=0.15, help="Share of formats held out for test. Default: 0.15.")
+    corpus.add_argument("--val-share", type=_unit_interval, default=0.10, help="Share of formats held out for validation. Default: 0.10.")
+    corpus.add_argument("--institution", help="Optional institution ID; omit to build a global corpus.")
+    corpus.add_argument(
+        "--max-evidence-items",
+        type=_positive_int,
+        default=20,
+        help="Maximum evidence items supplied per question, matching inference. Default: 20.",
+    )
+    corpus.add_argument(
+        "--min-test-examples-per-question",
+        type=int,
+        default=30,
+        help="Gate: minimum test examples each bound question needs for per-question metrics. Default: 30.",
+    )
+    corpus.add_argument(
+        "--max-answer-share",
+        type=_unit_interval,
+        default=0.90,
+        help="Gate: maximum share a single answer may hold for one question. Default: 0.90.",
+    )
+    corpus.add_argument(
+        "--max-formats",
+        type=_positive_int,
+        help="Optional cap on formats scanned, for smoke runs against a large registry.",
+    )
+    corpus.set_defaults(func=build_corpus)
     return parser
 
 
