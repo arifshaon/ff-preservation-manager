@@ -1,0 +1,10 @@
+{
+  "ai": {
+    "provider": "openai_compatible",
+    "endpoint": "http://127.0.0.1:8000/v1",
+    "model": "<LOCAL_MODEL_NAME>",
+    "temperature": 0.0,
+    "max_output_tokens": 1200,
+    "timeout_seconds": 60
+  }
+}
