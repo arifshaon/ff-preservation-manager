@@ -1,0 +1,43 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "method_profiles": {
+    "enabled": true,
+    "path": "method_profiles.example.json"
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings",
+    "include_drafts": false,
+    "scope": "all",
+    "notes": "Source-scoped operational config for adding or refreshing PRONOM. Reconciliation still uses latest stored records from other completed sources, such as NARA."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "pronom_registry",
+      "type": "pronom_registry",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
+      "notes": "PRONOM contributes verified PUID identity, disclosure evidence, update currency, and signature-based identifiability evidence."
+    }
+  ]
+}
