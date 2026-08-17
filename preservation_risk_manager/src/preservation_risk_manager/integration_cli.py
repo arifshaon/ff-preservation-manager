@@ -9,6 +9,7 @@ from preservation_risk_manager.ai import build_ai_provider, load_ai_config
 from preservation_risk_manager.ai.request_router import route_natural_language_request
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
 from preservation_risk_manager.frameworks import load_framework
+from preservation_risk_manager.human_renderer import render_human_response
 from preservation_risk_manager.request_api import RequestValidationError, execute_request
 
 
@@ -51,7 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ask = subparsers.add_parser(
         "ask",
-        help="Translate a human preservation-risk question into a controlled request and return canonical JSON.",
+        help="Answer a human preservation-risk question using controlled routing and deterministic evidence.",
     )
     ask.add_argument("question", help="Natural-language preservation-risk question.")
     _add_common_args(ask)
@@ -61,6 +62,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Default institution ID for the question, for example qnl. Explicit scope in the question may override it.",
     )
     ask.add_argument("--limit", type=int, default=100, help="Maximum number of formats for discovery/batch actions.")
+    ask.add_argument(
+        "--json",
+        action="store_true",
+        help="Return the canonical JSON response instead of the default detailed human-readable answer.",
+    )
 
     query = subparsers.add_parser(
         "query-json",
@@ -110,8 +116,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = _ask(args) if args.command == "ask" else _query_json(args)
-    except Exception as exc:  # Integration commands guarantee JSON output on errors.
-        print(json.dumps({"status": "error", "error": str(exc)}, indent=2, sort_keys=True))
+    except Exception as exc:
+        # System integration is JSON-only. Human mode uses a concise readable
+        # error unless the caller explicitly requested canonical JSON.
+        error = {"status": "error", "error": str(exc)}
+        if args.command == "query-json" or getattr(args, "json", False):
+            print(json.dumps(error, indent=2, sort_keys=True))
+        else:
+            print(f"The request could not be completed: {exc}")
         return 2
-    print(json.dumps(result, indent=2, sort_keys=True, default=str))
+
+    if args.command == "ask" and not args.json:
+        print(render_human_response(result))
+    else:
+        print(json.dumps(result, indent=2, sort_keys=True, default=str))
     return 0
