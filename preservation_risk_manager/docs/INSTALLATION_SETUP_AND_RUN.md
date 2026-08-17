@@ -2,11 +2,9 @@
 
 This is the primary operator runbook for `preservation_risk_manager`.
 
-It covers installation, registry/storage access, frameworks, AI configuration, and every current execution mode.
+For the shortest path from a fresh checkout to a real criterion-backed assessment, start with **[`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md)**. This guide then covers all execution modes in more detail.
 
 ## 1. What this module does
-
-The risk manager reads preservation evidence from the registry and applies explicit frameworks:
 
 ```text
 format query
@@ -20,25 +18,25 @@ format query
  -> human text or JSON
 ```
 
-It is normally a **read/assessment layer**. Registry creation and updates are handled by `qnl_format_registry_builder`.
+The risk manager is normally a read/assessment layer. Registry construction and normal registry updates belong to `qnl_format_registry_builder`.
 
-Read the architecture first for design details:
+Related architecture:
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
 - [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
 
 ## 2. Requirements
 
 - Python 3.10 or later.
 - A registry source:
-  - registry-builder storage backend/config, or
-  - compatible exported registry JSON.
-- The sibling registry-builder package installed when using its storage backends such as MongoDB/file.
-- `openai` extra only for AI provider/routing/AI-assisted modes.
+  - a registry-builder storage backend/config, or
+  - registry-builder export files.
+- Criterion claims when framework-driven assessment is expected.
+- The sibling registry-builder package installed when using its storage adapters.
+- The optional AI dependency only for `ask`, AI provider utilities, `fill-gaps`, and `review-all`.
 
-## 3. Recommended installation with the registry builder
-
-For operational use against MongoDB, install both packages into the same environment.
+## 3. Install both packages
 
 From the repository root in PowerShell:
 
@@ -54,11 +52,9 @@ python -m pip install -e ".[dev,ai]"
 pytest -q
 ```
 
-Using an existing virtual environment is also supported.
+Using an existing virtual environment is supported.
 
-### Risk manager only
-
-For deterministic analysis from JSON exports:
+### Deterministic export-only use
 
 ```powershell
 cd preservation_risk_manager
@@ -66,27 +62,23 @@ python -m pip install -e ".[dev]"
 pytest -q
 ```
 
-For AI provider support:
+## 4. CLI entry point
 
-```powershell
-python -m pip install -e ".[dev,ai]"
-```
-
-## 4. Important CLI entry-point note
-
-For all commands in this guide, prefer:
+Use:
 
 ```powershell
 python -m preservation_risk_manager ...
 ```
 
-The module dispatcher routes `ask` and `query-json` to the integration CLI and all core analysis commands to the deterministic/AI analysis CLI.
+The module dispatcher routes `ask` and `query-json` to the integration interface and other commands to the explicit analysis CLI.
 
-## 5. Registry/storage setup
+Command reference: [`CLI_REFERENCE.md`](CLI_REFERENCE.md).
 
-### Option A: MongoDB or another registry-builder backend
+## 5. Registry/evidence setup
 
-Pass a registry-builder storage block or a full builder config containing a top-level `storage` object.
+### Option A — persistent registry backend
+
+Pass a registry-builder storage block or a full builder config containing `storage`.
 
 Example:
 
@@ -94,32 +86,73 @@ Example:
 ..\qnl_format_registry_builder\config\storage.mongodb.example.json
 ```
 
-Example content:
+The risk manager reuses the registry-builder storage factory through `RegistryReader`; it does not implement separate MongoDB preservation logic.
 
-```json
-{
-  "storage": {
-    "type": "mongodb",
-    "uri": "mongodb://localhost:27017",
-    "database": "format_registry",
-    "collection_prefix": "",
-    "server_selection_timeout_ms": 5000,
-    "ping": true
-  }
-}
+Example deterministic command:
+
+```powershell
+python -m preservation_risk_manager analyze-format `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --format PDF
 ```
 
-The risk manager passes this to the common registry-builder storage factory and reads it through `RegistryReader`.
+### Option B — registry-builder exports
 
-### Option B: exported registry JSON
+Registry-builder normally exports canonical formats and criterion claims separately:
 
-Commands that support `--registry-json` can read a registry export through `JsonRegistryStore`.
+```text
+output\registry.json
+output\criterion_claims.jsonl
+```
 
-For useful risk assessment, the export should include the relevant evidence/criterion-claim collections, not only canonical names.
+When a risk-manager command receives:
+
+```powershell
+--registry-json ..\qnl_format_registry_builder\output\registry.json
+```
+
+`JsonRegistryStore` automatically looks in the same directory for:
+
+```text
+criterion_claims.jsonl
+criterion_claims.json
+```
+
+and loads the first matching claim export.
+
+This is the supported export handoff between the two packages.
+
+### Criterion mapping must actually have run
+
+The generic builder config:
+
+```text
+qnl_format_registry_builder/config/sources.example.json
+```
+
+is primarily a registry-construction example and does **not** enable criterion mapping. A build can therefore contain thousands of canonical formats but still have no criterion claims usable by the risk framework.
+
+For the no-database cross-package quickstart use:
+
+```text
+qnl_format_registry_builder/config/sources.criterion-mapping.quickstart.json
+```
+
+It enables approved criterion mappings and exports both canonical formats and criterion claims.
+
+Verify before assessing:
+
+```powershell
+cd ..\qnl_format_registry_builder
+Test-Path output\registry.json
+Test-Path output\criterion_claims.jsonl
+(Get-Content output\criterion_claims.jsonl | Measure-Object -Line).Lines
+```
+
+The claim count should be greater than zero when the intention is criterion-backed assessment.
 
 ## 6. Framework setup
-
-Current examples:
 
 ### Small scoring example
 
@@ -129,13 +162,13 @@ examples/qnl_sustainability.framework.example.json
 
 Purpose:
 
-- tests/example deterministic scoring;
-- 3 questions;
-- overall Low/Moderate/High banding enabled.
+- exercise deterministic scoring;
+- three questions;
+- Low/Moderate/High banding enabled.
 
-This is not the full QNL preservation-obsolescence model.
+It is not the final QNL preservation-risk framework.
 
-### Broad draft question framework
+### Broad draft preservation question set
 
 ```text
 examples/qnl_preservation_risk_questions.framework.draft.json
@@ -143,69 +176,77 @@ examples/qnl_preservation_risk_questions.framework.draft.json
 
 Purpose:
 
-- 8 assessment domains;
+- 8 domains;
 - 22 stable question IDs;
-- targeted evidence/question assessment;
-- human and machine query use.
+- question/domain-specific evidence assessment;
+- human and machine queries;
+- evidence-gap/remediation development.
 
-Status:
+Current status:
 
 ```text
 calibration_status = draft_unvalidated
 banding_enabled = false
 ```
 
-The questions can be used operationally, but the framework must not present an overall Low/Moderate/High band until QNL validates scoring weights/thresholds.
+Question-level conclusions can be returned, but the framework deliberately suppresses an overall Low/Moderate/High band until calibration is approved.
 
-See [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md).
+See:
+
+- [`FRAMEWORKS.md`](FRAMEWORKS.md)
+- [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md)
 
 ## 7. AI provider setup
 
-AI is required for natural-language `ask` routing and AI-assisted analysis modes. It is **not** required for `query-json` or deterministic `analyze-format`.
+AI is required for natural-language `ask` routing and AI-assisted analysis modes. It is not required for `query-json` or deterministic `analyze-format`.
 
-Copy the example to a local ignored config:
+### Azure OpenAI
 
 ```powershell
 New-Item -ItemType Directory -Force config | Out-Null
 Copy-Item examples\ai.azure.example.json config\ai.local.json
 ```
 
-Fill in the deployment/key values locally. Do not commit real credentials.
+Edit deployment/key values locally and never commit real credentials.
 
-Inspect/redact config without a generation request:
+### Local/OpenAI-compatible model
+
+A shipped local template is available:
+
+```powershell
+New-Item -ItemType Directory -Force config | Out-Null
+Copy-Item examples\ai.local.example.json config\ai.local.json
+```
+
+Edit:
+
+```text
+endpoint
+model
+```
+
+to match the local server (for example vLLM, llama.cpp, Ollama or another OpenAI-compatible endpoint).
+
+### Validate the provider
 
 ```powershell
 python -m preservation_risk_manager.ai info `
   --config config\ai.local.json
-```
 
-Provider smoke test:
-
-```powershell
 python -m preservation_risk_manager.ai query `
   --config config\ai.local.json `
   --prompt "Reply with a short confirmation that the provider is available."
-```
 
-Structured-output validation:
-
-```powershell
 python -m preservation_risk_manager.ai validate-structured `
   --config config\ai.local.json
-```
 
-Tool-calling validation:
-
-```powershell
 python -m preservation_risk_manager.ai validate-tools `
   --config config\ai.local.json
 ```
 
-Full provider documentation: [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md).
+See [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md) and [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md).
 
-## 8. Mode: human question (`ask`)
-
-Use this for preservation staff/interactive use.
+## 8. Human question mode — `ask`
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -221,19 +262,18 @@ Flow:
 
 ```text
 human prompt
- -> AI routes to controlled action only
+ -> AI routes intent/parameters only
+ -> canonical request
  -> deterministic registry/framework execution
  -> canonical result
  -> human renderer
 ```
 
-The AI router does not calculate the risk answer.
+The AI router does not calculate the preservation-risk result.
 
-More examples: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
+### Human routing audit
 
-## 9. Mode: human question with canonical JSON (`ask --json`)
-
-Use this to debug/audit how a human prompt was routed.
+Add `--json`:
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -245,21 +285,13 @@ python -m preservation_risk_manager ask `
   --json
 ```
 
-JSON includes:
+This returns the canonical result plus router provider/model/usage, raw routed request and any deterministic route repairs.
 
-- normalized canonical request;
-- deterministic result;
-- router provider/model/usage;
-- raw routed request;
-- deterministic router repairs, if any.
+## 9. Machine/system mode — `query-json`
 
-Do not use natural-language routing when a system already knows the intended structured action; use `query-json` instead.
+A system should use the canonical request API directly when it already knows the intended action.
 
-## 10. Mode: machine/system request (`query-json`)
-
-This is the preferred integration interface.
-
-Example request file `request.json`:
+Example `request.json`:
 
 ```json
 {
@@ -272,7 +304,7 @@ Example request file `request.json`:
 }
 ```
 
-Execute:
+Run:
 
 ```powershell
 python -m preservation_risk_manager query-json `
@@ -285,18 +317,18 @@ Literal JSON is also supported:
 
 ```powershell
 python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"fmt-pdf","scope":"global"}' `
+  --request-json '{"action":"assess_format","format":"PDF","scope":"global"}' `
   --framework examples\qnl_sustainability.framework.example.json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
 ```
 
-No AI provider call occurs.
+No AI call occurs.
 
-See [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md) for all current actions.
+See [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
 
-## 11. Mode: deterministic single-format analysis (`analyze-format`)
+## 10. Deterministic single-format mode — `analyze-format`
 
-Use this for full auditable JSON analysis of one format.
+Persistent-store example:
 
 ```powershell
 python -m preservation_risk_manager analyze-format `
@@ -304,6 +336,16 @@ python -m preservation_risk_manager analyze-format `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
   --format PDF `
   --compact-evidence `
+  --evidence-summary
+```
+
+Export example:
+
+```powershell
+python -m preservation_risk_manager analyze-format `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --registry-json ..\qnl_format_registry_builder\output\registry.json `
+  --format PDF `
   --evidence-summary
 ```
 
@@ -318,9 +360,9 @@ Useful options:
 --compact-evidence
 ```
 
-`--include-unapproved` should be used deliberately for investigation/debugging, not routine approved-evidence assessment.
+`--include-unapproved` is an investigation/debug option, not the routine approved-evidence path.
 
-## 12. Mode: AI-assisted fill gaps
+## 11. AI-assisted mode — `fill-gaps`
 
 ```powershell
 python -m preservation_risk_manager analyze-format-ai `
@@ -334,13 +376,13 @@ python -m preservation_risk_manager analyze-format-ai `
 
 Behavior:
 
-- deterministic answers are derived first;
-- AI receives only unresolved/ambiguous questions and bounded evidence;
-- AI must choose a framework-declared answer ID;
-- already resolved deterministic answers are not overwritten;
-- no usable evidence means the model should not be asked to invent an answer.
+- deterministic derivation runs first;
+- AI sees only unresolved/ambiguous eligible questions and bounded evidence;
+- AI must choose framework-declared answer IDs;
+- resolved deterministic answers are not overwritten merely because AI disagrees;
+- no usable evidence means the model should not invent an answer.
 
-## 13. Mode: independent AI review (`review-all`)
+## 12. Independent AI review — `review-all`
 
 ```powershell
 python -m preservation_risk_manager analyze-format-ai `
@@ -354,13 +396,9 @@ python -m preservation_risk_manager analyze-format-ai `
 
 Purpose: calibration/evaluation, not automatic override.
 
-The review model receives a raw-source-only evidence view. Deterministic answer/status and normalized mapped values are withheld. AI output is compared with deterministic output only after the response.
+The model receives a raw-source-only evidence view without deterministic answers/scores or normalized mapped conclusions. Its answers are compared with deterministic results only after response.
 
-A disagreement is a review signal; it does not rewrite deterministic scoring.
-
-## 14. Mode: fixture analysis
-
-Useful for framework/scoring tests without a registry backend.
+## 13. Fixture mode — `analyze-fixture`
 
 ```powershell
 python -m preservation_risk_manager analyze-fixture `
@@ -369,9 +407,9 @@ python -m preservation_risk_manager analyze-fixture `
   --answers examples\pdf.answers.example.json
 ```
 
-The fixture command scores the supplied controlled answers against the framework.
+Useful for framework/scoring tests without a registry backend.
 
-## 15. Mode: policy/action proposal package
+## 14. Policy/action proposal package
 
 ```powershell
 python -m preservation_risk_manager propose-policy-change `
@@ -385,42 +423,26 @@ python -m preservation_risk_manager propose-policy-change `
   --compact-evidence
 ```
 
-This prepares an evidence-grounded proposal/context package for human review. It does not approve policy and does not write policy changes into the registry.
+This creates an evidence-grounded proposal/context package for human review. It does not approve or write policy changes.
 
-## 16. Global vs institution scope
+## 15. Global vs institution scope
 
 ### Global
 
-Use when assessing general format sustainability:
-
-```json
-"scope": "global"
-```
-
 Institution-scoped claims are excluded.
 
-### QNL/institution
+### Institution
 
-Human mode:
+Human mode can use:
 
 ```powershell
-python -m preservation_risk_manager ask `
-  "Can QNL sustainably manage this format?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --institution qnl
+--institution qnl
 ```
 
-Machine mode:
+Machine mode uses:
 
 ```json
 {
-  "action": "assess_format_questions",
-  "format": "PDF",
-  "filters": {
-    "domains": ["local_institutional_feasibility"]
-  },
   "scope": "institution",
   "institution_id": "qnl"
 }
@@ -428,28 +450,7 @@ Machine mode:
 
 Institution mode includes global evidence plus matching institution-scoped claims.
 
-## 17. Common human questions
-
-Examples:
-
-```text
-What is the obsolescence risk of PDF?
-What are the software dependency and environment risks of PDF?
-Does PDF depend on external assets or proprietary software?
-How well documented and governed is PDF?
-Which PDF formats are at risk?
-Which PDF formats cannot currently be assessed, and why?
-What should we fix first so the PDF family can be assessed?
-What preservation-risk questions do you assess?
-Can QNL sustainably manage this format?
-Are there tested migration pathways for this format at QNL?
-```
-
-See [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md) and [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
-
-## 18. Machine actions
-
-Current controlled actions:
+## 16. Current machine actions
 
 ```text
 assess_format
@@ -462,13 +463,13 @@ list_evidence_gaps
 plan_evidence_remediation
 ```
 
-Machine clients should use action IDs and stable domain/question IDs instead of trying to reproduce the natural-language router.
+Machine clients should use stable action/domain/question IDs rather than reproduce the natural-language router.
 
-## 19. Coverage behavior
+## 17. Coverage and band suppression
 
-An empty at-risk list does not automatically mean all candidates are safe.
+An empty at-risk list does not mean every candidate is safe.
 
-Batch output explicitly distinguishes:
+Batch results distinguish:
 
 ```text
 High
@@ -477,21 +478,40 @@ Low
 Unbanded
 ```
 
-Unbanded formats may be `Not Assessed`, `Partially Assessed`, or `Needs Assessment` because evidence is insufficient or a critical question is unresolved.
+For single-format results inspect:
 
-Similarly, the broad draft framework can answer individual questions while suppressing an overall band because `banding_enabled=false`.
+```text
+criterion_claims_used
+analysis_status
+evidence_completeness
+missing_count
+abstention_count
+band_suppressed_reason
+analysed_band
+```
 
-## 20. Evidence-gap/remediation workflow
+Current suppression reasons include:
+
+```text
+framework_not_calibrated
+not_assessed
+critical_abstention
+insufficient_evidence_completeness
+```
+
+Detailed explanation: [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md).
+
+## 18. Evidence gaps/remediation
 
 Human examples:
 
 ```text
-Which PDF formats need more evidence and what is missing?
 Why can't PDF 1.7 be assessed?
+Which PDF formats need more evidence and what is missing?
 What should we fix first so the PDF family can be assessed?
 ```
 
-Machine equivalents:
+Machine examples:
 
 ```json
 {
@@ -511,13 +531,40 @@ Machine equivalents:
 }
 ```
 
-The deterministic remediation planner distinguishes mapping work, new evidence acquisition, and framework-alignment review.
+## 19. Periodic monitoring/reporting
 
-## 21. Troubleshooting
+The machine interface is designed for external schedulers/reporting services.
+
+Typical pattern:
+
+```text
+refresh registry sources
+ -> verify source health
+ -> execute query-json requests
+ -> retain dated canonical JSON
+ -> compare with prior report
+ -> render/distribute dashboard | PDF | email | ticket | API result
+```
+
+See [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md).
+
+## 20. Troubleshooting
+
+### `criterion_claims_used = 0`
+
+Check whether:
+
+1. the builder config enabled `criterion_mapping`;
+2. `criterion_claims.jsonl` exists beside `registry.json` in export mode;
+3. the persistent backend actually contains `criterion_claims` in storage mode;
+4. the resolved format/strong identifier aliases correspond to the claim records;
+5. claims are approved/usable for the requested scope.
+
+Use the root [`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md) quickstart to validate the handoff independently.
 
 ### `registry_builder is not importable`
 
-Install the sibling builder package in the same environment when using `--storage-config`:
+Install the sibling package when using `--storage-config`:
 
 ```powershell
 cd ..\qnl_format_registry_builder
@@ -526,23 +573,13 @@ python -m pip install -e ".[mongo]"
 
 ### Format is ambiguous
 
-Use a more specific canonical ID or authority identifier. The resolver intentionally does not guess when multiple formats genuinely match.
+Use a canonical ID or authority identifier. The resolver intentionally avoids guessing.
 
-### Many questions are unknown
+### Broad framework returns no overall band
 
-Use evidence-gap/remediation actions. The likely causes are:
+Expected while `qnl_preservation_risk_questions.framework.draft.json` has `banding_enabled=false`.
 
-- no matching source evidence;
-- source evidence exists but no criterion mapping;
-- criterion claim exists but value is not mapped to a framework answer;
-- framework question requires a new evidence field;
-- institution-specific evidence has not been supplied.
-
-### No overall risk band with the broad framework
-
-Expected: `qnl_preservation_risk_questions.framework.draft.json` has banding disabled until calibration is approved.
-
-## 22. Tests
+## 21. Tests
 
 ```powershell
 cd preservation_risk_manager
@@ -550,13 +587,19 @@ python -m pip install -e ".[dev,ai]"
 pytest -q
 ```
 
-For changes to routing/providers, run the provider capability checks where appropriate. For framework changes, test both deterministic question derivation and human/machine request paths.
+Cross-package export changes should include a regression proving that a sibling criterion-claim export reaches deterministic assessment.
 
 ## Related documentation
 
-- Documentation map: [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md)
-- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- Human/system queries: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
-- Question domains: [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md)
-- AI providers: [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
-- Shared data/store interface: [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- [`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md)
+- [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md)
+- [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
+- [`FRAMEWORKS.md`](FRAMEWORKS.md)
+- [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
+- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
+- [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
+- [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md)
+- [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md)
