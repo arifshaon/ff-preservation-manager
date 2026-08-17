@@ -15,6 +15,10 @@ query-json
 
 All other commands use the deterministic/AI analysis CLI.
 
+The integration commands now pass format observations through `IdentificationResolver` before the canonical request executor. Programmatic identification is always available; bounded AI identification is opt-in.
+
+See [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md).
+
 ## `ask`
 
 Human natural-language interface.
@@ -42,9 +46,27 @@ Optional:
 --institution <id>
 --limit <1..5000>
 --json
+--enable-ai-identification
+--identification-ai-min-confidence <0..1>
 ```
 
-Normal output is detailed human-readable text. `--json` returns canonical JSON plus router audit metadata.
+Without `--enable-ai-identification`, format resolution remains deterministic/programmatic.
+
+With it enabled, the same provider configured by `--ai-config` is reused as a bounded format-identification fallback after deterministic resolution/normalization fails or remains ambiguous.
+
+Example:
+
+```powershell
+python -m preservation_risk_manager ask `
+  "What is the preservation risk of old adobe flash movie?" `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --ai-config config\ai.local.json `
+  --enable-ai-identification `
+  --identification-ai-min-confidence 0.85
+```
+
+Normal output is detailed human-readable text. `--json` returns canonical JSON plus router and identification audit metadata.
 
 ## `query-json`
 
@@ -76,7 +98,37 @@ one of: --registry-json | --storage-config
 one of: --request | --request-json
 ```
 
-Output is always canonical JSON.
+Optional identification flags:
+
+```text
+--enable-ai-identification
+--identification-ai-config <path>
+--identification-ai-min-confidence <0..1>
+```
+
+`--identification-ai-config` is required only when `--enable-ai-identification` is used in `query-json` mode.
+
+Programmatic normalization example without AI:
+
+```powershell
+python -m preservation_risk_manager query-json `
+  --request-json '{"action":"assess_format","format":"PRONOM fmt 18","scope":"global"}' `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+```
+
+AI fallback example:
+
+```powershell
+python -m preservation_risk_manager query-json `
+  --request-json '{"action":"assess_format","format":"old adobe flash movie","scope":"global"}' `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --enable-ai-identification `
+  --identification-ai-config config\ai.local.json
+```
+
+Output is always canonical JSON. When a request contains `format`, the response may include an `identification` section showing input, normalization method, whether AI was attempted, selected candidate, confidence, and acceptance/rejection metadata.
 
 Current request actions:
 
@@ -124,6 +176,8 @@ Optional:
 --compact-evidence
 ```
 
+This lower-level command currently uses the deterministic `FormatResolver` directly. The optional identification plugin is exposed through the common human/system integration commands (`ask` and `query-json`).
+
 ### Export mode handoff
 
 When `--registry-json` points to `registry.json`, the file reader automatically loads a sibling:
@@ -164,6 +218,8 @@ Optional:
 ```
 
 Default AI mode is `fill-gaps`.
+
+This AI mode concerns **risk evidence interpretation/review**, not format identification. For AI-assisted format identification, use the integration commands and [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md).
 
 See [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md).
 
@@ -313,10 +369,22 @@ missing_count
 abstention_count
 ```
 
+For identification problems, inspect:
+
+```text
+identification.status
+identification.method
+identification.match_type
+identification.ai_attempted
+identification.ai.accepted
+identification.ai.confidence
+```
+
 Suppression reasons are documented in [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md).
 
 ## Related docs
 
+- [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md)
 - [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
 - [`FRAMEWORKS.md`](FRAMEWORKS.md)
 - [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
