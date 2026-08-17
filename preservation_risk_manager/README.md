@@ -1,8 +1,8 @@
 # Preservation Risk Manager
 
-`preservation_risk_manager` is the **assessment, query, and presentation module** in the File Format Preservation Manager repository.
+`preservation_risk_manager` is the **assessment, query, monitoring, and presentation module** in the File Format Preservation Manager repository.
 
-It reads the evidence registry produced by `qnl_format_registry_builder`, resolves formats, applies explicit preservation-risk frameworks, diagnoses evidence gaps, and exposes the same underlying result to humans and automated systems.
+It reads the evidence registry produced by `qnl_format_registry_builder`, resolves formats, applies explicit preservation-risk frameworks, diagnoses evidence gaps, and exposes the same underlying result to humans, automated systems, and external reporting/scheduling services.
 
 Repository flow:
 
@@ -13,6 +13,7 @@ qnl_format_registry_builder
   -> preservation_risk_manager
        -> detailed human answer
        -> canonical machine JSON
+       -> periodic/reporting integrations
 ```
 
 Start with repository-wide architecture/data model if you are working across both modules:
@@ -44,9 +45,11 @@ AI is optional and bounded. It can route human questions, interpret unresolved e
 | Install/setup/run every mode | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Navigate all module documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
 | Understand architecture/safety boundaries | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Set up periodic source refresh, watchlists, Top 10/high-risk reports | [`docs/RISK_MONITORING_AND_REPORTING.md`](docs/RISK_MONITORING_AND_REPORTING.md) |
 | Human prompts and machine JSON actions | [`docs/HUMAN_AND_SYSTEM_QUERIES.md`](docs/HUMAN_AND_SYSTEM_QUERIES.md) |
 | 8 domains / 22 preservation-risk questions | [`docs/PRESERVATION_RISK_QUESTIONS.md`](docs/PRESERVATION_RISK_QUESTIONS.md) |
 | AI provider configuration | [`docs/AI_PROVIDER_INTERFACE.md`](docs/AI_PROVIDER_INTERFACE.md) |
+| Add/map a new evidence source | [`../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 
 ## Installation
 
@@ -126,6 +129,41 @@ python -m preservation_risk_manager query-json `
 
 This path makes no AI call and returns canonical JSON for APIs, dashboards, scheduled processes, tests, and other integrations.
 
+## Periodic risk monitoring and reporting
+
+The tool is designed to be called by an external scheduler/reporting layer as well as interactively.
+
+A typical recurring workflow is:
+
+```text
+1. rerun registry-builder against all approved sources
+2. verify source/run health
+3. run query-json for selected formats/families/whole registry
+4. save the canonical JSON response with a date/time
+5. compare with the previous saved response
+6. produce/distribute a report
+```
+
+Supported report patterns include:
+
+```text
+selected-format watchlist
+all High-risk formats
+Moderate + High queue
+Top 10 highest-risk formats
+family-specific risk report
+evidence-gap / unbanded report
+institution-scoped QNL report
+```
+
+The reporting layer can be Windows Task Scheduler, cron, Azure Automation, Airflow, CI/CD, a dashboard backend, or another institutional/external service. It should consume canonical JSON and may render PDF, email, dashboard, ticket, or another API response.
+
+Important: for a true whole-registry "Top 10", the current request `limit` must cover the candidate registry before the external report takes the first 10 ranked results. See the monitoring guide for the exact request and caveat.
+
+Full guide:
+
+[`docs/RISK_MONITORING_AND_REPORTING.md`](docs/RISK_MONITORING_AND_REPORTING.md)
+
 ## Controlled request actions
 
 Current actions:
@@ -178,6 +216,8 @@ banding_enabled = false
 ```
 
 Question-level evidence assessment is usable, but overall Low/Moderate/High banding must remain disabled until QNL validates weights and thresholds.
+
+This means the broad draft is suitable for periodic question/evidence-gap monitoring, but it should not yet be presented as an approved Top 10 High-risk ranking.
 
 See [`docs/PRESERVATION_RISK_QUESTIONS.md`](docs/PRESERVATION_RISK_QUESTIONS.md).
 
@@ -258,6 +298,18 @@ Example machine request:
 ```
 
 Local capability/storage/readiness observations should not be generalized as universal properties of PDF.
+
+## Adding new source evidence
+
+The registry builder owns source onboarding and criterion mappings. A new source normally follows:
+
+```text
+ingest -> audit -> map -> validate -> human approve -> backfill/integrated run -> verify here
+```
+
+For external sources, institution-scoped evidence, adding a genuinely new criterion, and the dedicated AI prompt for DPC Bit List mapping, see:
+
+[`../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
 
 ## AI provider support
 
