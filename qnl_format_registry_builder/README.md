@@ -51,7 +51,7 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 - Source-by-source incremental augmentation against a persistent store.
 - Declarative source-to-criterion mappings with review status/versioning.
 - Criterion-claim audit and backfill workflows.
-- Institutional evidence and policy overlays kept separate from global facts.
+- Institution-scoped evidence kept separate from global facts.
 - Preservation method/readiness/trend evidence support.
 - Change detection between registry states.
 - Pluggable source adapters, storage backends, and exporters.
@@ -60,13 +60,13 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 
 ## Start here
 
-For installation, setup, and every supported operator mode, use:
-
-**[`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md)**
-
-For the full builder documentation map:
-
-**[`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md)**
+| Need | Document |
+| --- | --- |
+| Installation/setup/all builder modes | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Full builder documentation map | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
+| Add/map a new source or institution evidence | [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
+| Detailed criterion mapping workflow | [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md) |
+| Periodic source refresh + risk-report orchestration | [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
 
 ## Installation
 
@@ -106,6 +106,21 @@ python -m registry_builder run `
   --out output `
   --offline
 ```
+
+## Periodic source updates
+
+For operational monitoring, an external scheduler/service can rerun an integrated source configuration periodically:
+
+```powershell
+python -m registry_builder run `
+  --config config\sources.criterion-mapping.mongodb.example.json `
+  --workdir work `
+  --out output
+```
+
+A normal monitoring refresh should run online so upstream changes are discovered. The same persistent registry is then queried by `preservation_risk_manager` for watchlists, High-risk/Top-10 reports, family reports, and evidence-gap reports.
+
+See [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md).
 
 ## Common CLI modes
 
@@ -193,7 +208,30 @@ source-native field/value
  -> deterministic answer/risk analysis
 ```
 
-Read [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md).
+For a new source, use this operational sequence:
+
+```text
+ingest -> audit -> compare with criteria -> draft mapping -> validate
+-> human approve -> dry-run backfill -> write claims -> verify in risk manager
+```
+
+Read [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
+
+That guide also explains:
+
+- when a new source only needs a mapping versus a genuinely new neutral criterion;
+- how institution-level evidence must use `source_independence: institution_scoped`;
+- how to bind a new criterion into a risk framework question;
+- how to use AI to draft a mapping safely;
+- a DPC Bit List prompt that returns validator-compatible mapping JSON for human review.
+
+Reusable DPC prompt:
+
+```text
+config/prompts/propose_mapping/dpc_bit_list.v1.md
+```
+
+Detailed mapping lifecycle: [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md).
 
 ## Adding sources/backends
 
