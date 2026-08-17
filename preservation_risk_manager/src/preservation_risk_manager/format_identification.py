@@ -174,16 +174,16 @@ def enrich_candidate_from_source_records(reader: RegistryReader, row: dict[str, 
             version = _source_record_version(source_row)
             if version and version not in versions:
                 versions.append(version)
-            for name in _source_record_signature_names(source_row):
+            names = _source_record_signature_names(source_row)
+            for name in names:
                 if name not in signature_names:
                     signature_names.append(name)
-            if version or signature_names:
+            if version or names:
                 detail = {
                     "source_id": source_row.get("source_id"),
                     "source_record_id": source_row.get("source_record_id"),
                     "version": version,
                 }
-                names = _source_record_signature_names(source_row)
                 if names:
                     detail["internal_signature_names"] = names
                 if detail not in details:
@@ -380,9 +380,10 @@ class AIFormatIdentificationPlugin:
                         "plausible candidate IDs in candidate_canonical_ids. Return status=no_match when none of the "
                         "supplied candidates is a defensible match. Treat exact format tokens, aliases, extensions, "
                         "identifiers, source-declared versions, and internal-signature names as evidence. Do not infer a "
-                        "specific version when it is absent from the input. For match, set candidate_canonical_id and "
-                        "candidate_canonical_ids to an empty array. For ambiguous, leave candidate_canonical_id empty. "
-                        "For no_match, leave both candidate fields empty."
+                        "specific version when it is absent from the input. For match, put the chosen supplied ID in "
+                        "candidate_canonical_id and set candidate_canonical_ids to an empty array. For ambiguous, leave "
+                        "candidate_canonical_id empty and list the plausible supplied IDs in candidate_canonical_ids. "
+                        "For no_match, leave candidate_canonical_id empty and candidate_canonical_ids empty."
                     ),
                 ),
                 AIMessage(
@@ -522,8 +523,15 @@ class IdentificationResolver:
         if base_resolution.ambiguous and base_resolution.matches:
             candidates = self._enriched_candidates(list(base_resolution.matches))
         else:
-            all_rows = self._enriched_candidates(self.reader.list_canonical_formats())
-            candidates = shortlist_candidates(original, all_rows, limit=self.fuzzy_candidate_limit)
+            # Rank using the cheap canonical metadata first. Only enrich the small
+            # shortlist from source_records; do not perform source-record queries
+            # for every canonical format in a large registry.
+            raw_candidates = shortlist_candidates(
+                original,
+                self.reader.list_canonical_formats(),
+                limit=self.fuzzy_candidate_limit,
+            )
+            candidates = self._enriched_candidates(raw_candidates)
 
         try:
             candidate, metadata = self.plugin.resolve(
