@@ -136,7 +136,14 @@ def _answer_from_claim(question: Question, evidence_field: str, claim: dict[str,
     value = _claim_value(claim)
     if not value:
         return None
-    answer_id = DERIVATION_VALUE_MAP.get(evidence_field, {}).get(value)
+
+    # Framework-local mappings allow the same registry criterion to be reused by
+    # different calibrated/draft frameworks without coupling their controlled
+    # answer vocabularies. The historical global map remains a compatibility
+    # fallback for existing frameworks.
+    answer_id = question.mapped_answer_id(value)
+    if answer_id is None:
+        answer_id = DERIVATION_VALUE_MAP.get(evidence_field, {}).get(value)
     if answer_id in allowed:
         return answer_id
     return None
@@ -172,9 +179,6 @@ def _derive_question_answer(question: Question, claims: list[dict[str, Any]], *,
             "evidence_claims": [candidate[1] for candidate in candidates],
         }
 
-    # Deterministic preservation-safe behaviour: when explicit evidence maps to
-    # conflicting controlled answers, choose the highest-point answer and expose
-    # the conflict in derivation metadata instead of silently ignoring it.
     answer_id = max(answer_ids, key=lambda item: (_answer_points(question, item), item))
     return {
         "answer_id": answer_id,
