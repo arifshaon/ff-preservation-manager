@@ -1,95 +1,283 @@
 # Preservation Risk Manager
 
-The risk manager is a standalone Python package under `preservation_risk_manager/`.
-Install it before running module or CLI commands; do not rely on `PYTHONPATH=src`.
+`preservation_risk_manager` is the **assessment, query, and presentation module** in the File Format Preservation Manager repository.
 
-It contains the deterministic preservation-risk engine and now also provides a provider-neutral AI interface for the future File Format Preservation Risk Assistant.
+It reads the evidence registry produced by `qnl_format_registry_builder`, resolves formats, applies explicit preservation-risk frameworks, diagnoses evidence gaps, and exposes the same underlying result to humans and automated systems.
 
-## Setup
+Repository flow:
 
-From the package directory:
-
-```powershell
-cd preservation_risk_manager
-python -m pip install -e ".[dev]"
+```text
+qnl_format_registry_builder
+  -> RegistryStore / criterion evidence
+  -> RegistryReader
+  -> preservation_risk_manager
+       -> detailed human answer
+       -> canonical machine JSON
 ```
 
-To use hosted or OpenAI-compatible AI providers:
+Start with repository-wide architecture/data model if you are working across both modules:
+
+- [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
+- [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+
+## What this module does
+
+```text
+format reference
+ -> resolve canonical format
+ -> gather global/institution-scoped criterion claims
+ -> build evidence pack
+ -> apply RiskFramework questions
+ -> derive controlled answers deterministically
+ -> score / suppress band when evidence is insufficient
+ -> diagnose gaps / remediation when requested
+ -> canonical result
+ -> human renderer OR machine JSON
+```
+
+AI is optional and bounded. It can route human questions, interpret unresolved evidence in `fill-gaps`, or independently review raw evidence in `review-all`. It does not silently rewrite deterministic answers, scores, risk bands, evidence, or institutional policy.
+
+## Start here
+
+| Need | Document |
+| --- | --- |
+| Install/setup/run every mode | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Navigate all module documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
+| Understand architecture/safety boundaries | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Human prompts and machine JSON actions | [`docs/HUMAN_AND_SYSTEM_QUERIES.md`](docs/HUMAN_AND_SYSTEM_QUERIES.md) |
+| 8 domains / 22 preservation-risk questions | [`docs/PRESERVATION_RISK_QUESTIONS.md`](docs/PRESERVATION_RISK_QUESTIONS.md) |
+| AI provider configuration | [`docs/AI_PROVIDER_INTERFACE.md`](docs/AI_PROVIDER_INTERFACE.md) |
+
+## Installation
+
+Python 3.10 or later is required.
+
+For normal operation against a registry-builder MongoDB backend, install both sibling packages in the same environment:
 
 ```powershell
+cd ..\qnl_format_registry_builder
+python -m pip install -e ".[dev,mongo]"
+
+cd ..\preservation_risk_manager
 python -m pip install -e ".[dev,ai]"
-```
-
-CI uses the editable install before running tests.
-
-## Run tests
-
-```powershell
 pytest -q
 ```
 
-## Analyze one format from a registry export
+For deterministic JSON-export-only use, the risk manager can be installed without AI:
 
 ```powershell
-python -m preservation_risk_manager analyze-format `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --registry-json ..\qnl_format_registry_builder\out\registry.json `
-  --format fmt/18 `
-  --institution qnl `
-  --readiness-status Covered `
-  --exposure-level High
+python -m pip install -e ".[dev]"
 ```
 
-## Analyze one format from the registry-builder storage backend
+Full setup: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
+
+## Human interface
+
+A person asks an ordinary preservation question:
 
 ```powershell
-python -m preservation_risk_manager analyze-format `
-  --framework examples\qnl_sustainability.framework.example.json `
+python -m preservation_risk_manager ask `
+  "What are the software dependency and environment risks of PDF?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format fmt/18 `
-  --institution qnl `
-  --readiness-status Covered `
-  --exposure-level High
+  --ai-config config\ai.local.json
 ```
 
-`--storage-config` may point to either a storage block or a full registry-builder config containing a top-level `storage` object.
+Normal output is detailed human-readable text with evidence coverage, question-level conclusions, supporting evidence, unresolved evidence, and calibration cautions.
 
-## Resolution failures
+The AI model routes the question to a controlled action; the registry/framework engine determines the actual assessment.
 
-Ambiguous or missing format resolution returns JSON with a top-level `status` and exits non-zero. For example, extension-based `pdf` resolution may match many PDF variants; use a canonical ID or PUID instead.
+Use `--json` only when you want the canonical result and router audit metadata:
 
-## AI provider interface
+```powershell
+python -m preservation_risk_manager ask `
+  "Which PDF formats need more evidence?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --ai-config config\ai.local.json `
+  --json
+```
 
-The AI layer is intentionally provider-neutral. Preservation evidence, framework rules, scoring, risk bands, and institutional posture remain application-owned and deterministic. The provider supplies model inference only.
+## Machine/system interface
 
-The first concrete provider is Azure OpenAI. The example configuration already contains the QNL endpoint:
+Software should send a structured action directly rather than depend on prompt interpretation.
+
+Example `request.json`:
+
+```json
+{
+  "action": "assess_format_questions",
+  "format": "PDF",
+  "filters": {
+    "domains": ["software_dependencies_environment"]
+  },
+  "scope": "global"
+}
+```
+
+Run:
+
+```powershell
+python -m preservation_risk_manager query-json `
+  --request request.json `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+```
+
+This path makes no AI call and returns canonical JSON for APIs, dashboards, scheduled processes, tests, and other integrations.
+
+## Controlled request actions
+
+Current actions:
 
 ```text
-examples/ai.azure.example.json
+assess_format
+assess_format_questions
+search_formats
+assess_format_family
+list_at_risk_formats
+list_assessment_questions
+list_evidence_gaps
+plan_evidence_remediation
 ```
 
-Copy it to a local ignored file and replace the API-key and deployment placeholders:
+See [`docs/HUMAN_AND_SYSTEM_QUERIES.md`](docs/HUMAN_AND_SYSTEM_QUERIES.md) for request/response semantics and examples.
+
+## Frameworks
+
+### Small scoring example
+
+```text
+examples/qnl_sustainability.framework.example.json
+```
+
+A 3-question example used to exercise deterministic scoring/banding. It is not the full QNL obsolescence framework.
+
+### Broad draft preservation question set
+
+```text
+examples/qnl_preservation_risk_questions.framework.draft.json
+```
+
+Contains 8 domains / 22 stable question IDs covering:
+
+1. Specification Disclosure & Governance
+2. Software Dependencies & Environment
+3. Adoption & Community Support
+4. Technical Structure & Transparency
+5. Intellectual Property & Rights Management
+6. Metadata & Self-Documentation
+7. Essential Characteristics (Content Fidelity)
+8. Local Institutional Feasibility
+
+It is marked:
+
+```text
+calibration_status = draft_unvalidated
+banding_enabled = false
+```
+
+Question-level evidence assessment is usable, but overall Low/Moderate/High banding must remain disabled until QNL validates weights and thresholds.
+
+See [`docs/PRESERVATION_RISK_QUESTIONS.md`](docs/PRESERVATION_RISK_QUESTIONS.md).
+
+## Other execution modes
+
+| Mode | Purpose |
+| --- | --- |
+| `analyze-format` | Full deterministic single-format JSON analysis. |
+| `analyze-format-ai --ai-mode fill-gaps` | Deterministic analysis plus bounded interpretation of unresolved questions. |
+| `analyze-format-ai --ai-mode review-all` | Independent raw-evidence AI review for calibration; never automatic override. |
+| `analyze-fixture` | Score test/fixture evidence without live registry access. |
+| `propose-policy-change` | Build an evidence-grounded proposal package for human approval; does not write policy. |
+
+Commands: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
+
+## Evidence gaps and remediation
+
+The system treats unresolved evidence as a first-class result.
+
+Human questions:
+
+```text
+Why can't PDF 1.7 be assessed?
+Which PDF formats need more evidence and what is missing?
+What should we fix first so the PDF family can be assessed?
+```
+
+The deterministic gap/remediation layer distinguishes:
+
+```text
+no matching evidence
+claims that exist but do not map
+claims unrelated to the active framework
+mapping-rule work
+new source-evidence work
+framework-alignment review
+```
+
+This prevents `Unknown` from being silently treated as `Low`.
+
+## Registry/storage access
+
+The risk manager does not implement separate MongoDB business logic.
+
+`RegistryReader` consumes a minimal store protocol:
+
+```python
+query(collection, filter)
+```
+
+When given a registry-builder storage config, it creates the configured registry-builder backend. Therefore MongoDB, file storage, or a future compatible backend can serve the same assessment code.
+
+Shared contract: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md).
+
+## Global vs QNL scope
+
+Global analysis excludes institution-scoped claims.
+
+QNL/institution analysis includes:
+
+```text
+global/external evidence
++ institution_id=qnl evidence
+```
+
+Example machine request:
+
+```json
+{
+  "action": "assess_format_questions",
+  "format": "PDF",
+  "filters": {
+    "domains": ["local_institutional_feasibility"]
+  },
+  "scope": "institution",
+  "institution_id": "qnl"
+}
+```
+
+Local capability/storage/readiness observations should not be generalized as universal properties of PDF.
+
+## AI provider support
+
+The provider-neutral interface currently supports:
+
+- Azure OpenAI;
+- OpenAI-compatible endpoints.
+
+Capabilities include normal generation, structured output, and tool-calling validation where supported.
+
+Provider configuration must be local/secret-managed; never commit real API keys.
+
+See [`docs/AI_PROVIDER_INTERFACE.md`](docs/AI_PROVIDER_INTERFACE.md).
+
+## Tests
 
 ```powershell
-mkdir config
-Copy-Item examples\ai.azure.example.json config\ai.local.json
+cd preservation_risk_manager
+python -m pip install -e ".[dev,ai]"
+pytest -q
 ```
 
-Validate/redact the configuration without contacting Azure:
-
-```powershell
-python -m preservation_risk_manager.ai info `
-  --config config\ai.local.json
-```
-
-Run a manual provider smoke test after supplying a real key and deployment name:
-
-```powershell
-python -m preservation_risk_manager.ai query `
-  --config config\ai.local.json `
-  --prompt "Reply with a short confirmation that the preservation AI provider is available."
-```
-
-The same interface also has an `openai_compatible` provider path for future hosted or local inference servers. See [`docs/AI_PROVIDER_INTERFACE.md`](docs/AI_PROVIDER_INTERFACE.md) for configuration, structured-output, tool-calling, local-model, and secret-handling details.
-
-The next implementation step is to expose preservation tools such as `assess_format` and connect AI interpretation to unresolved framework questions while keeping final scoring deterministic.
+Changes to the canonical request layer should test both human routing and direct structured requests so the two interfaces cannot drift.
