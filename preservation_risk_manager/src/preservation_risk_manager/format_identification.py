@@ -12,6 +12,7 @@ from preservation_risk_manager.format_resolver import FormatResolution, FormatRe
 
 
 _PUID_PATTERN = re.compile(r"(?:pronom\s*)?(x?-?fmt)\s*[:/\- ]\s*(\d+)$", re.IGNORECASE)
+_TOKEN_PATTERN = re.compile(r"[a-z0-9][a-z0-9.+_-]*", re.IGNORECASE)
 _AI_UNSAFE_AMBIGUITY_TYPES = {
     "canonical_id",
     "verified_authority_identifier",
@@ -134,19 +135,49 @@ def _search_values(row: dict[str, Any]) -> list[str]:
     return [value.strip() for value in values if value.strip()]
 
 
+def _tokens(value: str) -> set[str]:
+    return {token.lower() for token in _TOKEN_PATTERN.findall(str(value or "")) if len(token) >= 2}
+
+
 def _fuzzy_score(query: str, row: dict[str, Any]) -> float:
+    """Rank local candidates for optional AI review.
+
+    Candidate generation is intentionally broader than deterministic identity
+    resolution. A descriptive observation such as ``Adobe Shockwave Flash SWF
+    file`` must retain a registry record whose extension/alias is exactly ``swf``
+    even though comparing the whole phrase to the three-letter token produces a
+    weak SequenceMatcher score. The AI plugin still decides only among supplied
+    local candidates and may abstain.
+    """
     needle = query.lower().strip()
     if not needle:
         return 0.0
+    query_tokens = _tokens(needle)
     best = 0.0
     for value in _search_values(row):
-        candidate = value.lower()
+        candidate = value.lower().strip()
+        if not candidate:
+            continue
         if needle == candidate:
             return 1.0
         if needle in candidate or candidate in needle:
             best = max(best, 0.88)
+
+        candidate_tokens = _tokens(candidate)
+        if candidate_tokens and query_tokens:
+            overlap = candidate_tokens.intersection(query_tokens)
+            if overlap:
+                # A complete candidate token set contained in the observation is
+                # highly relevant for aliases/extensions such as SWF, JPEG, TIFF.
+                if candidate_tokens.issubset(query_tokens):
+                    best = max(best, 0.96 if len(candidate_tokens) == 1 else 0.92)
+                else:
+                    coverage = len(overlap) / len(candidate_tokens)
+                    query_coverage = len(overlap) / len(query_tokens)
+                    best = max(best, 0.55 + (0.25 * coverage) + (0.10 * query_coverage))
+
         best = max(best, SequenceMatcher(None, needle, candidate).ratio())
-    return best
+    return min(best, 1.0)
 
 
 def shortlist_candidates(
@@ -161,6 +192,16 @@ def shortlist_candidates(
         key=lambda item: (-item[0], _format_label(item[1]).lower()),
     )
     return [row for score, row in ranked[:limit] if score >= minimum_score]
+
+
+def _candidate_summary(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "canonical_id": _format_id(row),
+        "label": _format_label(row),
+        "identifiers": row.get("identifiers") or {},
+        "extensions": _as_values(row.get("extensions")),
+        "mime_types": _as_values(row.get("mime_types")),
+    }
 
 
 class AIFormatIdentificationPlugin:
@@ -185,23 +226,19 @@ class AIFormatIdentificationPlugin:
         base_resolution: FormatResolution,
     ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
         candidates = candidates[: self.max_candidates]
+        candidate_payload = [_candidate_summary(row) for row in candidates]
+        candidate_audit = {
+            "candidate_count": len(candidate_payload),
+            "candidates": candidate_payload,
+        }
         if not candidates:
             return None, {
                 "status": "abstain",
                 "reason": "no_local_candidates",
                 "provider": self.provider.describe(),
+                **candidate_audit,
             }
 
-        candidate_payload = [
-            {
-                "canonical_id": _format_id(row),
-                "label": _format_label(row),
-                "identifiers": row.get("identifiers") or {},
-                "extensions": _as_values(row.get("extensions")),
-                "mime_types": _as_values(row.get("mime_types")),
-            }
-            for row in candidates
-        ]
         schema = {
             "type": "object",
             "additionalProperties": False,
@@ -220,8 +257,11 @@ class AIFormatIdentificationPlugin:
                     content=(
                         "You are a bounded file-format identification assistant. Select ONLY from the supplied "
                         "local canonical registry candidates. Never invent a PUID, identifier, format, or candidate. "
-                        "If the input is insufficient, ambiguous, or no supplied candidate is a defensible match, "
-                        "return status=abstain. candidate_canonical_id must be empty when abstaining."
+                        "Treat exact format tokens, aliases, extensions and identifiers in the user's observation as "
+                        "strong evidence for candidate relevance, but do not infer a specific version when the input "
+                        "does not distinguish among multiple versions. If the input is insufficient, ambiguous, or "
+                        "no supplied candidate is a defensible single match, return status=abstain. "
+                        "candidate_canonical_id must be empty when abstaining."
                     ),
                 ),
                 AIMessage(
@@ -258,6 +298,7 @@ class AIFormatIdentificationPlugin:
             "candidate_canonical_id": candidate_id or None,
             "minimum_confidence": self.minimum_confidence,
             "provider": self.provider.describe(),
+            **candidate_audit,
         }
         if status != "match" or confidence < self.minimum_confidence or not candidate_id:
             metadata["accepted"] = False
@@ -359,6 +400,8 @@ class IdentificationResolver:
                     "accepted": False,
                     "error_type": type(exc).__name__,
                     "error": str(exc),
+                    "candidate_count": len(candidates),
+                    "candidates": [_candidate_summary(row) for row in candidates],
                 },
             )
 
