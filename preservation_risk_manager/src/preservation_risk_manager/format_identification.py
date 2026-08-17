@@ -69,13 +69,18 @@ def normalize_format_observation(value: str) -> list[str]:
         canonical_prefix = "x-fmt" if prefix == "xfmt" else "fmt"
         variants.append(f"{canonical_prefix}/{match.group(2)}")
 
-    # Common wrapper text around an otherwise exact authority identifier.
     compact = raw.strip().strip("[](){}<>,;\"'")
     if compact != raw:
         variants.append(compact)
 
     seen: set[str] = set()
-    return [item for item in variants if item and not (item.lower() in seen or seen.add(item.lower()))]
+    deduped: list[str] = []
+    for item in variants:
+        key = item.lower()
+        if item and key not in seen:
+            seen.add(key)
+            deduped.append(item)
+    return deduped
 
 
 def _format_id(row: dict[str, Any]) -> str:
@@ -145,7 +150,7 @@ def shortlist_candidates(
     minimum_score: float = 0.25,
 ) -> list[dict[str, Any]]:
     ranked = sorted(
-        (( _fuzzy_score(query, row), row) for row in rows),
+        ((_fuzzy_score(query, row), row) for row in rows),
         key=lambda item: (-item[0], _format_label(item[1]).lower()),
     )
     return [row for score, row in ranked[:limit] if score >= minimum_score]
@@ -296,7 +301,6 @@ class IdentificationResolver:
                     resolution=normalized_resolution,
                     method="deterministic_normalization",
                 )
-            # Prefer a normalized ambiguity over the less-informative original miss.
             if base_resolution.not_found and normalized_resolution.ambiguous:
                 base_resolution = normalized_resolution
 
@@ -314,11 +318,27 @@ class IdentificationResolver:
             if base_resolution.ambiguous and base_resolution.matches
             else shortlist_candidates(original, all_rows, limit=self.fuzzy_candidate_limit)
         )
-        candidate, metadata = self.plugin.resolve(
-            original,
-            candidates=candidates,
-            base_resolution=base_resolution,
-        )
+        try:
+            candidate, metadata = self.plugin.resolve(
+                original,
+                candidates=candidates,
+                base_resolution=base_resolution,
+            )
+        except Exception as exc:
+            return FormatIdentificationResult(
+                input_value=original,
+                normalized_value=None,
+                resolution=base_resolution,
+                method="ai_fallback_error_programmatic_result_retained",
+                ai_attempted=True,
+                ai_metadata={
+                    "status": "error",
+                    "accepted": False,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+
         if candidate is not None:
             resolution = FormatResolution(
                 query=original,
