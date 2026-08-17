@@ -16,13 +16,15 @@ REQUEST_ROUTER_SYSTEM_PROMPT = (
     "the request against its registry and deterministic framework. Use assess_format for one format, "
     "search_formats only for format discovery, assess_format_family for assessing all matching family "
     "members, list_at_risk_formats when the user asks which formats are risky, concerning, at risk, "
-    "Moderate, High, or should be worried about, and list_evidence_gaps when the user asks why a format "
+    "Moderate, High, or should be worried about, list_evidence_gaps when the user asks why a format "
     "cannot be assessed, which formats need more evidence, what evidence is missing, or which formats "
-    "are unassessed/partially assessed. For family-level list_at_risk_formats or list_evidence_gaps, "
-    "put the family term in filters.family, not query. For a single-format evidence-gap question, put "
-    "the format in format. If the user asks for at-risk formats without bands, use Moderate and High. "
-    "If the user explicitly mentions QNL as the assessment scope, use scope institution with "
-    "institution_id qnl; otherwise use global unless another institution ID is explicitly supplied."
+    "are unassessed/partially assessed, and plan_evidence_remediation when the user asks what should be "
+    "fixed, prioritized, mapped, enriched, or done next to improve assessment coverage. For family-level "
+    "list_at_risk_formats, list_evidence_gaps, or plan_evidence_remediation, put the family term in "
+    "filters.family, not query. For a single-format evidence-gap or remediation question, put the format "
+    "in format. If the user asks for at-risk formats without bands, use Moderate and High. If the user "
+    "explicitly mentions QNL as the assessment scope, use scope institution with institution_id qnl; "
+    "otherwise use global unless another institution ID is explicitly supplied."
 )
 
 
@@ -104,14 +106,13 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
             repairs.append(f"{action}.filters.family<-query_or_format")
             family = inferred_family
 
-    # Evidence-gap requests support either one format or a family. If the model
-    # puts an otherwise unscoped subject in query, preserve it as a single-format
-    # subject rather than rejecting the request. Family prompts are instructed to
-    # use filters.family and therefore bypass this repair.
-    if action == "list_evidence_gaps" and not family and not format_value and query:
+    # Evidence diagnostic/remediation requests support either one format or a
+    # family. An otherwise unscoped subject in query is treated as one format;
+    # family prompts are instructed to use filters.family and bypass this repair.
+    if action in {"list_evidence_gaps", "plan_evidence_remediation"} and not family and not format_value and query:
         repaired["format"] = query
         repaired["query"] = None
-        repairs.append("list_evidence_gaps.format<-query")
+        repairs.append(f"{action}.format<-query")
 
     return repaired, repairs
 
