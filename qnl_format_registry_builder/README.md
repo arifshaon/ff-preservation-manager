@@ -2,28 +2,41 @@
 
 `qnl_format_registry_builder` is the **evidence-ingestion and registry-construction module** in the File Format Preservation Manager repository.
 
-It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, or other configured sources change.
+It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, DPC, or other configured sources change.
 
 For the first cross-package run from source acquisition to risk assessment, use:
 
 **[`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md)**
 
+For adding any new evidence source, use the single onboarding route:
+
+**[`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md)**
+
 ## Repository role
 
 ```text
-sources
-  -> qnl_format_registry_builder
+structured sources -----------------------------+
+                                                |
+narrative/PDF/HTML source                       |
+  -> manual/AI transcription                    |
+  -> human-reviewed structured artifact --------+
+                                                |
+                                                v
+qnl_format_registry_builder
   -> canonical formats + criterion claims
   -> RegistryStore / exports
   -> preservation_risk_manager
 ```
 
-Repository architecture/data model:
+Repository-wide references:
 
-- [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
-- [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- canonical backend-neutral data model: [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md)
+- architecture: [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
+- storage/query/update interface: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
 
 ## What this module does
+
+For structured sources:
 
 ```text
 Source acquisition
@@ -40,7 +53,17 @@ Source acquisition
   -> change detection
 ```
 
-The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction or the paired export files.
+For narrative/unstructured sources, add one controlled stage before normal ingestion:
+
+```text
+PDF / HTML / narrative publication
+  -> manual or AI-assisted transcription draft
+  -> human-reviewed versioned JSON
+  -> standard_json or thin source-specific adapter
+  -> normal pipeline
+```
+
+The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction or paired export files.
 
 ## Main capabilities
 
@@ -48,12 +71,15 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 - PRONOM registry and DROID/signature evidence.
 - Library of Congress FDD XML evidence.
 - Structured JSON source packages.
+- **Reviewed transcription packages for narrative/PDF/HTML preservation sources.**
+- **AI-assisted transcription prompts and schemas for unstructured sources, including DPC Bit List.**
 - Institutional policy workbook ingestion.
 - QNL institutional format evidence.
 - Content-addressed source snapshot cache and offline replay.
 - Conservative reconciliation using configured identifier authority rules.
 - Source-by-source incremental augmentation against persistent storage.
 - Declarative source-to-criterion mappings with review status/versioning.
+- **AI-assisted criterion-mapping drafts with mandatory human approval.**
 - Criterion-claim audit and backfill workflows.
 - Institution-scoped evidence separated from global facts.
 - Preservation method/readiness/trend evidence support.
@@ -67,11 +93,53 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 | Need | Document |
 | --- | --- |
 | First build + risk assessment across both packages | [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md) |
+| Canonical data model | [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md) |
+| Add any new source end-to-end | [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md) |
+| Add a narrative/PDF/unstructured source | [`../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md) |
 | Installation/setup/all builder modes | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Full builder documentation map | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
 | Add/map a new source or institution evidence | [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 | Detailed criterion mapping workflow | [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md) |
+| DPC AI transcription prompt | [`config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md`](config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md) |
+| DPC AI criterion-mapping prompt | [`config/prompts/propose_mapping/dpc_bit_list.v1.md`](config/prompts/propose_mapping/dpc_bit_list.v1.md) |
 | Periodic source refresh + risk-report orchestration | [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
+
+## AI-assisted source onboarding
+
+AI is useful in two separate source-onboarding stages.
+
+### 1. Transcription
+
+```text
+unstructured source -> source-native JSON draft
+```
+
+The repository provides:
+
+```text
+config/schemas/unstructured_source_transcription.v1.schema.json
+config/prompts/transcribe_unstructured_source/v1.0.md
+config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md
+```
+
+The model must preserve source locators and source-native terminology. It must not invent identifiers or calculate QNL risk. A named human/team reviews the artifact before production use.
+
+### 2. Criterion mapping
+
+```text
+reviewed source-native fields -> proposed neutral criterion mapping
+```
+
+Prompts:
+
+```text
+config/prompts/propose_mapping/v1.0.md
+config/prompts/propose_mapping/dpc_bit_list.v1.md
+```
+
+The mapping remains unapproved until human review. AI must not invent criterion IDs/values or approve its own mapping.
+
+Keep these two AI stages separate and auditable.
 
 ## Installation
 
@@ -102,11 +170,9 @@ python -m registry_builder run `
   --out output
 ```
 
-This demonstrates multi-source registry construction. **Criterion mapping is not enabled in this config.** It is therefore valid for learning/building the registry, but its outputs are not sufficient by themselves to demonstrate framework-driven risk assessment.
+This demonstrates multi-source registry construction. **Criterion mapping is not enabled in this config.** It is valid for learning/building the registry, but its outputs are not sufficient by themselves to demonstrate framework-driven risk assessment.
 
 ### Cross-package risk-assessment quickstart
-
-Use:
 
 ```powershell
 python -m registry_builder run `
@@ -115,7 +181,7 @@ python -m registry_builder run `
   --out output
 ```
 
-This no-database config explicitly enables approved criterion mappings and exports:
+This no-database config enables approved criterion mappings and exports:
 
 ```text
 output\registry.json
@@ -133,6 +199,31 @@ Test-Path output\criterion_claims.jsonl
 ```
 
 Full path: [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md).
+
+## Adding a narrative source such as DPC Bit List
+
+The recommended path is:
+
+```text
+DPC Bit List PDF/HTML
+ -> AI/manual transcription draft
+ -> human-reviewed JSON artifact
+ -> standard_json or DpcBitListAdapter
+ -> source field audit
+ -> AI/manual criterion mapping draft
+ -> human-approved mapping
+ -> criterion_claims
+ -> preservation_risk_manager verification
+```
+
+The transcription itself is a first-class artifact: versioned, diffable, reviewable, and traceable back to page/section/URL passages.
+
+Do not make production risk assessment depend directly on a transient LLM answer.
+
+See:
+
+- [`../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
+- [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md)
 
 ## Offline replay
 
@@ -168,6 +259,8 @@ Release behavior is source/configuration-specific. The committed integrated exam
 ```
 
 A deployment may keep separate pinned baseline and follow-latest monitoring configurations.
+
+For a manually transcribed narrative source, source refresh means reviewing the new publication edition, producing/reviewing a new transcription artifact, then rerunning the source. A future DPC-specific adapter may automate edition acquisition while retaining the same reviewed-transcription gate.
 
 See:
 
@@ -208,9 +301,10 @@ The sibling risk manager reuses the same store through `RegistryReader`; it does
 
 Read:
 
-- [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
-- [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
-- [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
+- canonical model: [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md)
+- common storage/query/update contract: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- builder storage config: [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
+- MongoDB physical schema: [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
 
 ## Source-by-source augmentation
 
@@ -220,6 +314,7 @@ A persistent registry can be updated one source at a time:
 NARA run -> refresh NARA contribution
 PRONOM run -> refresh verified PUID/identity contribution
 LOC run -> refresh FDD sustainability evidence
+DPC run -> refresh reviewed DPC transcription contribution
 ```
 
 The current canonical view is recomputed from active source contributions; source history/provenance is retained.
@@ -238,28 +333,22 @@ source-native field/value
  -> deterministic answer/risk analysis
 ```
 
-For a new source:
+For a new source, use the complete route:
 
 ```text
-ingest -> audit -> compare with criteria -> draft mapping -> validate
--> human approve -> dry-run backfill -> write claims -> verify in risk manager
+decide boundary
+ -> transcribe if unstructured
+ -> adapter/register identifiers
+ -> audit actual fields
+ -> draft mapping
+ -> validate/human approve
+ -> generate criterion claims
+ -> verify in risk manager
 ```
 
-Use [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
+Use [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md).
 
-That guide also covers:
-
-- external vs institution-scoped evidence;
-- when to add a genuinely new neutral criterion;
-- binding criteria into framework questions;
-- AI-assisted mapping drafts;
-- the dedicated DPC Bit List prompt.
-
-Reusable DPC prompt:
-
-```text
-config/prompts/propose_mapping/dpc_bit_list.v1.md
-```
+Detailed mapping guide: [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
 
 ## Adding sources/backends
 
@@ -302,6 +391,8 @@ work/snapshots/<source_id>/
 output/
 ```
 
+Reviewed transcription source artifacts are different from generated output. Store/version them in a controlled source-data location appropriate to the deployment so that they can be reviewed and diffed between editions.
+
 ## Tests
 
 ```powershell
@@ -310,7 +401,7 @@ python -m pip install -e ".[dev,mongo]"
 pytest -q
 ```
 
-For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report.
+For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report. For narrative sources, validate/review the transcription and prove the final criterion claim is visible to the risk manager.
 
 ## Related module
 
