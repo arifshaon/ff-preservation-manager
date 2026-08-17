@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from preservation_risk_manager.ai import (
@@ -21,6 +22,7 @@ from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.human_renderer import render_human_response
 from preservation_risk_manager.request_api import RequestValidationError, execute_request, normalize_request
 from preservation_risk_manager.scoring import score_answers
+from preservation_risk_manager.source_evidence import build_ai_source_evidence
 
 
 def _require_file(path: str | Path, *, label: str) -> Path:
@@ -175,6 +177,87 @@ def _identification_plugin(args: argparse.Namespace, *, existing_provider=None):
     return AIFormatIdentificationPlugin(provider, minimum_confidence=confidence)
 
 
+def _candidate_extension_values(candidate: dict[str, Any]) -> set[str]:
+    values = {str(value).strip().lower() for value in candidate.get("extensions") or [] if str(value).strip()}
+    identifiers = candidate.get("identifiers") or {}
+    if isinstance(identifiers, dict):
+        values.update(str(value).strip().lower() for value in identifiers.get("extension") or [] if str(value).strip())
+    return values
+
+
+def _query_has_explicit_version(query: str, versions: set[str]) -> bool:
+    lowered = str(query or "").lower()
+    for version in versions:
+        escaped = re.escape(version.lower())
+        if re.search(rf"\b(?:version|ver|v|swf|flash)\s*[-:/]?\s*{escaped}\b", lowered):
+            return True
+    return False
+
+
+def _promote_version_ambiguity(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Correct an AI no-match when its shortlist proves a version-family ambiguity.
+
+    A model may describe "cannot choose one version" as no_match. When the local
+    shortlist itself demonstrates that the query matches one format family but
+    spans multiple declared versions, the programmatic layer reports ambiguity
+    instead. The original AI decision remains untouched under ``ai`` for audit.
+    """
+    if metadata.get("status") in {"resolved", "ambiguous"}:
+        return metadata
+    ai = metadata.get("ai") or {}
+    if ai.get("status") not in {"no_match", "abstain"}:
+        return metadata
+    candidates = [item for item in ai.get("candidates") or [] if isinstance(item, dict)]
+    if len(candidates) < 2:
+        return metadata
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for candidate in candidates:
+        label = str(candidate.get("label") or "").strip().lower()
+        version = str(candidate.get("version") or "").strip()
+        canonical_id = str(candidate.get("canonical_id") or "").strip()
+        if not label or not version or not canonical_id:
+            continue
+        grouped.setdefault(label, []).append(candidate)
+
+    query = str(metadata.get("input") or "").strip().lower()
+    query_tokens = set(re.findall(r"[a-z0-9]+", query))
+    eligible: list[tuple[int, str, list[dict[str, Any]]]] = []
+    for label, group in grouped.items():
+        versions = {str(item.get("version") or "").strip() for item in group if str(item.get("version") or "").strip()}
+        if len(group) < 2 or len(versions) < 2 or _query_has_explicit_version(query, versions):
+            continue
+        label_tokens = {token for token in re.findall(r"[a-z0-9]+", label) if len(token) >= 3}
+        shared_extensions: set[str] | None = None
+        for item in group:
+            item_extensions = _candidate_extension_values(item)
+            shared_extensions = item_extensions if shared_extensions is None else shared_extensions.intersection(item_extensions)
+        family_signal = bool(label_tokens.intersection(query_tokens)) or bool((shared_extensions or set()).intersection(query_tokens))
+        if family_signal:
+            eligible.append((len(group), label, group))
+
+    if not eligible:
+        return metadata
+    eligible.sort(key=lambda item: (-item[0], item[1]))
+    _, label, group = eligible[0]
+    candidate_ids = [str(item.get("canonical_id")) for item in group]
+    promoted = dict(metadata)
+    promoted.update({
+        "status": "ambiguous",
+        "match_type": "programmatic_version_ambiguity",
+        "method": "ai_fallback_no_match_programmatic_ambiguity",
+        "ambiguity_candidate_canonical_ids": candidate_ids,
+        "programmatic_ambiguity": {
+            "reason": "family_matched_but_version_not_supplied",
+            "family_label": label,
+            "candidate_count": len(candidate_ids),
+            "candidate_canonical_ids": candidate_ids,
+            "ai_status_retained_for_audit": ai.get("status"),
+        },
+    })
+    return promoted
+
+
 def _resolve_request_format(
     reader: RegistryReader,
     request: dict[str, Any],
@@ -197,6 +280,8 @@ def _resolve_request_format(
             metadata["resolved_label"] = (
                 row.get("preferred_name") or row.get("format_name") or row.get("name") or row.get("label")
             )
+    else:
+        metadata = _promote_version_ambiguity(metadata)
     return prepared, metadata
 
 
@@ -206,7 +291,8 @@ def _identification_ambiguity_response(framework, request: dict[str, Any], ident
         return None
     normalized_request = normalize_request(request)
     ai = identification.get("ai") or {}
-    wanted = {str(value) for value in ai.get("candidate_canonical_ids") or [] if str(value).strip()}
+    wanted_values = identification.get("ambiguity_candidate_canonical_ids") or ai.get("candidate_canonical_ids") or []
+    wanted = {str(value) for value in wanted_values if str(value).strip()}
     candidates = [
         candidate
         for candidate in ai.get("candidates") or []
@@ -248,9 +334,10 @@ def _apply_ai_risk_assessment(
 ) -> dict[str, Any]:
     """Attach AI-assisted risk analysis after a canonical single-format assessment.
 
-    This deliberately sits outside ``request_api.execute_request`` so the canonical
-    request executor remains deterministic. The deterministic result is retained in
-    the normal response; AI output is an additive audit/interpretation layer.
+    Deterministic assessment remains based on the normal evidence pack and
+    approved criterion claims. AI modes receive an additive, bounded source-native
+    evidence section for unresolved interpretation; that section is ignored by
+    deterministic answer derivation and scoring.
     """
     if ai_mode == "off" or response.get("status") != "ok":
         return response
@@ -288,6 +375,14 @@ def _apply_ai_risk_assessment(
         deterministic_answers.get("scoring_answers") or deterministic_answers["answers"],
     )
 
+    source_evidence = build_ai_source_evidence(
+        reader,
+        resolution.format_doc,
+        max_source_records=max(40, max_items * 3),
+        max_items=max(60, max_items * 5),
+    )
+    pack["ai_source_evidence"] = source_evidence
+
     try:
         if ai_mode == "review-all":
             ai_answers = review_answers_with_ai(
@@ -306,18 +401,26 @@ def _apply_ai_risk_assessment(
                 max_evidence_items=max_items,
             )
         ai_analysis = score_answers(framework, ai_answers.get("scoring_answers") or ai_answers["answers"])
+        source_record_keys = {
+            (str(item.get("source_id") or ""), str(item.get("source_record_id") or ""))
+            for item in source_evidence
+            if item.get("source_id") or item.get("source_record_id")
+        }
         response["ai_risk_assessment"] = {
             "status": "ok",
             "ai_mode": ai_mode,
             "provider": provider.describe(),
             "evidence_hash": evidence_hash(pack),
             "criterion_claims_used": len(claims),
+            "ai_source_evidence_items": len(source_evidence),
+            "ai_source_records_used": len(source_record_keys),
             "deterministic_analysis": deterministic_analysis,
             "analysis": ai_analysis,
             "derived_answers": ai_answers,
             "authority_boundary": (
-                "AI may interpret supplied evidence according to the selected mode; deterministic evidence, "
-                "framework rules, score/band governance, and policy remain authoritative."
+                "Deterministic answers and scores use approved criterion evidence only. AI may additionally interpret "
+                "bounded source-native evidence for unresolved questions; it cannot replace deterministically resolved "
+                "answers, change framework governance, or create policy."
             ),
         }
     except Exception as exc:
@@ -327,6 +430,7 @@ def _apply_ai_risk_assessment(
             "provider": provider.describe(),
             "error_type": type(exc).__name__,
             "error": str(exc),
+            "ai_source_evidence_items": len(source_evidence),
             "deterministic_analysis": deterministic_analysis,
         }
     return response
