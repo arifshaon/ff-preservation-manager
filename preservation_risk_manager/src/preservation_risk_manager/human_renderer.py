@@ -255,11 +255,130 @@ def _render_search(response: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_identification_disclosure(response: dict[str, Any]) -> list[str]:
+    identification = response.get("identification")
+    if not isinstance(identification, dict):
+        return []
+    method = str(identification.get("method") or "")
+    ai_attempted = bool(identification.get("ai_attempted"))
+    if not ai_attempted and not method.startswith("ai_"):
+        return []
+
+    ai = identification.get("ai") or {}
+    lines = ["AI-assisted format identification"]
+    lines.append(f"- Method: {method or 'AI fallback' }.")
+    resolved_label = identification.get("resolved_label")
+    resolved_id = identification.get("resolved_canonical_id")
+    if resolved_label or resolved_id:
+        lines.append(
+            f"- Resolved local registry candidate: {_display(resolved_label, _display(resolved_id))}"
+            + (f" ({resolved_id})" if resolved_id and str(resolved_id) != str(resolved_label) else "")
+            + "."
+        )
+    confidence = ai.get("confidence")
+    if confidence is not None:
+        try:
+            numeric = float(confidence)
+            lines.append(f"- AI confidence: {numeric:.2f} ({numeric * 100:.0f}%).")
+        except (TypeError, ValueError):
+            lines.append(f"- AI confidence: {_display(confidence)}.")
+    lines.append(f"- AI decision status: {_display(ai.get('status'), _display(identification.get('status')))}.")
+    rationale = ai.get("rationale")
+    if rationale:
+        lines.append(f"- Rationale: {rationale}")
+    lines.append(
+        "- Boundary: the AI could only select from supplied local registry candidates; this identification is disclosed because it was not a deterministic authority match."
+    )
+    return lines
+
+
+def _render_ai_risk_disclosure(response: dict[str, Any]) -> list[str]:
+    ai_risk = response.get("ai_risk_assessment")
+    if not isinstance(ai_risk, dict):
+        return []
+
+    status = str(ai_risk.get("status") or "unknown")
+    mode = _display(ai_risk.get("ai_mode"), "unknown")
+    lines = ["AI-assisted risk interpretation", f"- Mode: {mode}.", f"- Status: {status}."]
+    provider = ai_risk.get("provider")
+    if provider:
+        lines.append(f"- Provider: {provider}.")
+
+    if status == "ok":
+        analysis = ai_risk.get("analysis") or {}
+        band = analysis.get("analysed_band")
+        score = analysis.get("score")
+        max_score = analysis.get("max_score")
+        analysis_status = analysis.get("analysis_status")
+        completeness = analysis.get("evidence_completeness")
+        if band:
+            lines.append(f"- AI-assisted framework result: {band} (score {_display(score)}/{_display(max_score)}).")
+        else:
+            reason = str(analysis.get("band_suppressed_reason") or "unbanded").replace("_", " ")
+            lines.append(f"- AI-assisted framework result: no band ({reason}); score {_display(score)}/{_display(max_score)}.")
+        lines.append(
+            f"- AI-assisted assessment status: {_display(analysis_status)}; evidence completeness {_pct(completeness)}."
+        )
+
+        derived = ai_risk.get("derived_answers") or {}
+        summary = derived.get("ai_summary") or {}
+        if summary:
+            lines.append(
+                "- AI question handling: "
+                f"{int(summary.get('accepted_answers') or 0)} accepted, "
+                f"{int(summary.get('abstentions') or 0)} abstained, "
+                f"{int(summary.get('failed_questions') or 0)} failed."
+            )
+        audit = derived.get("ai_audit") or {}
+        for question_id, item in audit.items():
+            if not isinstance(item, dict):
+                continue
+            answer_id = item.get("answer_id")
+            confidence = item.get("confidence")
+            if answer_id is None:
+                continue
+            detail = f"  - {question_id}: {answer_id}"
+            if confidence is not None:
+                try:
+                    detail += f" at confidence {float(confidence):.2f}"
+                except (TypeError, ValueError):
+                    detail += f" at confidence {_display(confidence)}"
+            detail += "."
+            lines.append(detail)
+    elif status == "error_deterministic_retained":
+        lines.append(
+            "- AI interpretation failed; the deterministic result above was retained unchanged."
+        )
+        if ai_risk.get("error"):
+            lines.append(f"- Error: {ai_risk.get('error')}")
+    elif ai_risk.get("reason"):
+        lines.append(f"- Reason: {str(ai_risk.get('reason')).replace('_', ' ')}.")
+
+    boundary = ai_risk.get("authority_boundary")
+    if boundary:
+        lines.append(f"- Authority boundary: {boundary}")
+    return lines
+
+
+def _append_ai_disclosure(rendered: str, response: dict[str, Any]) -> str:
+    sections: list[str] = []
+    identification = _render_identification_disclosure(response)
+    if identification:
+        sections.append("\n".join(identification))
+    risk = _render_ai_risk_disclosure(response)
+    if risk:
+        sections.append("\n".join(risk))
+    if not sections:
+        return rendered
+    return rendered + "\n\n" + "\n\n".join(sections)
+
+
 def render_human_response(response: dict[str, Any]) -> str:
     """Render canonical request JSON as an archivist-facing detailed answer.
 
-    The renderer does not add preservation facts. It only explains data already
-    present in the canonical deterministic response.
+    The renderer does not add preservation facts. It explains data already present
+    in the canonical response and explicitly discloses any AI identification or
+    AI evidence-interpretation step that affected or supplemented that response.
     """
     status = str(response.get("status") or "ok")
     if status != "ok":
@@ -271,29 +390,34 @@ def render_human_response(response: dict[str, Any]) -> str:
                 lines.append("Possible matches:")
                 for row in matches:
                     lines.append(f"- {_display(row.get('label') or row.get('format_id'))}")
-            return "\n".join(lines)
-        return f"The request could not be completed: {_display(response.get('error'), status)}"
+            return _append_ai_disclosure("\n".join(lines), response)
+        return _append_ai_disclosure(
+            f"The request could not be completed: {_display(response.get('error'), status)}",
+            response,
+        )
 
     action = str((response.get("request") or {}).get("action") or "")
     if action == "assess_format_questions":
-        return _render_question_assessment(response.get("result") or {})
-    if action == "assess_format":
-        return _render_single_assessment(response.get("result") or {})
-    if action == "list_assessment_questions":
-        return _render_question_catalog(response)
-    if action == "list_at_risk_formats":
-        return _render_at_risk(response)
-    if action == "list_evidence_gaps":
+        rendered = _render_question_assessment(response.get("result") or {})
+    elif action == "assess_format":
+        rendered = _render_single_assessment(response.get("result") or {})
+    elif action == "list_assessment_questions":
+        rendered = _render_question_catalog(response)
+    elif action == "list_at_risk_formats":
+        rendered = _render_at_risk(response)
+    elif action == "list_evidence_gaps":
         if response.get("result"):
-            return _render_evidence_gaps({"results": [response["result"]], "gap_summary": {"formats_with_gaps": 1}})
-        return _render_evidence_gaps(response)
-    if action == "plan_evidence_remediation":
+            rendered = _render_evidence_gaps({"results": [response["result"]], "gap_summary": {"formats_with_gaps": 1}})
+        else:
+            rendered = _render_evidence_gaps(response)
+    elif action == "plan_evidence_remediation":
         if response.get("result"):
-            return _render_remediation({"results": [response["result"]], "remediation_summary": {"formats_requiring_remediation": 1, "remediation_item_count": response["result"].get("remediation_item_count", 0)}})
-        return _render_remediation(response)
-    if action == "search_formats":
-        return _render_search(response)
-    if action == "assess_format_family":
+            rendered = _render_remediation({"results": [response["result"]], "remediation_summary": {"formats_requiring_remediation": 1, "remediation_item_count": response["result"].get("remediation_item_count", 0)}})
+        else:
+            rendered = _render_remediation(response)
+    elif action == "search_formats":
+        rendered = _render_search(response)
+    elif action == "assess_format_family":
         rows = response.get("results") or []
         lines = [f"Assessed {len(rows)} format(s)."]
         for row in rows:
@@ -302,6 +426,8 @@ def render_human_response(response: dict[str, Any]) -> str:
                 f"- {_display(fmt.get('label') or fmt.get('format_id'))}: "
                 f"{_display(row.get('risk_band'), 'Unbanded')}, evidence {_pct(row.get('evidence_completeness'))}."
             )
-        return "\n".join(lines)
+        rendered = "\n".join(lines)
+    else:
+        rendered = "The request completed successfully, but no human renderer is defined for this action."
 
-    return "The request completed successfully, but no human renderer is defined for this action."
+    return _append_ai_disclosure(rendered, response)
