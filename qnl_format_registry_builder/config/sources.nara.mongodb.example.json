@@ -17,10 +17,10 @@
     "enabled": true,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings",
+    "mappings": "criterion_mappings/nara_digital_preservation_framework.v1.approved.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "Source-scoped operational config for adding or refreshing NARA. Reconciliation still uses latest stored records from other completed sources."
+    "notes": "Mode 3: source ingestion plus approved NARA criterion mapping in one run. Apply approved NARA rubric-answer mappings in memory after reconcile() and before persistence; use Mode 2 backfill only when mappings are added after NARA has already been ingested."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
@@ -40,7 +40,7 @@
       "fallback_release_date": "20260320",
       "github_ref": "master",
       "fallback_local_files": [],
-      "notes": "NARA is useful as an identity, preservation-planning, and external hazard source. Criterion claims are generated only for accepted NARA rubric-answer mappings; composite NARA ratings remain hazard estimators."
+      "notes": "Fresh NARA onboarding source. Pull NARA source data, normalize identity and hazard evidence, reconcile canonical records from currently available evidence, and generate approved NARA criterion_claims. Composite NARA ratings remain hazard estimators and are not mapped as criterion claims."
     }
   ]
 }
