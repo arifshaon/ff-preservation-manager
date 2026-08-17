@@ -1,8 +1,12 @@
 # MongoDB storage schema
 
-This document describes the MongoDB implementation of the `RegistryStore` backend.
+This document describes the **MongoDB physical implementation** of the repository's backend-neutral registry data model.
 
-MongoDB is the first production storage backend for the registry. The pipeline writes directly to MongoDB through `MongoRegistryStore`; JSON, CSV, SQLite and Markdown files are optional exports and are not staging files for database population.
+For the canonical entity/collection/transformation model—including `SourceSnapshot`, `Identifier`, `RawFormatRecord`, `CanonicalFormat`, `criterion_claims`, and risk-framework outputs—start with:
+
+[`../../docs/DATA_MODEL.md`](../../docs/DATA_MODEL.md)
+
+MongoDB is one `RegistryStore` implementation. The pipeline writes directly to MongoDB through `MongoRegistryStore`; JSON, CSV, SQLite and Markdown files are optional exports and are not staging files for database population.
 
 ## Implementation location
 
@@ -18,6 +22,8 @@ query(collection: str, filt: dict | None = None) -> list[dict]
 ```
 
 It also overrides common helper methods such as `create_run`, `save_snapshot`, `save_source_record`, `upsert_canonical_format`, `upsert_identifier`, and `save_hazard_assessment` so records are stored with stable MongoDB upsert keys and useful indexes.
+
+`criterion_claims` use the generic/storage helper path and have dedicated MongoDB indexes for format/criterion, source/mapping, criteria/mapping version, and institution scope.
 
 ## Configuration
 
@@ -59,19 +65,21 @@ Full supported storage block:
 
 Install dependency:
 
-```bash
+```powershell
 python -m pip install -e ".[mongo]"
 ```
 
 ## Storage model
 
-The registry is stored as logical MongoDB collections. A pipeline run persists:
+A pipeline run may persist:
 
 1. run metadata and report;
 2. source snapshots acquired in the current run;
 3. source records extracted in the current run;
 4. the current canonical registry view recomputed from active evidence contributions;
-5. per-format identifier, overlay, hazard, readiness, trend, and change records.
+5. identifier claims and institution overlays;
+6. normalized `criterion_claims` when criterion mapping is enabled;
+7. hazard/readiness/trend/change records.
 
 When `incremental_source_updates` is enabled, running one source at a time is supported. The current run contributes new evidence, while latest successful evidence contributions from other sources are reused for reconciliation. Earlier source records remain in MongoDB as provenance/history.
 
@@ -88,39 +96,40 @@ Source material can contain upstream keys that MongoDB may treat specially, for 
 
 This happens recursively for nested dictionaries and lists. It is a storage-layer concern only; source adapters and reconciliation code should not perform MongoDB-specific key rewriting.
 
+Criterion mapping's dotted-path resolver understands exact, Mongo-safe, and case-insensitive dictionary-key variants, so source-native keys that contain literal dots can still be addressed through mapping rules.
+
 ## Collection overview
 
 | Collection | Purpose | Main lookup keys |
 | --- | --- | --- |
 | `runs` | One document per pipeline run, including run report and source status. | `run_id` |
-| `source_snapshots` | Immutable source material snapshots acquired in a run. | `run_id`, `source_id`, `sha256` |
-| `source_records` | Normalized raw evidence records extracted from source snapshots. | `run_id`, `source_id`, `source_record_id` |
-| `canonical_formats` | Current queryable canonical registry records, plus retained non-current records. | `canonical_id`, `current` |
-| `format_identifiers` | Flattened identifier claims for lookup and matching. | `type`, `value`, `format_id` |
+| `source_snapshots` | Source material snapshots acquired in a run. | `run_id`, `source_id`, `sha256` |
+| `source_records` | Normalized raw/source-native evidence records emitted by adapters. | `run_id`, `source_id`, `source_record_id` |
+| `canonical_formats` | Current reconciled registry records, plus retained non-current records. | `canonical_id`, `current` |
+| `format_identifiers` | Flattened identifier claims for lookup/matching. | `type`, `value`, `format_id` |
 | `institution_policy_overlays` | Institutional policy/action overlays attached to canonical formats. | `run_id`, `format_id`, `institution_id`, `institution_format_id` |
+| `criterion_claims` | Neutral normalized evidence used by framework-driven risk analysis. | `canonical_id`, `criterion_id`, `source_id`, `mapping_rule_id`, `institution_id` |
 | `hazard_assessments` | Current-run hazard assessment snapshot per canonical format. | `run_id`, `format_id`, `basis`, `band` |
 | `readiness_assessments` | Readiness evidence/actions per canonical format. | `run_id`, `format_id`, `sequence` |
 | `trend_observations` | Trend/exposure evidence per canonical format. | `run_id`, `format_id`, `sequence` |
-| `assessment_changes` | Typed change events between the previous current registry view and the new view. | `change_id`, `created_at`, `format_id`, `change_type` |
+| `assessment_changes` | Typed change events between previous and current registry state. | `change_id`, `created_at`, `format_id`, `change_type` |
 
 If `collection_prefix` is set, the physical collection name is prefixed, for example `dev_canonical_formats`.
 
 ## Common fields
 
-Most persisted documents contain some combination of the following fields:
+Most persisted documents contain some combination of:
 
 | Field | Purpose |
 | --- | --- |
-| `run_id` | Pipeline run that produced or stored the document. |
-| `source_id` | Configured source instance ID, for example `nara_digital_preservation_framework`. |
-| `source_type` | Adapter type, for example `nara_digital_preservation_framework` or `pronom_registry`. |
-| `canonical_id` | Stable canonical format ID created during reconciliation. |
-| `format_id` | Alias of `canonical_id` used by storage helper collections. |
-| `current` | Boolean flag on `canonical_formats`; `false` means retained history, not current registry view. |
-| `last_seen_run_id` | Last run where a canonical format appeared in the current registry view. |
-| `last_removed_run_id` | Run that first marked a canonical format as no longer current. |
-| `removed_at` | Timestamp when a canonical format was marked non-current. |
-| `_storage_key` | Generic key used by the fallback `upsert()` method. |
+| `run_id` | Pipeline run that produced/stored the document where applicable. |
+| `source_id` | Configured source instance ID. |
+| `source_type` | Adapter/source type. |
+| `canonical_id` | Stable canonical format ID. |
+| `format_id` | Alias of `canonical_id` used by helper collections. |
+| `institution_id` | Optional institution scope, e.g. `qnl`. |
+| `current` | Current/non-current flag where the collection uses retained history. |
+| `_storage_key` | Generic stable key used by fallback `upsert()`. |
 
 ## `runs`
 
@@ -131,31 +140,20 @@ Important fields:
 | Field | Purpose |
 | --- | --- |
 | `run_id` | Unique run identifier. |
-| `started_at` | UTC timestamp when the run started. |
-| `finished_at` | UTC timestamp when the run finished. |
-| `status` | `running` at start, usually `completed` at end. |
-| `config_path` | Config file used for the run. |
-| `storage` | Storage summary: type, database, path, collection prefix. |
-| `offline` | Whether offline replay was used. |
+| `started_at` / `finished_at` | Run timestamps. |
+| `status` | Run status. |
+| `config_path` | Config file used. |
+| `storage` | Storage summary. |
+| `offline` | Whether cached/offline replay was used. |
 | `incremental_source_updates` | Whether source-by-source augmentation was enabled. |
-| `previous_canonical_formats` | Count of current canonical records before the run. |
 | `sources` | Per-source status summary. |
-| `identifier_kinds` | Identifier strength/verification rules used for the run. |
-| `source_status_counts` | Count of completed, failed, disabled sources. |
-| `source_change_counts` | Count of changed/unchanged completed source snapshots. |
-| `raw_records_extracted` | Number of source records extracted in this run only. |
-| `stored_source_records_used_for_augmentation` | Number of stored source records reused from other sources for source-by-source augmentation. |
-| `active_source_records` / `raw_records` | Total evidence records used for reconciliation in this run. |
-| `contributing_source_ids` | Source IDs that contributed new evidence in this run. |
-| `canonical_formats` | Number of canonical formats generated in the current view. |
-| `institution_policy_formats` | Count of canonical formats with institutional overlays. |
-| `validation_errors` | Validation errors from the run. |
-| `validation_warnings` | Validation warnings from the run. |
-| `change_detection` | Compact change summary. |
-| `change_counts` | Change counts by type. |
-| `changes` | Sample change events included in the run report. |
-| `exports_enabled` | Whether optional file exports were written. |
-| `outputs` | Export filenames when exports are enabled. |
+| `identifier_kinds` | Identifier strength/authority rules. |
+| `raw_records_extracted` | Source records extracted in this run. |
+| `stored_source_records_used_for_augmentation` | Stored records reused from other source contributions. |
+| `canonical_formats` | Current canonical format count. |
+| `validation_errors` / `validation_warnings` | Validation outcome. |
+| `change_detection` / `change_counts` | Change summary. |
+| `exports_enabled` / `outputs` | Export state and filenames. |
 
 Typical query:
 
@@ -165,24 +163,23 @@ db.runs.find().sort({finished_at: -1}).limit(1).pretty()
 
 ## `source_snapshots`
 
-Stores the source material snapshots acquired during a run.
+Stores source material snapshots acquired during a run.
 
 Important fields:
 
 | Field | Purpose |
 | --- | --- |
 | `run_id` | Run that acquired the snapshot. |
-| `source_id` | Configured source instance. |
-| `source_type` | Adapter type. |
-| `uri` | Original URI or file path used by the adapter. |
-| `acquired_at` | UTC acquisition timestamp. |
-| `sha256` | Content hash of the acquired source material. |
-| `local_path` | Cached local snapshot path under the work directory. |
+| `source_id` / `source_type` | Source identity/type. |
+| `uri` | Original URI/file path. |
+| `acquired_at` | Acquisition timestamp. |
+| `sha256` | Content hash. |
+| `local_path` | Cached/temporary local path. |
 | `content_type` | Optional content type. |
-| `note` | Optional adapter/acquisition note. |
-| `changed` | Whether the source content changed compared with the local snapshot index. |
-| `from_cache` | Whether the snapshot came from cache/offline replay. |
-| `metadata` | Adapter-specific metadata such as release mode, release date, Git ref, or fallback details. |
+| `note` | Adapter/acquisition note. |
+| `changed` | Source-change indicator where available. |
+| `from_cache` | Cached/offline replay indicator. |
+| `metadata` | Adapter-specific release/acquisition metadata. |
 
 Upsert identity:
 
@@ -190,41 +187,32 @@ Upsert identity:
 run_id + source_id + sha256
 ```
 
-Typical query:
-
-```javascript
-db.source_snapshots.find(
-  {source_id: "nara_digital_preservation_framework"},
-  {run_id: 1, uri: 1, sha256: 1, metadata: 1}
-).pretty()
-```
-
 ## `source_records`
 
-Stores normalized raw evidence records extracted from source snapshots. These records are the source-level evidence contributions that feed reconciliation.
+Stores source-level evidence records emitted by adapters. These records feed reconciliation and criterion mapping.
 
 Important fields mirror `RawFormatRecord`:
 
 | Field | Purpose |
 | --- | --- |
-| `run_id` | Run that extracted the record. |
-| `source_id` | Configured source instance. |
-| `source_type` | Adapter type. |
-| `source_record_id` | Stable source-local record ID; generated if missing. |
-| `name` | Source-provided format name. |
-| `category` | Source-provided category/family. |
-| `description` | Source description or note. |
-| `extensions` | Compatibility list of extensions. |
-| `mime_types` | Compatibility list of MIME types. |
-| `puids`, `loc_ids`, `nara_ids`, `wikidata_ids` | Compatibility identifier lists for existing adapters. |
-| `identifiers` | Generic identifier claims, each with `kind`, `value`, `source`, `verified`, `source_record_id`. |
-| `urls` | Source URLs or authority links. |
-| `institution_policy` | Institutional policy/action overlay data when the source is an institutional workbook. |
-| `hazard` | Source hazard estimate and native rating payload. |
-| `readiness` | Source readiness evidence. |
-| `trend` | Source trend/exposure evidence. |
-| `evidence` | Snapshot/source-row evidence pointers. |
-| `raw` | Original source row or useful source subset for audit/debugging. |
+| `run_id` | Run that extracted/stored the record. |
+| `source_id` / `source_type` | Source identity/type. |
+| `source_record_id` | Stable source-local record ID. |
+| `name` / `category` / `description` | Source-provided identity/description. |
+| `extensions` / `mime_types` | Source-provided compatibility fields. |
+| `puids`, `loc_ids`, `nara_ids`, `wikidata_ids` | Compatibility identifier lists. |
+| `identifiers` | Generic identifier claims with provenance/verification. |
+| `urls` | Source/authority links. |
+| `institution_policy` | Institution-specific policy/action overlay. |
+| `institution_evidence` | Institution-scoped evidence observations. |
+| `hazard` | Source-native/composite hazard evidence. |
+| `readiness` | Readiness/capability evidence. |
+| `trend` | Trend/exposure evidence. |
+| `evidence` | Snapshot/source-row/source-locator evidence pointers. |
+| `native_fields` | Source-native values intended for declarative criterion mappings. |
+| `raw` | Original source row/record/useful raw subset for audit/debugging. |
+
+For transcribed narrative sources ingested through `standard_json`, transcription-specific values may remain under `raw.native_fields.*`. A thin source-specific adapter may instead promote them into top-level `native_fields`.
 
 Upsert identity:
 
@@ -236,39 +224,35 @@ Typical query:
 
 ```javascript
 db.source_records.find(
-  {source_id: "nara_digital_preservation_framework"},
-  {source_record_id: 1, name: 1, identifiers: 1, hazard: 1}
+  {source_id: "loc_fdd_xml"},
+  {source_record_id: 1, name: 1, native_fields: 1, identifiers: 1}
 ).limit(5).pretty()
 ```
 
 ## `canonical_formats`
 
-Stores the recomputed canonical registry view. This is the main collection for querying the current registry.
+Stores the recomputed canonical registry view. This is the main collection for ordinary current-format lookup.
 
 Important fields mirror `CanonicalFormat` plus storage fields:
 
 | Field | Purpose |
 | --- | --- |
-| `canonical_id` | Stable canonical ID, usually based on the strongest verified identifier or a name-derived fallback. |
-| `format_id` | Alias of `canonical_id`. |
-| `preferred_name` | Reconciled preferred display name. |
-| `category` | Reconciled format category/family. |
-| `description` | Reconciled description where available. |
-| `identifiers` | Identifier values grouped by kind, for example `{puid: [...], nara: [...], extension: [...]}`. |
-| `identifier_claims` | Flattened source-specific identifier evidence with provenance. |
-| `source_records` | Source evidence summaries contributing to this canonical format. |
+| `canonical_id` / `format_id` | Stable canonical identity. |
+| `preferred_name` | Reconciled display name. |
+| `category` / `description` | Reconciled descriptive fields. |
+| `identifiers` | Identifier values grouped by kind. |
+| `identifier_claims` | Source-specific identifier evidence with provenance. |
+| `source_records` | Source contributions to this canonical format. |
 | `institution_policy_overlays` | Institutional policy/action overlays. |
-| `external_hazard` | External hazard evidence before final reconciliation. |
-| `hazard_assessment` | Final hazard band/basis/review state and native rating metadata. |
-| `readiness` | Readiness evidence/actions. |
-| `trend` | Trend/exposure observations. |
-| `preservation_method` | Assigned preservation method profiles. |
-| `provenance` | Reconciliation and source provenance metadata. |
-| `run_id` | Run that produced the current stored version. |
-| `current` | `true` or absent means current; `false` means retained historical record. |
-| `last_seen_run_id` | Latest run where this record was current. |
-| `last_removed_run_id` | Run that marked the record non-current. |
-| `removed_at` | Timestamp when marked non-current. |
+| `institution_evidence_claims` | Local institutional evidence. |
+| `external_hazard` | External hazard evidence. |
+| `hazard_assessment` | Final builder hazard state. |
+| `readiness` / `trend` | Capability/trend observations. |
+| `preservation_method` | Assigned method profiles. |
+| `provenance` | Reconciliation/source provenance. |
+| `run_id` | Run producing stored current version. |
+| `current` | Current/non-current state. |
+| `last_seen_run_id` / `last_removed_run_id` / `removed_at` | History markers. |
 
 Upsert identity:
 
@@ -282,31 +266,21 @@ Current registry query:
 db.canonical_formats.find({current: {$ne: false}})
 ```
 
-Sample query:
-
-```javascript
-db.canonical_formats.findOne(
-  {"identifiers.extension": "pdf", current: {$ne: false}},
-  {canonical_id: 1, preferred_name: 1, identifiers: 1, hazard_assessment: 1, source_records: 1}
-)
-```
-
 ## `format_identifiers`
 
-Stores one flattened row per identifier claim attached to a canonical format. This supports fast lookup by identifier type and value.
+Stores one flattened document per identifier claim attached to a canonical format.
 
 Important fields:
 
-| Field | Purpose |
-| --- | --- |
-| `run_id` | Run that generated the identifier claim. |
-| `format_id` | Canonical format ID. |
-| `canonical_id` | Canonical format ID alias. |
-| `type` | Identifier namespace, for example `puid`, `loc`, `nara`, `wikidata`, `extension`, `mime`, or future namespaces such as `dpc`. |
-| `value` | Identifier value. |
-| `source` | Source that made or verified the claim. |
-| `verified` | Whether this source verifies the namespace according to `identifier_kinds`. |
-| `source_record_id` | Source record that produced the claim. |
+```text
+run_id
+format_id / canonical_id
+type
+value
+source
+verified
+source_record_id
+```
 
 Upsert identity:
 
@@ -322,139 +296,181 @@ db.format_identifiers.findOne({type: "puid", value: "fmt/18"})
 
 ## `institution_policy_overlays`
 
-Stores institutional policy/action overlays separated from external authority evidence.
+Stores institution-specific policy/action decisions separately from external authority evidence and neutral criterion claims.
 
-Important fields depend on the institutional adapter but commonly include:
+Common fields include:
+
+```text
+run_id
+format_id / canonical_id
+institution_id
+institution_name
+institution_format_id
+source_row
+local_risk_level
+preservation_action
+proposed_preservation_plan
+preferred_tools
+conversion_process
+raw
+```
+
+Institution policy decisions should not be treated as universal format facts.
+
+## `criterion_claims`
+
+This collection is the normalized evidence bridge between registry-builder sources and `preservation_risk_manager` frameworks.
+
+A typical claim looks like:
+
+```json
+{
+  "canonical_id": "puid-fmt-18",
+  "criterion_id": "sustainability.disclosure",
+  "value": "openly_documented",
+  "source_id": "pronom_registry",
+  "source_type": "pronom_registry",
+  "source_record_id": "fmt/18",
+  "source_field": "native_fields.specification_status",
+  "source_value": "Full",
+  "native_vocabulary": "pronom",
+  "directness": "explicit",
+  "covers": "full",
+  "source_independence": "independent",
+  "criteria_version": "v1",
+  "mapping_version": "2026-08-17",
+  "mapping_rule_id": "pronom.disclosure.specification_status.v1",
+  "review_status": "approved",
+  "observed_at": "2026-08-17T00:00:00+00:00"
+}
+```
+
+Fields:
 
 | Field | Purpose |
 | --- | --- |
-| `run_id` | Run that generated the overlay. |
-| `format_id` / `canonical_id` | Canonical format ID. |
-| `institution_id` | Institution profile, for example `qnl`. |
-| `institution_name` | Institution display name. |
-| `institution_format_id` | Local/institutional format ID. |
-| `source_row` | Workbook/source row if available. |
-| `local_risk_level` / `risk_level` | Institutional risk label. |
-| `preservation_action` | Institution-defined action. |
-| `proposed_preservation_plan` | Proposed local preservation plan. |
-| `preferred_tools` | Preferred processing/conversion tools. |
-| `conversion_process` | Local conversion or handling process. |
-| `raw` | Original source row or subset. |
+| `canonical_id` | Format the claim describes. |
+| `criterion_id` | Neutral criteria-vocabulary field. |
+| `value` | Normalized allowed criterion value. |
+| `source_id` / `source_type` | Source contribution provenance. |
+| `source_record_id` | Source-local record that produced the observation. |
+| `source_field` | Actual mapped field path. |
+| `source_value` | Source/native value used by the mapping where retained. |
+| `native_vocabulary` | Name/version of source vocabulary where supplied. |
+| `directness` | `explicit`, `derived`, or `inferred`. |
+| `covers` / `covers_note` | Full/partial semantic coverage. |
+| `source_independence` | `independent`, `source_derived`, or `institution_scoped`. |
+| `criteria_version` | Criteria vocabulary version. |
+| `mapping_version` | Mapping configuration version. |
+| `mapping_rule_id` | Rule producing the claim. |
+| `review_status` | Claim review state. |
+| `observed_at` | Observation/mapping execution timestamp. |
+| `institution_id` | Optional institution scope. |
 
-Upsert identity:
+Institution-scoped claims must include/retain institution scope and are excluded from global-only analysis by the risk manager.
 
-```text
-run_id + format_id + institution_id + institution_format_id + source_row
-```
+Do not directly edit this collection to “fix” a risk result. Correct the source/transcription/mapping and regenerate claims so provenance remains valid.
 
-Typical query:
+Typical queries:
 
 ```javascript
-db.institution_policy_overlays.find({institution_id: "qnl"}).limit(10).pretty()
+db.criterion_claims.find({canonical_id: "fmt-pdf"}).pretty()
+```
+
+```javascript
+db.criterion_claims.find({criterion_id: "sustainability.adoption"}).limit(20).pretty()
+```
+
+```javascript
+db.criterion_claims.find({institution_id: "qnl"}).limit(20).pretty()
+```
+
+```javascript
+db.criterion_claims.aggregate([
+  {$group: {_id: "$criterion_id", count: {$sum: 1}}},
+  {$sort: {count: -1}}
+])
 ```
 
 ## `hazard_assessments`
 
-Stores the final hazard assessment for each canonical format generated by a run.
+Stores builder hazard conclusions separately from primitive criterion claims.
 
-Important fields:
-
-| Field | Purpose |
-| --- | --- |
-| `run_id` | Run that produced the assessment. |
-| `format_id` / `canonical_id` | Canonical format ID. |
-| `band` | Final hazard band, for example `Low`, `Moderate`, `High`, or operational states such as `no_estimator_available`. |
-| `basis` | Basis for the final assessment, for example external-only, corroborated, institutional override, or no estimator. |
-| `rating` | Normalized rating where available. |
-| `external_band` | External source band where available. |
-| `institution_band` | Institutional band where available. |
-| `review_required` | Whether a human review is required. This is not the same as divergence. |
-| `external_rating_native` | Source-native rating value. |
-| `external_rating_native_scale` | Name of source-native scale. |
-| `external_rating_native_direction` | Direction such as `higher_is_safer` or `lower_is_safer`. |
-| `external_native_gap_to_institution_band` | Source-specific native gap when the core understands the source scale. |
-| `confidence` | Assessment confidence where supplied. |
-| `reasons` / `evidence` | Explanation and supporting evidence where supplied. |
-
-Upsert identity:
+Important fields commonly include:
 
 ```text
-run_id + format_id
+run_id
+format_id / canonical_id
+band
+basis
+rating
+external_band
+institution_band
+review_required
+external_rating_native
+external_rating_native_scale
+external_rating_native_direction
+confidence
+reasons / evidence
 ```
 
-Typical query:
-
-```javascript
-db.hazard_assessments.find({band: "High"}).limit(20).pretty()
-```
+A source/composite hazard band is a conclusion and should not automatically be remapped into a primitive criterion claim.
 
 ## `readiness_assessments`
 
-Stores readiness evidence and actions by format.
+Stores readiness/capability evidence/actions by format.
 
-Important fields:
-
-| Field | Purpose |
-| --- | --- |
-| `run_id` | Run that produced the record. |
-| `format_id` / `canonical_id` | Canonical format ID. |
-| `sequence` | Sequence number for multiple readiness entries per format. |
-| `status` | Readiness status where supplied. |
-| `action` / `recommended_action` | Readiness action where supplied. |
-| `basis` | Why the readiness state/action was assigned. |
-| `evidence` | Supporting evidence. |
-
-Upsert identity:
+Common fields:
 
 ```text
-run_id + format_id + sequence
+run_id
+format_id / canonical_id
+sequence
+status
+action / recommended_action
+basis
+evidence
 ```
 
 ## `trend_observations`
 
 Stores trend/exposure evidence separately from base hazard.
 
-Important fields:
-
-| Field | Purpose |
-| --- | --- |
-| `run_id` | Run that produced the record. |
-| `format_id` / `canonical_id` | Canonical format ID. |
-| `sequence` | Sequence number for multiple trend entries per format. |
-| `trend` / `direction` | Trend direction where supplied. |
-| `exposure` | Exposure/holdings/use context where supplied. |
-| `basis` | Why the trend observation was assigned. |
-| `evidence` | Supporting evidence. |
-
-Upsert identity:
+Common fields:
 
 ```text
-run_id + format_id + sequence
+run_id
+format_id / canonical_id
+sequence
+trend / direction
+exposure
+basis
+evidence
 ```
 
 ## `assessment_changes`
 
 Stores actionable change events generated by comparing the previous current registry view with the newly computed view.
 
-Important fields:
+Common fields:
 
-| Field | Purpose |
-| --- | --- |
-| `change_id` | Stable change ID for the run/change/canonical field. |
-| `run_id` | Run that detected the change. |
-| `created_at` | Timestamp when detected. |
-| `change_type` | Event type. |
-| `canonical_id` / `format_id` | Affected canonical format. |
-| `field` | Field that changed, where applicable. |
-| `previous` | Summary of previous state. |
-| `current` | Summary of current state. |
-| `severity` | Review severity, for example `info` or `review`. |
-| `recommended_actions` | Suggested follow-up actions. |
-| `collapsed_change_type` | For bulk source-level collapse events. |
-| `affected_count` | Number of per-format changes collapsed into a bulk event. |
-| `dominant_source_ids` | Sources involved in a bulk event. |
+```text
+change_id
+run_id
+created_at
+change_type
+canonical_id / format_id
+field
+previous
+current
+severity
+recommended_actions
+collapsed_change_type
+affected_count
+dominant_source_ids
+```
 
-Common `change_type` values:
+Common change types include:
 
 ```text
 record_added
@@ -470,21 +486,9 @@ divergence_resolved
 source_coverage_changed
 ```
 
-Upsert identity:
-
-```text
-change_id
-```
-
-Typical query:
-
-```javascript
-db.assessment_changes.find({change_type: "hazard_band_changed"}).sort({created_at: -1}).limit(20).pretty()
-```
-
 ## Indexes created by `MongoRegistryStore`
 
-The MongoDB adapter creates these indexes at startup:
+The MongoDB adapter currently creates these indexes at startup:
 
 | Collection | Indexes |
 | --- | --- |
@@ -498,8 +502,9 @@ The MongoDB adapter creates these indexes at startup:
 | `readiness_assessments` | `run_id + format_id` |
 | `trend_observations` | `run_id + format_id` |
 | `assessment_changes` | `created_at`, `format_id`, `change_type` |
+| `criterion_claims` | `canonical_id + criterion_id`, `source_id + mapping_rule_id`, `criteria_version + mapping_version`, `institution_id` |
 
-These are not unique indexes. Upsert behavior is controlled in the store methods by the filter used in `replace_one(..., upsert=True)`.
+These are not unique indexes. Upsert behavior is controlled by store/helper key semantics.
 
 ## Useful local verification queries
 
@@ -511,6 +516,7 @@ db.canonical_formats.countDocuments({current: {$ne: false}})
 db.source_records.countDocuments()
 db.source_snapshots.countDocuments()
 db.format_identifiers.countDocuments()
+db.criterion_claims.countDocuments()
 db.hazard_assessments.countDocuments()
 db.assessment_changes.countDocuments()
 ```
@@ -521,16 +527,25 @@ Latest run:
 db.runs.find().sort({finished_at: -1}).limit(1).pretty()
 ```
 
-Formats with no estimator:
+Criterion-claim coverage by source:
 
 ```javascript
-db.canonical_formats.find(
-  {"hazard_assessment.basis": "no_estimator_available", current: {$ne: false}},
-  {canonical_id: 1, preferred_name: 1, hazard_assessment: 1, source_records: 1}
-).pretty()
+db.criterion_claims.aggregate([
+  {$group: {_id: "$source_id", claims: {$sum: 1}}},
+  {$sort: {claims: -1}}
+])
 ```
 
-Formats requiring review:
+Criterion-claim coverage by criterion:
+
+```javascript
+db.criterion_claims.aggregate([
+  {$group: {_id: "$criterion_id", claims: {$sum: 1}}},
+  {$sort: {claims: -1}}
+])
+```
+
+Formats requiring builder hazard review:
 
 ```javascript
 db.canonical_formats.find(
@@ -546,29 +561,32 @@ const id = db.format_identifiers.findOne({type: "puid", value: "fmt/18"})
 db.canonical_formats.findOne({canonical_id: id.format_id, current: {$ne: false}})
 ```
 
-Show source evidence for a format:
+Show source evidence and mapped claims for a format:
 
 ```javascript
-db.canonical_formats.findOne(
+const f = db.canonical_formats.findOne(
   {preferred_name: /Portable Document Format/i, current: {$ne: false}},
-  {canonical_id: 1, preferred_name: 1, identifiers: 1, source_records: 1, hazard_assessment: 1}
+  {canonical_id: 1, preferred_name: 1, identifiers: 1, source_records: 1}
 )
+
+db.criterion_claims.find({canonical_id: f.canonical_id}).pretty()
 ```
 
-Recent review actions:
-
-```javascript
-db.assessment_changes.find(
-  {severity: "review"},
-  {created_at: 1, change_type: 1, canonical_id: 1, recommended_actions: 1}
-).sort({created_at: -1}).limit(20).pretty()
-```
+Note that risk-manager identity expansion may also consume claims attached to strong source-derived aliases such as PUID/LOC canonical IDs, not only the aggregate display record.
 
 ## Operational notes
 
-- `canonical_formats` is the best collection for ordinary current registry queries.
-- `source_records` and `source_snapshots` are evidence/provenance collections. Do not manually edit them to change the canonical view; rerun the relevant source adapter instead.
-- `hazard_assessments` is useful for per-run reporting, while the latest assessment is also embedded in `canonical_formats.hazard_assessment`.
-- `assessment_changes` is the operational review queue produced by change detection.
+- `canonical_formats` is the best collection for ordinary current registry identity queries.
+- `source_records` and `source_snapshots` are evidence/provenance collections. Rerun the source adapter/transcription workflow rather than manually editing them.
+- `criterion_claims` is the normalized evidence layer for framework-driven risk analysis. Correct source mappings and regenerate claims rather than manually changing claim values.
+- `hazard_assessments` stores builder hazard conclusions and is conceptually separate from neutral criterion claims.
+- `assessment_changes` is an operational review/change queue.
 - Optional exports can be disabled for database-only runs with `"exports": {"enabled": false}`.
-- If you need to reset a local test database, use `db.dropDatabase()` from the selected database after confirming you are not connected to a production database.
+- If you reset a local test database, confirm first that you are not connected to production.
+
+## Related documentation
+
+- Canonical backend-neutral data model: [`../../docs/DATA_MODEL.md`](../../docs/DATA_MODEL.md)
+- Storage interface/adapter contract: [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- Criterion mapping workflow: [`criterion_mapping_workflow.md`](criterion_mapping_workflow.md)
+- Reading the registry: [`READING_THE_REGISTRY.md`](READING_THE_REGISTRY.md)
