@@ -102,6 +102,46 @@ def _searchable_values(format_doc: dict[str, Any]) -> list[str]:
     return values
 
 
+def _family_searchable_values(format_doc: dict[str, Any]) -> tuple[list[str], bool]:
+    """Return values suitable for family membership discovery.
+
+    Explicit family metadata is authoritative when present. Until the registry
+    carries explicit family relationships consistently, fall back only to
+    human-readable names/aliases. Extensions, MIME types and authority IDs are
+    deliberately excluded because sharing `.pdf` or mentioning PDF in an
+    identifier does not make another format a PDF-family member.
+    """
+    explicit: list[str] = []
+    for key in ("family", "format_family", "family_id", "parent_family", "member_of"):
+        for value in _as_list(format_doc.get(key)):
+            if isinstance(value, dict):
+                continue
+            text = str(value).strip()
+            if text:
+                explicit.append(text)
+    if explicit:
+        return explicit, True
+
+    fallback: list[str] = []
+    for key in (
+        "preferred_name",
+        "format_name",
+        "name",
+        "label",
+        "short_name",
+        "display_name",
+        "aliases",
+        "alternative_names",
+    ):
+        for value in _as_list(format_doc.get(key)):
+            if isinstance(value, dict):
+                continue
+            text = str(value).strip()
+            if text:
+                fallback.append(text)
+    return fallback, False
+
+
 def _strong_identifiers(format_doc: dict[str, Any]) -> set[tuple[str, str]]:
     values: set[tuple[str, str]] = set()
     direct = {
@@ -165,12 +205,7 @@ def search_format_docs(
     *,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return current canonical formats matching a human/family search term.
-
-    This is intentionally a discovery search, not authoritative identity
-    resolution. Exact assessment still goes through FormatResolver. Strong-ID
-    duplicates are collapsed in favour of aggregate canonical records.
-    """
+    """Return current canonical formats matching a general discovery term."""
     needle = str(query or "").strip().lower()
     if not needle:
         return []
@@ -191,6 +226,45 @@ def search_format_docs(
         (_format_id(item[2]) or ""): item[0]
         for item in ranked
     }
+    deduped.sort(
+        key=lambda row: (
+            -score_by_id.get(_format_id(row) or "", 0),
+            (_format_label(row) or _format_id(row) or "").lower(),
+        )
+    )
+    rows = [deepcopy(row) for row in deduped]
+    return rows[:limit] if limit is not None else rows
+
+
+def search_family_docs(
+    reader: RegistryReader,
+    family: str,
+    *,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return formats that are plausible members of a requested format family.
+
+    Explicit family fields are preferred. With no explicit family metadata, the
+    fallback is constrained to names and aliases only. This is intentionally
+    narrower than `search_format_docs`.
+    """
+    needle = str(family or "").strip().lower()
+    if not needle:
+        return []
+    ranked: list[tuple[int, str, dict[str, Any]]] = []
+    for row in reader.list_canonical_formats():
+        values, explicit = _family_searchable_values(row)
+        normalized = [value.lower() for value in values]
+        exact = needle in normalized
+        contains = any(needle in value for value in normalized)
+        if not exact and not contains:
+            continue
+        score = (4 if exact else 3) if explicit else (2 if exact else 1)
+        label = (_format_label(row) or _format_id(row) or "").lower()
+        ranked.append((score, label, row))
+
+    deduped = _dedupe_format_docs(item[2] for item in ranked)
+    score_by_id = {(_format_id(item[2]) or ""): item[0] for item in ranked}
     deduped.sort(
         key=lambda row: (
             -score_by_id.get(_format_id(row) or "", 0),
@@ -407,7 +481,7 @@ def execute_request(
 
     family = request["filters"].get("family")
     if family:
-        candidates = search_format_docs(reader, family, limit=request["limit"])
+        candidates = search_family_docs(reader, family, limit=request["limit"])
     else:
         candidates = _dedupe_format_docs(reader.list_canonical_formats())[: request["limit"]]
     all_assessments = [
