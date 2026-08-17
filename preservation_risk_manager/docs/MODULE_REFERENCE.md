@@ -14,18 +14,35 @@ preservation_risk_manager/src/preservation_risk_manager/
 | --- | --- |
 | `__main__.py` | Top-level module dispatch. Routes `ask` and `query-json` to the integration CLI; other commands to the analysis CLI. |
 | `cli.py` | Deterministic single-format analysis, AI-assisted analysis, fixture analysis, policy-proposal CLI, registry/storage argument handling. |
-| `integration_cli.py` | Human `ask` and machine `query-json` commands; constructs reader/framework/router execution and selects human vs JSON output. |
+| `integration_cli.py` | Human `ask` and machine `query-json` commands; constructs reader/framework/router execution, optional format-identification AI plugin, and selects human vs JSON output. |
 | `request_api.py` | Canonical structured request validation/execution for human-routed and system requests. Defines supported actions, family/general search, ranking and batch output. |
 | `human_renderer.py` | Converts canonical request results into detailed preservation-professional prose for human `ask` mode. |
 
-## Registry/data access
+## Registry/data access and format identification
 
 | Module | Responsibility |
 | --- | --- |
 | `data_access.py` | `RegistryReader`, storage-config loading, export-backed `JsonRegistryStore`, institution-scope filtering, strong-ID expansion for claims. Export mode also loads sibling `criterion_claims.jsonl/json`. |
-| `format_resolver.py` | Conservative resolution of canonical IDs, authority IDs, names, aliases, MIME types and extensions; reports ambiguity rather than guessing. |
+| `format_resolver.py` | Conservative exact resolution of canonical IDs, authority IDs, names, aliases, MIME types and extensions; reports ambiguity rather than guessing. |
+| `format_identification.py` | Front-end identification orchestration. Applies safe syntax normalization, creates fuzzy local candidate shortlists, supports the `FormatIdentificationPlugin` protocol, implements bounded `AIFormatIdentificationPlugin`, preserves programmatic fallback on AI errors, and blocks unsafe AI arbitration of strong-ID/extension/MIME ambiguities. |
 | `evidence_packs.py` | Builds normalized global/institution evidence packs, applies review-status filtering, deduplicates normalized vs legacy evidence and produces evidence hashes. |
 | `currency.py` | Evidence/source currency helpers used to reason about age/currentness where supported. |
+
+The intended boundary is:
+
+```text
+format observation / PUID / DROID-Siegfried output
+        ↓
+IdentificationResolver
+        ↓
+FormatResolver
+        ↓ optional bounded plugin fallback
+CanonicalFormat
+        ↓
+evidence/risk workflow
+```
+
+The risk engine does not need to know whether the upstream observation came from a human, AIP metadata, DROID, Siegfried, or another service.
 
 ## Framework and deterministic analysis
 
@@ -78,6 +95,8 @@ preservation_risk_manager/ai/
 | `providers/azure_openai.py` | Azure OpenAI adapter. |
 | `providers/openai_compatible.py` | OpenAI-compatible hosted/local adapter for local servers and compatible APIs. |
 
+`format_identification.py` deliberately sits outside the AI package because identification orchestration is not inherently AI-driven. Its AI implementation consumes the provider-neutral `AIProvider` interface as an optional plugin.
+
 ## Main dependency flow
 
 ```text
@@ -85,7 +104,10 @@ integration_cli / cli
         |
         +--> data_access -> RegistryStore
         |
-        +--> format_resolver
+        +--> format_identification
+        |      |
+        |      +--> format_resolver
+        |      +--> optional AIFormatIdentificationPlugin
         |
         +--> evidence_packs
         |
@@ -103,10 +125,11 @@ integration_cli / cli
                 +--> JSON
 ```
 
-AI-enabled paths add one of:
+AI-enabled paths may add one or more of:
 
 ```text
 request_router
+format-identification candidate selection
 fill-gaps analysis
 review-all comparison
 ```
@@ -118,7 +141,9 @@ without replacing the deterministic scoring layer.
 | Change | Primary module(s) |
 | --- | --- |
 | Add a new structured request action | `request_api.py`, router schema/examples, tests, human renderer if human output is needed |
-| Change format resolution | `format_resolver.py` + regression tests |
+| Change exact format resolution | `format_resolver.py` + regression tests |
+| Change format-observation normalization or fallback identification | `format_identification.py` + `test_format_identification.py` |
+| Add another identification plugin | Implement `FormatIdentificationPlugin`; wire it through integration/configuration without changing the risk engine |
 | Change storage/backend access | registry-builder `RegistryStore`; only `data_access.py` for read-side adaptation |
 | Add a framework field/semantic | `frameworks.py` + framework JSON/tests |
 | Change evidence→answer mapping semantics | `answer_derivation.py` and/or framework-local `evidence_value_map` |
@@ -136,13 +161,15 @@ Preferred rule:
 
 ```text
 CLI/router chooses operation
-core modules determine result
+identification layer resolves canonical format
+core modules determine preservation result
 renderer/provider only presents/transports it
 ```
 
 ## Related documentation
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md)
 - [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
 - [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
 - [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
