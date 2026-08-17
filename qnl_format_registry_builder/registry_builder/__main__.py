@@ -41,6 +41,52 @@ def _resolve_relative(base: str | Path, candidate: str | Path) -> str:
     return str(Path(base).parent / path)
 
 
+def _source_label(source: dict[str, Any]) -> str:
+    return str(source.get("id") or source.get("source_id") or source.get("type") or "")
+
+
+def _source_matches_filter(source: dict[str, Any], selector: str) -> bool:
+    selector = str(selector).strip()
+    return selector in {
+        str(source.get("id") or ""),
+        str(source.get("source_id") or ""),
+        str(source.get("type") or ""),
+    }
+
+
+def _source_filtered_config_path(config_path: str | Path, selectors: list[str] | None) -> Path | None:
+    if not selectors:
+        return None
+    base_path = Path(config_path)
+    config = _load_json(base_path)
+    sources = list(config.get("sources") or [])
+    if not sources:
+        raise SystemExit("--source was supplied, but the config contains no sources")
+
+    selected_sources: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for selector in selectors:
+        matches = [source for source in sources if _source_matches_filter(source, selector)]
+        if not matches:
+            missing.append(selector)
+            continue
+        for source in matches:
+            if source not in selected_sources:
+                selected_sources.append(source)
+    if missing:
+        available = ", ".join(_source_label(source) for source in sources)
+        raise SystemExit(
+            "Unknown source selector(s): " + ", ".join(missing) + ". Available sources: " + available
+        )
+
+    filtered = dict(config)
+    filtered["sources"] = selected_sources
+    filtered["run_source_filter"] = selectors
+    runtime_path = base_path.parent / f".{base_path.stem}.source-filter-runtime.json"
+    runtime_path.write_text(json.dumps(filtered, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return runtime_path
+
+
 def _write_or_print(result: dict, out: str | None = None) -> None:
     text = json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True)
     if out:
@@ -203,6 +249,11 @@ def main() -> None:
 
     run = sub.add_parser("run", help="Run the registry-building pipeline")
     run.add_argument("--config", required=True)
+    run.add_argument(
+        "--source",
+        action="append",
+        help="Run only the selected source id or source type from the config. May be supplied more than once.",
+    )
     run.add_argument("--workdir", default="work")
     run.add_argument("--out", default="out")
     run.add_argument("--offline", action="store_true", help="Use cached source snapshots only; do not fetch remote sources")
@@ -253,9 +304,12 @@ def main() -> None:
         progress = _progress_enabled(args)
         stop_event: threading.Event | None = None
         heartbeat: threading.Thread | None = None
+        runtime_config_path = _source_filtered_config_path(args.config, args.source)
+        run_config = str(runtime_config_path or args.config)
         if progress:
+            source_note = f"; source_filter={','.join(args.source)}" if args.source else ""
             print(
-                f"[registry-builder] starting pipeline; config={args.config}; workdir={args.workdir}; out={args.out}",
+                f"[registry-builder] starting pipeline; config={args.config}{source_note}; workdir={args.workdir}; out={args.out}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -267,12 +321,14 @@ def main() -> None:
             )
             heartbeat.start()
         try:
-            report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline)
+            report = run_pipeline(run_config, args.workdir, args.out, offline=args.offline)
         finally:
             if stop_event is not None:
                 stop_event.set()
             if heartbeat is not None:
                 heartbeat.join(timeout=1)
+            if runtime_config_path is not None:
+                runtime_config_path.unlink(missing_ok=True)
         if progress:
             print(
                 "[registry-builder] completed pipeline; "
