@@ -10,6 +10,7 @@ from preservation_risk_manager.ai import (
     build_ai_provider,
     derive_answers_with_ai,
     load_ai_config,
+    review_answers_with_ai,
 )
 from preservation_risk_manager.answer_derivation import derive_answers
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
@@ -325,13 +326,24 @@ def analyze_format_ai(args: argparse.Namespace) -> dict[str, Any]:
     context = _resolved_analysis_context(args)
     ai_config = load_ai_config(_require_file(args.ai_config, label="AI config file"))
     provider = build_ai_provider(ai_config)
-    ai_answer_document = derive_answers_with_ai(
-        provider,
-        context["framework"],
-        context["evidence_pack"],
-        context["answer_document"],
-        max_evidence_items=args.max_ai_evidence_items,
-    )
+
+    if args.ai_mode == "review-all":
+        ai_answer_document = review_answers_with_ai(
+            provider,
+            context["framework"],
+            context["evidence_pack"],
+            context["answer_document"],
+            max_evidence_items=args.max_ai_evidence_items,
+        )
+    else:
+        ai_answer_document = derive_answers_with_ai(
+            provider,
+            context["framework"],
+            context["evidence_pack"],
+            context["answer_document"],
+            max_evidence_items=args.max_ai_evidence_items,
+        )
+
     ai_analysis = score_answers(
         context["framework"],
         ai_answer_document.get("scoring_answers") or ai_answer_document["answers"],
@@ -344,6 +356,7 @@ def analyze_format_ai(args: argparse.Namespace) -> dict[str, Any]:
     result: dict[str, Any] = {
         "status": "ok",
         "mode": "ai_assisted",
+        "ai_mode": args.ai_mode,
         "provider": provider.describe(),
         "resolution": _resolution_summary(context["resolution"]),
         "format": context["evidence_pack"].get("format"),
@@ -458,8 +471,8 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_registry_ai = subparsers.add_parser(
         "analyze-format-ai",
         help=(
-            "Run deterministic risk analysis, then use the configured AI provider only for unresolved "
-            "or ambiguous framework questions before deterministic rescoring."
+            "Run deterministic risk analysis and either fill unresolved questions with AI or "
+            "independently review all questions without changing deterministic answers."
         ),
     )
     _add_format_analysis_args(analyze_registry_ai)
@@ -469,10 +482,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to AI provider JSON configuration, for example config/ai.local.json.",
     )
     analyze_registry_ai.add_argument(
+        "--ai-mode",
+        choices=("fill-gaps", "review-all"),
+        default="fill-gaps",
+        help=(
+            "AI behavior: fill-gaps may supply unresolved controlled answers; review-all compares "
+            "AI answers against deterministic answers without changing scoring inputs."
+        ),
+    )
+    analyze_registry_ai.add_argument(
         "--max-ai-evidence-items",
         type=int,
         default=20,
-        help="Maximum evidence items supplied to AI for each unresolved question.",
+        help="Maximum evidence items supplied to AI for each question it interprets or reviews.",
     )
     analyze_registry_ai.set_defaults(func=analyze_format_ai)
 
