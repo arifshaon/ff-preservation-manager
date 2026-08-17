@@ -8,6 +8,7 @@ from typing import Any
 from preservation_risk_manager.ai import build_ai_provider, load_ai_config
 from preservation_risk_manager.ai.request_router import route_natural_language_request
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
+from preservation_risk_manager.format_identification import AIFormatIdentificationPlugin, IdentificationResolver
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.human_renderer import render_human_response
 from preservation_risk_manager.request_api import RequestValidationError, execute_request
@@ -33,6 +34,28 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--registry-json", help="Path to registry JSON export.")
     source.add_argument("--storage-config", help="Path to registry-builder storage config.")
+
+
+def _add_identification_args(parser: argparse.ArgumentParser, *, machine_mode: bool) -> None:
+    parser.add_argument(
+        "--enable-ai-identification",
+        action="store_true",
+        help=(
+            "Enable bounded AI fallback when deterministic format identification is unresolved or ambiguous. "
+            "AI may select only from local canonical registry candidates."
+        ),
+    )
+    parser.add_argument(
+        "--identification-ai-min-confidence",
+        type=float,
+        default=0.80,
+        help="Minimum AI confidence required to accept a local candidate. Default: 0.80.",
+    )
+    if machine_mode:
+        parser.add_argument(
+            "--identification-ai-config",
+            help="AI provider config used only for optional format-identification fallback.",
+        )
 
 
 def _load_request(args: argparse.Namespace) -> dict[str, Any]:
@@ -67,6 +90,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return the canonical JSON response instead of the default detailed human-readable answer.",
     )
+    _add_identification_args(ask, machine_mode=False)
 
     query = subparsers.add_parser(
         "query-json",
@@ -76,7 +100,53 @@ def _build_parser() -> argparse.ArgumentParser:
     request_source = query.add_mutually_exclusive_group(required=True)
     request_source.add_argument("--request", help="Path to structured request JSON.")
     request_source.add_argument("--request-json", help="Literal structured request JSON object.")
+    _add_identification_args(query, machine_mode=True)
     return parser
+
+
+def _identification_plugin(args: argparse.Namespace, *, existing_provider=None):
+    if not bool(getattr(args, "enable_ai_identification", False)):
+        return None
+
+    provider = existing_provider
+    if provider is None:
+        config_path = getattr(args, "identification_ai_config", None)
+        if not config_path:
+            raise RequestValidationError(
+                "--identification-ai-config is required with --enable-ai-identification in query-json mode."
+            )
+        config = load_ai_config(_require_file(config_path, label="Identification AI config file"))
+        provider = build_ai_provider(config)
+
+    confidence = float(getattr(args, "identification_ai_min_confidence", 0.80))
+    if confidence < 0.0 or confidence > 1.0:
+        raise RequestValidationError("--identification-ai-min-confidence must be between 0 and 1.")
+    return AIFormatIdentificationPlugin(provider, minimum_confidence=confidence)
+
+
+def _resolve_request_format(
+    reader: RegistryReader,
+    request: dict[str, Any],
+    *,
+    plugin=None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    prepared = dict(request)
+    raw_format = prepared.get("format")
+    if raw_format is None or not str(raw_format).strip():
+        return prepared, None
+
+    identification = IdentificationResolver(reader, plugin=plugin).resolve(str(raw_format))
+    metadata = identification.to_dict()
+    if identification.resolved and identification.resolution.format_doc:
+        row = identification.resolution.format_doc
+        canonical_id = row.get("canonical_id") or row.get("format_id") or row.get("id")
+        if canonical_id:
+            prepared["format"] = str(canonical_id)
+            metadata["resolved_canonical_id"] = str(canonical_id)
+            metadata["resolved_label"] = (
+                row.get("preferred_name") or row.get("format_name") or row.get("name") or row.get("label")
+            )
+    return prepared, metadata
 
 
 def _ask(args: argparse.Namespace) -> dict[str, Any]:
@@ -93,12 +163,16 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
         default_institution_id=args.institution,
         default_limit=args.limit,
     )
-    response = execute_request(reader, framework, routed["request"])
+    plugin = _identification_plugin(args, existing_provider=provider)
+    prepared_request, identification = _resolve_request_format(reader, routed["request"], plugin=plugin)
+    response = execute_request(reader, framework, prepared_request)
     response["input"] = {
         "mode": "human_prompt",
         "prompt": args.question,
     }
     response["router"] = routed["router"]
+    if identification is not None:
+        response["identification"] = identification
     return response
 
 
@@ -106,8 +180,12 @@ def _query_json(args: argparse.Namespace) -> dict[str, Any]:
     reader = _reader_from_args(args)
     framework = load_framework(_require_file(args.framework, label="Framework file"))
     request = _load_request(args)
-    response = execute_request(reader, framework, request)
+    plugin = _identification_plugin(args)
+    prepared_request, identification = _resolve_request_format(reader, request, plugin=plugin)
+    response = execute_request(reader, framework, prepared_request)
     response["input"] = {"mode": "structured_request"}
+    if identification is not None:
+        response["identification"] = identification
     return response
 
 
