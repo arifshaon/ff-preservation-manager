@@ -180,3 +180,19 @@ def test_ai_info_cli_does_not_expose_placeholder_key(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert "<QNL_AZURE_OPENAI_API_KEY>" not in output
     assert '"api_key": "***"' in output
+
+
+def test_ai_response_can_be_replayed_as_assistant_tool_call_message():
+    tool_call = SimpleNamespace(
+        id="call_456",
+        function=SimpleNamespace(name="assess_format", arguments='{"format_query":"fmt/18"}'),
+    )
+    client = FakeClient(_completion(tool_calls=[tool_call]))
+    provider = build_ai_provider(_azure_config(), client=client)
+    result = provider.generate(AIRequest(messages=(AIMessage("user", "Assess PDF"),)))
+
+    replay = result.as_assistant_message().to_dict()
+    assert replay["role"] == "assistant"
+    assert replay["content"] is None
+    assert replay["tool_calls"][0]["id"] == "call_456"
+    assert replay["tool_calls"][0]["function"]["name"] == "assess_format"
