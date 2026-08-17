@@ -8,12 +8,52 @@ If this is your first checkout, start with:
 
 That guide takes a new user from installation to a criterion-mapped registry and then to a deterministic preservation-risk assessment. It is the canonical cross-package quickstart.
 
+## AI-assisted preservation workflows
+
+AI is a **first-class but bounded capability** in this project. It is used where language understanding or structured extraction is useful, while preservation evidence, deterministic scoring, approval, and policy remain application/human controlled.
+
+Current AI-assisted uses include:
+
+| AI use | What it does | What it must not do |
+| --- | --- | --- |
+| Human-question routing | Converts a natural-language preservation question into a controlled machine request. | Calculate or invent the risk result. |
+| Unstructured-source transcription | Drafts structured JSON from narrative PDF/HTML sources such as the DPC Bit List, preserving source locators. | Invent source facts/identifiers or approve its own transcription. |
+| Criterion-mapping draft | Proposes how reviewed source-native fields map to the neutral criteria vocabulary. | Approve mappings or invent criterion IDs/values. |
+| `fill-gaps` analysis | Interprets bounded evidence for unresolved framework questions. | Replace already-resolved deterministic answers or invent evidence. |
+| `review-all` analysis | Independently reviews raw source evidence for calibration/evaluation. | Automatically change deterministic scoring or policy. |
+
+Local/OpenAI-compatible models and Azure OpenAI are both supported. AI can therefore be hosted locally when required by institutional policy.
+
+Start here for AI-related workflows:
+
+- unstructured/narrative source transcription: [`docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
+- DPC transcription prompt: [`qnl_format_registry_builder/config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md)
+- DPC criterion-mapping prompt: [`qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md)
+- AI-assisted risk analysis: [`preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md`](preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md)
+- provider/local-model setup: [`preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md`](preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md)
+
+The important governance rule is:
+
+```text
+AI may draft / route / interpret / review.
+AI does not silently create evidence, approve mappings, change deterministic scoring,
+or write institutional policy.
+```
+
 ## Architecture at a glance
 
 ```text
 Authoritative + institutional sources
           |
-          v
+          +--> structured source --------------------+
+          |                                           |
+          +--> narrative PDF/HTML                     |
+                 |                                    |
+                 +--> manual/AI transcription draft  |
+                        |                              |
+                        +--> human-reviewed JSON ------+
+                                                       |
+                                                       v
 qnl_format_registry_builder
   acquire -> normalize -> reconcile -> map evidence -> persist/export
           |
@@ -38,7 +78,7 @@ The registry is not a static spreadsheet, and the risk manager is not an AI-only
 
 | Module | Purpose | Start here |
 | --- | --- | --- |
-| [`qnl_format_registry_builder/`](qnl_format_registry_builder/) | Builds and incrementally updates the local file-format evidence registry from NARA, PRONOM, LOC FDD, QNL/institutional evidence, and additional adapters. | [`qnl_format_registry_builder/README.md`](qnl_format_registry_builder/README.md) |
+| [`qnl_format_registry_builder/`](qnl_format_registry_builder/) | Builds and incrementally updates the local file-format evidence registry from NARA, PRONOM, LOC FDD, QNL/institutional evidence, transcribed narrative sources, and additional adapters. | [`qnl_format_registry_builder/README.md`](qnl_format_registry_builder/README.md) |
 | [`preservation_risk_manager/`](preservation_risk_manager/) | Reads the same evidence store/exports and performs deterministic risk assessment, gap diagnosis, remediation planning, human Q&A, machine queries, AI-assisted review, and monitoring/reporting integration. | [`preservation_risk_manager/README.md`](preservation_risk_manager/README.md) |
 
 ## Where to start
@@ -46,12 +86,16 @@ The registry is not a static spreadsheet, and the risk manager is not an AI-only
 | Need | Document |
 | --- | --- |
 | First clone: build evidence and produce a real risk assessment | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) |
+| Understand the canonical backend-neutral data model | [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) |
+| Understand storage/adapters/query-update contract | [`docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) |
 | Understand how the modules fit together | [`docs/REPOSITORY_ARCHITECTURE.md`](docs/REPOSITORY_ARCHITECTURE.md) |
-| Understand the shared data/storage/adapter contract | [`docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) |
+| Add any new source — one obvious starting page | [`docs/HOW_TO_ADD_A_SOURCE.md`](docs/HOW_TO_ADD_A_SOURCE.md) |
+| Add a narrative/PDF/unstructured source | [`docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md) |
 | Navigate all documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
 | Install/configure/run the registry builder | [`qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md`](qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Add/map a new source or institution-level evidence | [`qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
-| Draft a DPC Bit List mapping with an AI agent | [`qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md) |
+| Draft a DPC Bit List transcription with AI | [`qnl_format_registry_builder/config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md) |
+| Draft a DPC Bit List criterion mapping with AI | [`qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md) |
 | Install/configure/run the risk manager | [`preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md`](preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Understand the risk-analysis pipeline and band suppression | [`preservation_risk_manager/docs/RISK_ANALYSIS_WORKFLOW.md`](preservation_risk_manager/docs/RISK_ANALYSIS_WORKFLOW.md) |
 | Author/review risk frameworks | [`preservation_risk_manager/docs/FRAMEWORKS.md`](preservation_risk_manager/docs/FRAMEWORKS.md) |
@@ -64,7 +108,7 @@ The registry is not a static spreadsheet, and the risk manager is not an AI-only
 
 ## What the registry builder produces
 
-Typical flow:
+Typical structured-source flow:
 
 ```text
 source config
@@ -78,6 +122,15 @@ source config
  -> criterion_claims
  -> RegistryStore and/or exports
  -> change detection / reports
+```
+
+For narrative/unstructured sources there is an explicit pre-ingestion artifact:
+
+```text
+PDF/HTML
+ -> manual or AI-assisted transcription draft
+ -> human-reviewed versioned JSON
+ -> normal source adapter pipeline
 ```
 
 The builder owns normal registry **writes and updates**.
