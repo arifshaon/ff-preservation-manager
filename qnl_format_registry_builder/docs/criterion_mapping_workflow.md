@@ -2,6 +2,16 @@
 
 This layer lets registry-builder harmonise source-native observations into neutral `criterion_claims` without making institution-specific scoring decisions.
 
+For a **simplified step-by-step onboarding guide** covering new external sources, institution-level evidence, adding a genuinely new criterion, and AI-assisted DPC Bit List mapping, start with:
+
+[`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
+
+Reusable DPC AI prompt:
+
+```text
+config/prompts/propose_mapping/dpc_bit_list.v1.md
+```
+
 Core rule:
 
 ```text
@@ -147,7 +157,7 @@ config/criterion_mappings/australian_nara_style.template.json
 
 AI does not approve mappings. It drafts a config for human review.
 
-Upload these files to the AI bot along with an audit JSON:
+For generic sources, upload these files to the AI bot along with an audit JSON:
 
 ```text
 config/prompts/propose_mapping/v1.0.md
@@ -155,10 +165,28 @@ config/prompts/propose_mapping/negative_rules.v1.json
 config/criteria/v1.json
 ```
 
+For the DPC Bit List, use the dedicated prompt:
+
+```text
+config/prompts/propose_mapping/dpc_bit_list.v1.md
+```
+
+and, where possible, supply:
+
+```text
+DPC Bit List source/export
+config/criteria/v1.json
+audit/source-field profile from the adapter
+accepted mapping examples
+config/prompts/propose_mapping/negative_rules.v1.json
+```
+
+The audit/field profile matters because the final `from_field` values must match the adapter's actual normalized output. An AI can understand the DPC document without that profile, but it must not pretend guessed field paths are production-ready.
+
 The AI must return a JSON mapping draft. Save the draft outside `config/criterion_mappings/`, for example:
 
 ```text
-drafts/australian_preservation_framework.v1.proposal.json
+drafts/dpc_bit_list.v1.proposal.json
 ```
 
 Then validate it:
@@ -166,7 +194,9 @@ Then validate it:
 ```powershell
 python -m registry_builder mapping validate `
   --criteria config\criteria\v1.json `
-  --mappings drafts\australian_preservation_framework.v1.proposal.json
+  --mappings drafts\dpc_bit_list.v1.proposal.json
 ```
 
-Only a human-reviewed mapping should be copied into `config/criterion_mappings/` with `mapping_status: accepted` and `decided_by` set.
+Only a human-reviewed mapping should be copied into `config/criterion_mappings/` with approved claim status, accepted rule status, and `decided_by` set.
+
+See [`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) for the full DPC copy/paste prompt, institution-scoped examples, and the separate workflow for adding a genuinely new criterion to the neutral vocabulary.
