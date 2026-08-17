@@ -82,6 +82,7 @@ def _ask(args: argparse.Namespace) -> dict[str, Any]:
     routed = route_natural_language_request(
         provider,
         args.question,
+        framework=framework,
         default_scope=default_scope,
         default_institution_id=args.institution,
         default_limit=args.limit,
