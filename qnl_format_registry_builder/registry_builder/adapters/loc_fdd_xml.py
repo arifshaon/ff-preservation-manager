@@ -55,6 +55,7 @@ _EXTENSION_STOPWORDS = {
 }
 _SUSTAINABILITY_FACTOR_ALIASES = {
     "disclosure": {"disclosure"},
+    "documentation": {"documentation", "formatdocumentation", "specificationdocumentation"},
     "adoption": {"adoption"},
     "transparency": {"transparency"},
     "self_documentation": {"selfdocumentation", "selfdocumenting", "selfdoc"},
@@ -231,8 +232,14 @@ def _factor_key_from_label(value: str) -> str | None:
     normalized = _normalize_label(value)
     if not normalized:
         return None
+    # Prefer exact aliases before substring fallback. This prevents the nested
+    # LOC factor "selfDocumentation" from being misclassified as the separate
+    # "documentation" detail now retained for disclosure interpretation.
     for factor_key, aliases in _SUSTAINABILITY_FACTOR_ALIASES.items():
-        if normalized in aliases or any(alias in normalized for alias in aliases):
+        if normalized in aliases:
+            return factor_key
+    for factor_key, aliases in _SUSTAINABILITY_FACTOR_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
             return factor_key
     return None
 
@@ -251,11 +258,14 @@ def _extract_sustainability_factors(root: ET.Element) -> dict[str, str]:
 
     The adapter stores upstream LOC factor text only; it does not decide risk
     bands or criterion values. Declarative mapping configs decide whether a
-    phrase is strong enough to become a normalized criterion claim.
+    phrase is strong enough to become a normalized criterion claim. Nested LOC
+    documentation text is retained separately from the broader disclosure prose
+    so version-specific specifications are not lost.
     """
     factors: dict[str, str] = {}
 
     # Direct element form: <disclosure>...</disclosure>,
+    # <documentation>...</documentation>,
     # <externalDependencies>...</externalDependencies>, etc.
     for elem in root.iter():
         factor_key = _factor_key_from_label(_local_name(elem.tag))
@@ -294,19 +304,11 @@ def _snapshot_is_zip(snapshot: SourceSnapshot) -> bool:
     content_type = (snapshot.content_type or "").lower()
     uri = (snapshot.uri or "").lower()
     local_path = Path(snapshot.local_path)
-    return (
-        local_path.suffix.lower() == ".zip"
-        or uri.endswith(".zip")
-        or "zip" in content_type
-    )
+    return local_path.suffix.lower() == ".zip" or uri.endswith(".zip") or "zip" in content_type
 
 
 def _is_fdd_xml_payload_name(name: str) -> bool:
-    """Return true only for real LOC FDD XML files inside the LOC ZIP.
-
-    The LOC FDD archive can contain auxiliary XML such as `_notes/dwsync.xml`.
-    Those are not format descriptions and must not become source records.
-    """
+    """Return true only for real LOC FDD XML files inside the LOC ZIP."""
     return bool(re.fullmatch(r"fdd\d{6}\.xml", Path(str(name)).name.lower()))
 
 
@@ -340,12 +342,7 @@ def _fddid_from_xml(root: ET.Element) -> str | None:
 
 
 def _first_loc_id(root: ET.Element, text: str, source_file: str) -> str | None:
-    """Return the LOC FDD record ID for the current record.
-
-    The filename is authoritative for the official LOC FDD ZIP. Do not use generic
-    `<id>` elements or first-match full-text scanning before the filename, because
-    FDD records often cite related FDD IDs in references and relationship fields.
-    """
+    """Return the LOC FDD record ID for the current record."""
     file_id = _loc_id_from_source_file(source_file)
     if file_id:
         return file_id
@@ -363,7 +360,6 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     name = _record_name(root)
     category = _record_category(root)
 
-    # Conservative regex fallbacks for common identifiers embedded in FDD text.
     puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
     wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
     extensions = _declared_extensions(root)
@@ -371,11 +367,7 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     if not loc_id and not name:
         return None
 
-    loc_url = (
-        f"https://www.loc.gov/preservation/digital/formats/fddXML/{loc_id}.xml"
-        if loc_id
-        else snapshot.uri
-    )
+    loc_url = f"https://www.loc.gov/preservation/digital/formats/fddXML/{loc_id}.xml" if loc_id else snapshot.uri
     evidence_type = "loc_fdd_xml_zip" if _snapshot_is_zip(snapshot) else "loc_fdd_xml_text"
     snapshot_retained = snapshot.metadata.get("snapshot_retained", True)
     raw = {"snapshot_sha256": snapshot.sha256, "source_file": source_file}
@@ -413,14 +405,7 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
 
 
 class LocFddXmlAdapter(SourceAdapter):
-    """Acquire and parse Library of Congress FDD XML records.
-
-    LOC's FDD XML is used here as sustainability evidence and identifiers. The
-    adapter supports the official FDD XML ZIP as the default online acquisition
-    mode, plus explicit XML/ZIP URIs and local XML directories for admin-staged
-    runs. Individual URI mode can use temporary snapshots that are deleted after
-    extraction while normalized source records are persisted through storage.
-    """
+    """Acquire and parse Library of Congress FDD XML records."""
 
     type_name = "loc_fdd_xml"
 
@@ -507,11 +492,7 @@ class LocFddXmlAdapter(SourceAdapter):
         for index, uri in enumerate(uris, start=1):
             suffix = ".zip" if str(uri).lower().endswith(".zip") else ".xml"
             if policy == "temporary" and not self.offline:
-                snapshot = self._acquire_temporary_uri_snapshot(
-                    uri,
-                    suffix=suffix,
-                    note="retrieval_mode=explicit_uri",
-                )
+                snapshot = self._acquire_temporary_uri_snapshot(uri, suffix=suffix, note="retrieval_mode=explicit_uri")
             else:
                 snapshot = self.acquire_uri_snapshot(
                     uri,
