@@ -25,6 +25,11 @@ _NON_DISCRIMINATING_METHOD_PROFILES = {"generic_preservation"}
 _RAW_RECORD_FIELD_NAMES = set(RawFormatRecord.__dataclass_fields__)
 
 
+def _emit_progress(progress, event: str, **fields: Any) -> None:
+    if progress is not None:
+        progress({"event": event, **fields})
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -568,19 +573,41 @@ def _write_file_exports(
     return outputs
 
 
-def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Path, *, offline: bool = False) -> dict[str, Any]:
+def run_pipeline(
+    config_path: str | Path,
+    workdir: str | Path,
+    outdir: str | Path,
+    *,
+    offline: bool = False,
+    progress=None,
+) -> dict[str, Any]:
     started_at = utc_now_iso()
     run_id = _new_run_id()
+    _emit_progress(progress, "config_load_started", config_path=str(config_path))
     config = load_config(config_path)
+    _emit_progress(progress, "config_load_completed", sources=len(config.get("sources", [])))
     offline = bool(offline or config.get("offline", False))
     incremental_source_updates = _incremental_source_updates_enabled(config)
     identifier_rules = load_identifier_rules(config.get("identifier_kinds"))
     criterion_mapping_inputs = _load_criterion_mapping_inputs(config, config_path)
+    _emit_progress(
+        progress,
+        "criterion_mapping_loaded",
+        enabled=criterion_mapping_inputs is not None,
+        mappings=(len(criterion_mapping_inputs[1]) if criterion_mapping_inputs is not None else 0),
+    )
     workdir = ensure_dir(workdir)
     outdir = ensure_dir(outdir)
     storage_config = _storage_config(config)
+    _emit_progress(progress, "storage_open_started", storage_type=storage_config.get("type", "memory"))
     store = create_store(storage_config)
     previous_registry_view = store.get_current_registry_view()
+    _emit_progress(
+        progress,
+        "storage_open_completed",
+        storage_type=storage_config.get("type", "memory"),
+        previous_canonical_formats=len(previous_registry_view),
+    )
     store.create_run({
         "run_id": run_id,
         "started_at": started_at,
@@ -598,9 +625,11 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
 
     for source in config.get("sources", []):
         required = _source_required(source)
+        source_id = source.get("id")
         if not source.get("enabled", True):
+            _emit_progress(progress, "source_skipped", source_id=source_id, status="disabled")
             source_summaries.append({
-                "source_id": source.get("id"),
+                "source_id": source_id,
                 "enabled": False,
                 "required": required,
                 "status": "disabled",
@@ -612,20 +641,42 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
 
         try:
             source_type = source["type"]
+            _emit_progress(progress, "source_started", source_id=source_id, source_type=source_type)
             adapter_cls = resolve_adapter(source_type)
             source_config = dict(source)
             if offline:
                 source_config["offline"] = True
             adapter = adapter_cls(source_config, workdir)
+            _emit_progress(progress, "source_acquire_started", source_id=source_id, source_type=source_type)
             snapshots = adapter.acquire()
+            _emit_progress(
+                progress,
+                "source_acquire_completed",
+                source_id=source_id,
+                source_type=source_type,
+                snapshots=len(snapshots),
+                snapshots_changed=sum(1 for snapshot in snapshots if snapshot.changed is True),
+                snapshots_unchanged=sum(1 for snapshot in snapshots if snapshot.changed is False and not snapshot.from_cache),
+                snapshots_from_cache=sum(1 for snapshot in snapshots if snapshot.from_cache),
+            )
+            _emit_progress(progress, "source_extract_started", source_id=source_id, source_type=source_type, snapshots=len(snapshots))
             extracted = adapter.extract(snapshots)
+            _emit_progress(
+                progress,
+                "source_extract_completed",
+                source_id=source_id,
+                source_type=source_type,
+                records_extracted=len(extracted),
+            )
+            _emit_progress(progress, "source_normalize_started", source_id=source_id, records=len(extracted))
             all_snapshots.extend(snapshots)
             raw_records.extend(normalize_record(r, identifier_rules=identifier_rules) for r in extracted)
+            _emit_progress(progress, "source_normalize_completed", source_id=source_id, records=len(extracted))
             source_status = "completed"
             if len(snapshots) == 0 and len(extracted) == 0:
                 source_status = "unavailable"
             source_summaries.append({
-                "source_id": source["id"],
+                "source_id": source_id,
                 "source_type": source_type,
                 "enabled": True,
                 "required": required,
@@ -634,9 +685,17 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
                 "records_extracted": len(extracted),
                 **_source_snapshot_status(snapshots, offline=offline),
             })
+            _emit_progress(
+                progress,
+                "source_completed",
+                source_id=source_id,
+                status=source_status,
+                snapshots=len(snapshots),
+                records_extracted=len(extracted),
+            )
         except Exception as exc:
             failed = {
-                "source_id": source.get("id"),
+                "source_id": source_id,
                 "source_type": source.get("type"),
                 "enabled": True,
                 "required": required,
@@ -648,6 +707,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
                 **_empty_source_status(offline=offline),
             }
             source_summaries.append(failed)
+            _emit_progress(progress, "source_failed", source_id=source_id, error_type=type(exc).__name__, error=str(exc))
             if required:
                 raise
             continue
@@ -657,6 +717,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         for s in source_summaries
         if s.get("enabled", True) and s.get("status") == "completed" and s.get("source_id")
     }
+    _emit_progress(progress, "stored_source_records_started", current_sources=len(current_run_source_ids))
     stored_source_records = (
         _stored_source_records_for_augmentation(
             store,
@@ -666,11 +727,25 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         if incremental_source_updates
         else []
     )
+    _emit_progress(progress, "stored_source_records_completed", records=len(stored_source_records))
     active_source_records = stored_source_records + raw_records
+    _emit_progress(
+        progress,
+        "active_source_records_ready",
+        raw_records_extracted=len(raw_records),
+        stored_records=len(stored_source_records),
+        active_source_records=len(active_source_records),
+    )
 
+    _emit_progress(progress, "reconcile_started", active_source_records=len(active_source_records))
     registry = reconcile(active_source_records, identifier_rules=identifier_rules)
+    _emit_progress(progress, "reconcile_completed", canonical_formats=len(registry))
+    _emit_progress(progress, "method_profiles_started", enabled=bool(config.get("method_profiles", {}).get("enabled", False)))
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
+    _emit_progress(progress, "method_profiles_completed", version=method_profile_version, canonical_formats=len(registry))
+    _emit_progress(progress, "validation_started", canonical_formats=len(registry))
     errors, warnings = validate_registry(registry)
+    _emit_progress(progress, "validation_completed", errors=len(errors), warnings=len(warnings))
     warning_summary = summarize_validation_warnings(warnings)
     warning_counts = validation_warning_counts(warnings)
     method_metrics = _method_profile_metrics(registry)
@@ -681,6 +756,13 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     if criterion_mapping_inputs is not None:
         criteria, mappings, criterion_mapping_report = criterion_mapping_inputs
         active_source_record_dicts = [record.to_dict() for record in active_source_records]
+        _emit_progress(
+            progress,
+            "criterion_claims_started",
+            canonical_formats=len(registry_dicts),
+            source_records=len(active_source_record_dicts),
+            mappings=len(mappings),
+        )
         criterion_claims = build_criterion_claims(
             registry_dicts,
             active_source_record_dicts,
@@ -688,12 +770,14 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
             criteria,
             include_drafts=criterion_mapping_report.get("include_drafts", False),
         )
+        _emit_progress(progress, "criterion_claims_completed", claims=len(criterion_claims))
         criterion_mapping_report = criterion_mapping_report | _criterion_claim_summary(
             criterion_claims,
             source_summaries=source_summaries,
             mappings=mappings,
         )
 
+    _emit_progress(progress, "change_detection_started", previous_formats=len(previous_registry_view), current_formats=len(registry_dicts))
     change_detection = detect_registry_changes(
         previous_registry_view,
         registry_dicts,
@@ -701,7 +785,21 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         created_at=utc_now_iso(),
     )
     change_summary = compact_change_summary(change_detection)
+    _emit_progress(
+        progress,
+        "change_detection_completed",
+        total_changes=change_summary.get("total_changes", 0),
+        run_kind=change_summary.get("run_kind"),
+    )
 
+    _emit_progress(
+        progress,
+        "persistence_started",
+        snapshots=len(all_snapshots),
+        raw_records=len(raw_records),
+        canonical_formats=len(registry),
+        criterion_claims=len(criterion_claims),
+    )
     _persist_registry_to_store(
         store,
         run_id=run_id,
@@ -712,6 +810,7 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
         previous_registry=previous_registry_view,
         changes=change_detection.get("changes", []),
     )
+    _emit_progress(progress, "persistence_completed")
 
     enabled_sources = [s for s in source_summaries if s.get("enabled", True)]
     completed_sources = [s for s in enabled_sources if s.get("status") == "completed"]
@@ -756,9 +855,12 @@ def run_pipeline(config_path: str | Path, workdir: str | Path, outdir: str | Pat
     }
 
     if _exports_enabled(config):
+        _emit_progress(progress, "exports_started", outdir=str(outdir))
         report["outputs"] = _write_file_exports(outdir, registry, active_source_records, all_snapshots, report, criterion_claims if criterion_mapping_inputs is not None else None)
+        _emit_progress(progress, "exports_completed", outputs=len(report["outputs"]))
 
     store.create_run(report)
+    _emit_progress(progress, "run_completed", canonical_formats=len(registry), active_source_records=len(active_source_records), criterion_claims=len(criterion_claims))
     return report
 
 
