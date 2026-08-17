@@ -199,15 +199,25 @@ def build_ai_source_evidence(
     for questions that remain unresolved. A source record is eligible when it is
     directly attached to the canonical format or shares a strong identifier with
     it. The latter permits source-family records to contribute when the authority
-    itself cross-references the exact format identifier.
+    itself cross-references the exact format identifier. If the active registry
+    reader does not expose source records, this optional layer fails closed to an
+    empty list and the existing deterministic/AI-claim workflow continues.
     """
     max_source_records = max(1, int(max_source_records))
     max_items = max(1, int(max_items))
     direct_refs = _direct_source_refs(format_doc)
     format_ids = _format_identifier_sets(format_doc)
 
+    query = getattr(reader, "query", None)
+    if not callable(query):
+        return []
+    try:
+        source_rows = query("source_records", {})
+    except Exception:
+        return []
+
     linked: list[tuple[bool, str, str, dict[str, Any], dict[str, Any]]] = []
-    for source_record in _latest_source_records(reader.query("source_records", {})):
+    for source_record in _latest_source_records(source_rows):
         link = _link_basis(source_record, direct_refs=direct_refs, format_ids=format_ids)
         if link is None:
             continue
