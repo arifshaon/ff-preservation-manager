@@ -8,6 +8,37 @@ from preservation_risk_manager.ai.risk_analysis import interpret_question_with_a
 from preservation_risk_manager.frameworks import RiskFramework
 
 
+_AUDIT_EVIDENCE_KEYS = (
+    "claim_id",
+    "source_claim_id",
+    "_storage_key",
+    "canonical_id",
+    "criterion_id",
+    "value",
+    "answer_id",
+    "source_id",
+    "source_type",
+    "source_record_id",
+    "source_field",
+    "mapping_rule_id",
+    "mapping_version",
+    "institution_id",
+    "source_independence",
+    "evidence_section",
+    "review_status",
+    "directness",
+    "covers",
+)
+
+
+def _compact_cited_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {key: item[key] for key in _AUDIT_EVIDENCE_KEYS if key in item and item[key] is not None}
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
 def review_answers_with_ai(
     provider: AIProvider,
     framework: RiskFramework,
@@ -95,8 +126,14 @@ def review_answers_with_ai(
         comparison = "agreement" if agreement else "divergence"
         summary["agreements" if agreement else "divergences"] += 1
 
+        audit_ai_result = {
+            key: value
+            for key, value in ai_result.items()
+            if key != "cited_evidence"
+        }
         audit[question.id] = {
-            **ai_result,
+            **audit_ai_result,
+            "cited_evidence": _compact_cited_evidence(ai_result.get("cited_evidence") or []),
             "comparison": comparison,
             "agreement": agreement,
             "deterministic_answer_id": deterministic_answer_id,
