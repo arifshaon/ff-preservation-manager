@@ -68,6 +68,7 @@ The risk engine does not need to know whether the upstream observation came from
 | Module | Responsibility |
 | --- | --- |
 | `policy_proposals.py` | Builds bounded evidence-grounded proposal packages for human review. It does not automatically alter institutional policy. |
+| `training_corpus.py` | Builds the versioned, leakage-tiered fine-tuning corpus for the risk-answer interpreter. Reuses the inference prompt/evidence path so training and production prompts cannot drift, and fails the build on a quality-gate violation. See [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md). |
 
 ## Error model
 

@@ -244,6 +244,51 @@ Required:
 
 Useful for framework/scoring regression tests.
 
+## `build-training-corpus`
+
+Build a versioned, leakage-gated fine-tuning corpus (Corpus A) from registry evidence.
+
+```powershell
+python -m preservation_risk_manager build-training-corpus `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --out corpus\ `
+  --corpus-version 2026-09
+```
+
+Required:
+
+```text
+--framework
+--registry-json | --storage-config
+--out
+--corpus-version
+```
+
+Optional:
+
+```text
+--tiers                            A,B,C (default A,B,C)
+--abstention-share                 default 0.12
+--abstention-tolerance             default 0.03
+--split-seed                       default 20260901
+--test-share                       default 0.15
+--val-share                        default 0.10
+--institution                      omit for a global corpus
+--max-evidence-items               default 20
+--min-test-examples-per-question   default 30
+--max-answer-share                 default 0.90
+--max-formats                      cap the scan for smoke runs
+```
+
+Writes `<out>/<corpus-version>/` containing `train.jsonl`, `val.jsonl`, `test.jsonl`,
+`manifest.json`, and `leakage_report.json`.
+
+Exits `2` with `status: quality_gates_failed` when a gate is violated. The corpus is still
+written so the failure can be inspected.
+
+See [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md).
+
 ## `propose-policy-change`
 
 Create an evidence-grounded draft proposal package for human review.
@@ -389,3 +434,4 @@ Suppression reasons are documented in [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSI
 - [`FRAMEWORKS.md`](FRAMEWORKS.md)
 - [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
 - [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md)
