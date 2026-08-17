@@ -14,22 +14,26 @@ def _display(value: Any, fallback: str = "Unknown") -> str:
 
 def _render_multi_puid(response: dict[str, Any]) -> str:
     assessments = [item for item in response.get("assessments") or [] if isinstance(item, dict)]
-    lines = [
-        f"Preservation-risk assessments for {len(assessments)} matched PRONOM PUIDs",
-        "",
-    ]
+    matched_count = int(response.get("matched_puid_count") or len(assessments))
+    assessed_count = int(response.get("assessed_puid_count") or len(assessments))
 
-    if response.get("ai_format_limit_applied"):
-        limit = int(response.get("ai_format_limit") or 0)
-        assessed = int(response.get("ai_formats_assessed") or 0)
-        skipped = int(response.get("ai_formats_skipped") or 0)
+    if matched_count != assessed_count:
+        title = f"Preservation-risk assessments for {assessed_count} of {matched_count} matched PRONOM PUIDs"
+    else:
+        title = f"Preservation-risk assessments for {assessed_count} matched PRONOM PUIDs"
+
+    lines = [title, ""]
+
+    if response.get("human_format_assessment_limit_applied"):
+        limit = int(response.get("human_format_assessment_limit") or 0)
+        unassessed = int(response.get("unassessed_puid_count") or 0)
         lines.extend([
-            f"More than {limit} matching formats were found. AI risk assessment was limited to the first {assessed} PUIDs; "
-            f"the remaining {skipped} PUIDs were assessed deterministically only.",
+            f"{matched_count} matching formats were found. The configured human assessment limit is {limit}, "
+            f"so only the first {assessed_count} PUIDs were assessed. The remaining {unassessed} PUIDs were not assessed.",
             "",
         ])
 
-    lines.append("Each matched PUID was assessed independently; no family-level risk score was invented.")
+    lines.append("Each assessed PUID was evaluated independently; no family-level risk score was invented.")
 
     for index, assessment in enumerate(assessments, start=1):
         puid = _display(assessment.get("matched_puid"), "PUID unknown")
