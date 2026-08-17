@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 import json
@@ -107,6 +108,105 @@ def _as_values(value: Any) -> list[str]:
     return [str(value)] if str(value).strip() else []
 
 
+def _nested_dict(value: Any, *keys: str) -> dict[str, Any]:
+    current = value
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def _source_record_version(row: dict[str, Any]) -> str | None:
+    direct = row.get("version")
+    if direct is not None and str(direct).strip():
+        return str(direct).strip()
+    raw_record = _nested_dict(row, "raw", "record")
+    version = raw_record.get("version")
+    if version is not None and str(version).strip():
+        return str(version).strip()
+    return None
+
+
+def _source_record_signature_names(row: dict[str, Any], *, limit: int = 6) -> list[str]:
+    raw_record = _nested_dict(row, "raw", "record")
+    names: list[str] = []
+    for signature in raw_record.get("internalSignatures", []) or []:
+        if not isinstance(signature, dict):
+            continue
+        name = str(signature.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+        if len(names) >= limit:
+            break
+    return names
+
+
+def enrich_candidate_from_source_records(reader: RegistryReader, row: dict[str, Any]) -> dict[str, Any]:
+    """Add identity discriminators retained in source records to one candidate.
+
+    Canonical records historically kept the PRONOM name but not its dedicated
+    version field. The persisted source record still contains the authoritative
+    raw PRONOM JSON, so identification can recover version/signature labels at
+    query time without making the model infer them or requiring an immediate
+    registry rebuild.
+    """
+    enriched = deepcopy(row)
+    versions: list[str] = []
+    signature_names: list[str] = []
+    details: list[dict[str, Any]] = []
+
+    for ref in row.get("source_records", []) or []:
+        if not isinstance(ref, dict):
+            continue
+        source_id = str(ref.get("source_id") or "").strip()
+        source_record_id = str(ref.get("source_record_id") or "").strip()
+        if not source_record_id:
+            continue
+        filt: dict[str, Any] = {"source_record_id": source_record_id}
+        if source_id:
+            filt["source_id"] = source_id
+        try:
+            source_rows = reader.query("source_records", filt)
+        except Exception:
+            source_rows = []
+        for source_row in source_rows:
+            version = _source_record_version(source_row)
+            if version and version not in versions:
+                versions.append(version)
+            for name in _source_record_signature_names(source_row):
+                if name not in signature_names:
+                    signature_names.append(name)
+            if version or signature_names:
+                detail = {
+                    "source_id": source_row.get("source_id"),
+                    "source_record_id": source_row.get("source_record_id"),
+                    "version": version,
+                }
+                names = _source_record_signature_names(source_row)
+                if names:
+                    detail["internal_signature_names"] = names
+                if detail not in details:
+                    details.append(detail)
+
+    # Prefer a source-declared canonical version already present on the row. The
+    # source-record lookup fills the field only when all observed versions agree.
+    existing_version = enriched.get("version")
+    if existing_version is not None and str(existing_version).strip():
+        version = str(existing_version).strip()
+        if version not in versions:
+            versions.insert(0, version)
+    if len(versions) == 1:
+        enriched["version"] = versions[0]
+    elif versions:
+        enriched["versions"] = versions
+    if signature_names:
+        enriched["internal_signature_names"] = signature_names[:8]
+    if details:
+        enriched["identification_source_details"] = details[:8]
+    return enriched
+
+
 def _search_values(row: dict[str, Any]) -> list[str]:
     values: list[str] = []
     for key in (
@@ -118,6 +218,9 @@ def _search_values(row: dict[str, Any]) -> list[str]:
         "label",
         "short_name",
         "display_name",
+        "version",
+        "versions",
+        "internal_signature_names",
         "aliases",
         "alternative_names",
         "extensions",
@@ -189,7 +292,7 @@ def shortlist_candidates(
 ) -> list[dict[str, Any]]:
     ranked = sorted(
         ((_fuzzy_score(query, row), row) for row in rows),
-        key=lambda item: (-item[0], _format_label(item[1]).lower()),
+        key=lambda item: (-item[0], _format_label(item[1]).lower(), str(item[1].get("version") or "")),
     )
     return [row for score, row in ranked[:limit] if score >= minimum_score]
 
@@ -198,6 +301,9 @@ def _candidate_summary(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "canonical_id": _format_id(row),
         "label": _format_label(row),
+        "version": row.get("version"),
+        "versions": _as_values(row.get("versions")),
+        "internal_signature_names": _as_values(row.get("internal_signature_names")),
         "identifiers": row.get("identifiers") or {},
         "extensions": _as_values(row.get("extensions")),
         "mime_types": _as_values(row.get("mime_types")),
@@ -233,9 +339,10 @@ class AIFormatIdentificationPlugin:
         }
         if not candidates:
             return None, {
-                "status": "abstain",
+                "status": "no_match",
                 "reason": "no_local_candidates",
                 "provider": self.provider.describe(),
+                "accepted": False,
                 **candidate_audit,
             }
 
@@ -243,25 +350,39 @@ class AIFormatIdentificationPlugin:
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "status": {"type": "string", "enum": ["match", "abstain"]},
+                "status": {"type": "string", "enum": ["match", "ambiguous", "no_match", "abstain"]},
                 "candidate_canonical_id": {"type": "string"},
+                "candidate_canonical_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
                 "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "rationale": {"type": "string"},
             },
-            "required": ["status", "candidate_canonical_id", "confidence", "rationale"],
+            "required": [
+                "status",
+                "candidate_canonical_id",
+                "candidate_canonical_ids",
+                "confidence",
+                "rationale",
+            ],
         }
         request = AIRequest(
             messages=(
                 AIMessage(
                     role="system",
                     content=(
-                        "You are a bounded file-format identification assistant. Select ONLY from the supplied "
-                        "local canonical registry candidates. Never invent a PUID, identifier, format, or candidate. "
-                        "Treat exact format tokens, aliases, extensions and identifiers in the user's observation as "
-                        "strong evidence for candidate relevance, but do not infer a specific version when the input "
-                        "does not distinguish among multiple versions. If the input is insufficient, ambiguous, or "
-                        "no supplied candidate is a defensible single match, return status=abstain. "
-                        "candidate_canonical_id must be empty when abstaining."
+                        "You are a bounded file-format identification assistant. Use ONLY the supplied local "
+                        "canonical registry candidates. Never invent a PUID, identifier, format, version, or candidate. "
+                        "Return status=match only when one supplied candidate is uniquely supported by the observation. "
+                        "Return status=ambiguous when two or more supplied candidates are plausible but the observation "
+                        "does not provide the version/profile/other discriminator needed to choose one; list only those "
+                        "plausible candidate IDs in candidate_canonical_ids. Return status=no_match when none of the "
+                        "supplied candidates is a defensible match. Treat exact format tokens, aliases, extensions, "
+                        "identifiers, source-declared versions, and internal-signature names as evidence. Do not infer a "
+                        "specific version when it is absent from the input. For match, set candidate_canonical_id and "
+                        "candidate_canonical_ids to an empty array. For ambiguous, leave candidate_canonical_id empty. "
+                        "For no_match, leave both candidate fields empty."
                     ),
                 ),
                 AIMessage(
@@ -284,27 +405,46 @@ class AIFormatIdentificationPlugin:
         )
         response = self.provider.generate(request)
         decision = response.structured or parse_json_object(response.text or "{}", label="AI identification response")
-        status = str(decision.get("status") or "abstain")
+        status = str(decision.get("status") or "no_match")
         candidate_id = str(decision.get("candidate_canonical_id") or "").strip()
+        candidate_ids = [
+            str(value).strip()
+            for value in (decision.get("candidate_canonical_ids") or [])
+            if str(value).strip()
+        ]
         try:
             confidence = float(decision.get("confidence") or 0.0)
         except (TypeError, ValueError):
             confidence = 0.0
 
+        by_id = {_format_id(row): row for row in candidates if _format_id(row)}
         metadata = {
             "status": status,
             "confidence": confidence,
             "rationale": str(decision.get("rationale") or ""),
             "candidate_canonical_id": candidate_id or None,
+            "candidate_canonical_ids": candidate_ids,
             "minimum_confidence": self.minimum_confidence,
             "provider": self.provider.describe(),
             **candidate_audit,
         }
+
+        if status == "ambiguous":
+            valid_ambiguous_ids = [value for value in candidate_ids if value in by_id]
+            invalid_ids = [value for value in candidate_ids if value not in by_id]
+            metadata["candidate_canonical_ids"] = valid_ambiguous_ids
+            metadata["accepted"] = False
+            if invalid_ids:
+                metadata["invalid_candidate_canonical_ids"] = invalid_ids
+            if len(valid_ambiguous_ids) < 2:
+                metadata["reason"] = "ambiguous_status_requires_at_least_two_supplied_candidates"
+                metadata["status"] = "no_match"
+            return None, metadata
+
         if status != "match" or confidence < self.minimum_confidence or not candidate_id:
             metadata["accepted"] = False
             return None, metadata
 
-        by_id = {_format_id(row): row for row in candidates if _format_id(row)}
         candidate = by_id.get(candidate_id)
         if candidate is None:
             metadata.update({"accepted": False, "reason": "candidate_not_in_supplied_registry_set"})
@@ -328,6 +468,9 @@ class IdentificationResolver:
         self.base = FormatResolver(reader)
         self.plugin = plugin
         self.fuzzy_candidate_limit = max(1, int(fuzzy_candidate_limit))
+
+    def _enriched_candidates(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [enrich_candidate_from_source_records(self.reader, row) for row in rows]
 
     def resolve(self, query: str) -> FormatIdentificationResult:
         original = str(query or "").strip()
@@ -376,12 +519,12 @@ class IdentificationResolver:
                 },
             )
 
-        all_rows = self.reader.list_canonical_formats()
-        candidates = (
-            list(base_resolution.matches)
-            if base_resolution.ambiguous and base_resolution.matches
-            else shortlist_candidates(original, all_rows, limit=self.fuzzy_candidate_limit)
-        )
+        if base_resolution.ambiguous and base_resolution.matches:
+            candidates = self._enriched_candidates(list(base_resolution.matches))
+        else:
+            all_rows = self._enriched_candidates(self.reader.list_canonical_formats())
+            candidates = shortlist_candidates(original, all_rows, limit=self.fuzzy_candidate_limit)
+
         try:
             candidate, metadata = self.plugin.resolve(
                 original,
@@ -422,11 +565,32 @@ class IdentificationResolver:
                 ai_metadata=metadata,
             )
 
+        if metadata.get("status") == "ambiguous":
+            wanted = set(str(value) for value in metadata.get("candidate_canonical_ids") or [])
+            ambiguous_matches = tuple(row for row in candidates if _format_id(row) in wanted)
+            if len(ambiguous_matches) >= 2:
+                resolution = FormatResolution(
+                    query=original,
+                    status="ambiguous",
+                    match_type="ai_candidate_ambiguity",
+                    format_doc=None,
+                    matches=ambiguous_matches,
+                )
+                return FormatIdentificationResult(
+                    input_value=original,
+                    normalized_value=None,
+                    resolution=resolution,
+                    method="ai_fallback_ambiguous",
+                    ai_attempted=True,
+                    ai_metadata=metadata,
+                )
+
+        method = "ai_fallback_no_match" if metadata.get("status") in {"no_match", "abstain"} else "ai_fallback_abstained"
         return FormatIdentificationResult(
             input_value=original,
             normalized_value=None,
             resolution=base_resolution,
-            method="ai_fallback_abstained",
+            method=method,
             ai_attempted=True,
             ai_metadata=metadata,
         )
