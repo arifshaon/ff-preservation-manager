@@ -12,6 +12,13 @@ from preservation_risk_manager.format_resolver import FormatResolution, FormatRe
 
 
 _PUID_PATTERN = re.compile(r"(?:pronom\s*)?(x?-?fmt)\s*[:/\- ]\s*(\d+)$", re.IGNORECASE)
+_AI_UNSAFE_AMBIGUITY_TYPES = {
+    "canonical_id",
+    "verified_authority_identifier",
+    "authority_identifier",
+    "mime_type",
+    "extension",
+}
 
 
 @dataclass(frozen=True)
@@ -310,6 +317,22 @@ class IdentificationResolver:
                 normalized_value=None,
                 resolution=base_resolution,
                 method="deterministic_best_effort",
+            )
+
+        # Do not ask AI to arbitrate an authority collision or a bare extension/MIME
+        # ambiguity. Those cases either indicate a registry/data issue or simply do
+        # not contain enough information for a defensible variant-level decision.
+        if base_resolution.ambiguous and base_resolution.match_type in _AI_UNSAFE_AMBIGUITY_TYPES:
+            return FormatIdentificationResult(
+                input_value=original,
+                normalized_value=None,
+                resolution=base_resolution,
+                method="programmatic_ambiguity_requires_review",
+                ai_attempted=False,
+                ai_metadata={
+                    "status": "not_attempted",
+                    "reason": "unsafe_or_insufficient_ambiguity_for_ai",
+                },
             )
 
         all_rows = self.reader.list_canonical_formats()
