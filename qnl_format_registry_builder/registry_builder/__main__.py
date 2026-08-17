@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import sys
+import threading
 from typing import Any
 
 from registry_builder.collision_report import build_collision_report
@@ -62,6 +63,26 @@ def _progress_every(args, config: dict[str, Any] | None = None) -> int:
     if value is None and config:
         value = config.get("progress_every")
     return max(1, int(value or 500))
+
+
+def _heartbeat_every(args, config: dict[str, Any] | None = None) -> int:
+    value = getattr(args, "heartbeat_every", None)
+    if value is None and config:
+        value = config.get("heartbeat_every")
+    return max(5, int(value or 30))
+
+
+def _run_heartbeat(stop_event: threading.Event, *, interval: int) -> None:
+    elapsed = 0
+    while not stop_event.wait(interval):
+        elapsed += interval
+        print(
+            "[registry-builder] still running "
+            f"({elapsed}s elapsed); quiet work may include reconciliation, "
+            "criterion mapping, MongoDB writes, SQLite export, or coverage report generation...",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _format_progress(event: dict[str, Any]) -> str:
@@ -185,6 +206,8 @@ def main() -> None:
     run.add_argument("--workdir", default="work")
     run.add_argument("--out", default="out")
     run.add_argument("--offline", action="store_true", help="Use cached source snapshots only; do not fetch remote sources")
+    run.add_argument("--heartbeat-every", type=int, default=30, help="Report that the pipeline is still running after this many seconds of quiet work")
+    run.add_argument("--no-progress", action="store_true", help="Suppress registry run progress and heartbeat messages on stderr")
 
     val = sub.add_parser("validate", help="Validate a generated registry.json")
     val.add_argument("--registry", required=True)
@@ -227,7 +250,38 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "run":
-        report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline)
+        progress = _progress_enabled(args)
+        stop_event: threading.Event | None = None
+        heartbeat: threading.Thread | None = None
+        if progress:
+            print(
+                f"[registry-builder] starting pipeline; config={args.config}; workdir={args.workdir}; out={args.out}",
+                file=sys.stderr,
+                flush=True,
+            )
+            stop_event = threading.Event()
+            heartbeat = threading.Thread(
+                target=_run_heartbeat,
+                kwargs={"stop_event": stop_event, "interval": _heartbeat_every(args)},
+                daemon=True,
+            )
+            heartbeat.start()
+        try:
+            report = run_pipeline(args.config, args.workdir, args.out, offline=args.offline)
+        finally:
+            if stop_event is not None:
+                stop_event.set()
+            if heartbeat is not None:
+                heartbeat.join(timeout=1)
+        if progress:
+            print(
+                "[registry-builder] completed pipeline; "
+                f"canonical_formats={report.get('canonical_formats', 0)}; "
+                f"active_source_records={report.get('active_source_records', 0)}; "
+                f"criterion_claims={report.get('criterion_mapping', {}).get('claims_generated', 0)}",
+                file=sys.stderr,
+                flush=True,
+            )
         print(json.dumps(report, indent=2, ensure_ascii=False))
     elif args.command == "validate":
         registry = _load_registry(args.registry)
