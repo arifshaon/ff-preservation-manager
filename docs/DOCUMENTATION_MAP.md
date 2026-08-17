@@ -25,8 +25,10 @@ Use this map to choose the correct level of documentation instead of reading eve
 | Developer working with data/storage | [`DATA_MODEL_AND_STORAGE_INTERFACE.md`](DATA_MODEL_AND_STORAGE_INTERFACE.md) |
 | Registry operator | [`../qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md`](../qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Registry adapter developer | [`../qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](../qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md) |
+| New-source / criterion-mapping operator | [`../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 | Preservation analyst / risk-manager user | [`../preservation_risk_manager/README.md`](../preservation_risk_manager/README.md) |
 | Risk-manager operator | [`../preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md`](../preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Periodic monitoring/reporting operator | [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
 | Human-question / system-integration developer | [`../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md`](../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md) |
 | Framework/question-set reviewer | [`../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md`](../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md) |
 | AI provider / model integrator | [`../preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md`](../preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md) |
@@ -48,6 +50,7 @@ The builder owns source acquisition, normalization, reconciliation, criterion ma
 | Module overview | [`../qnl_format_registry_builder/README.md`](../qnl_format_registry_builder/README.md) |
 | Install, configure, and run all builder modes | [`../qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md`](../qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Builder-specific documentation map | [`../qnl_format_registry_builder/docs/DOCUMENTATION_MAP.md`](../qnl_format_registry_builder/docs/DOCUMENTATION_MAP.md) |
+| Add criteria/map a new external or institution source | [`../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 | Architecture | [`../qnl_format_registry_builder/docs/ARCHITECTURE.md`](../qnl_format_registry_builder/docs/ARCHITECTURE.md) |
 | Add/run source adapters | [`../qnl_format_registry_builder/docs/ADDING_AND_RUNNING_DATA_SOURCES.md`](../qnl_format_registry_builder/docs/ADDING_AND_RUNNING_DATA_SOURCES.md) |
 | Existing adapter reference | [`../qnl_format_registry_builder/docs/ADAPTER_REFERENCE.md`](../qnl_format_registry_builder/docs/ADAPTER_REFERENCE.md) |
@@ -72,9 +75,32 @@ The risk manager owns format resolution, evidence assembly, framework-driven det
 | Risk-manager documentation map | [`../preservation_risk_manager/docs/DOCUMENTATION_MAP.md`](../preservation_risk_manager/docs/DOCUMENTATION_MAP.md) |
 | Architecture and module responsibilities | [`../preservation_risk_manager/docs/ARCHITECTURE.md`](../preservation_risk_manager/docs/ARCHITECTURE.md) |
 | Install, setup, and run all modes | [`../preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md`](../preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Periodic source refresh/risk monitoring/reporting | [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
 | Human questions and machine requests | [`../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md`](../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md) |
 | Preservation-risk domains/questions | [`../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md`](../preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md) |
 | AI provider interface | [`../preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md`](../preservation_risk_manager/docs/AI_PROVIDER_INTERFACE.md) |
+
+## Monitoring/reporting path
+
+For periodic operations, read:
+
+```text
+qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md
+  -> preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md
+  -> preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md
+```
+
+The monitoring guide covers:
+
+- scheduled/periodic refresh of all configured evidence sources;
+- selected-format watchlists;
+- High-risk and Moderate/High reports;
+- correct whole-registry Top 10 ranking behavior;
+- family-specific reports;
+- evidence-gap reports;
+- institution-scoped monitoring;
+- retaining dated canonical JSON snapshots;
+- use by external schedulers, reporting services, dashboards, email/PDF generators, or API wrappers.
 
 ## Documentation boundaries
 
@@ -87,7 +113,9 @@ Some subjects appear in more than one place. Use these boundaries:
 | MongoDB collection/index details | `qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md` |
 | How to write a new backend | `qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md` |
 | Builder commands/configuration | `qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md` |
+| New-source/criterion mapping, institution-scoped mappings, DPC AI prompt | `qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md` |
 | Risk-manager commands/configuration | `preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md` |
+| Periodic monitoring/report production | `preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md` |
 | Human vs machine query semantics | `preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md` |
 | Meaning of the 8-domain question set | `preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md` |
 
@@ -101,5 +129,6 @@ Some subjects appear in more than one place. Use these boundaries:
 6. The registry builder owns normal registry writes/updates.
 7. The risk manager reads the same store through `RegistryReader` and does not directly couple assessment logic to MongoDB.
 8. Deterministic scoring/framework rules are authoritative for risk calculation.
-9. AI can route, interpret bounded evidence, or review; it cannot invent evidence or silently change deterministic policy/scoring.
+9. AI can route, interpret bounded evidence, review, or draft source mappings; it cannot invent evidence or silently change deterministic policy/scoring/approved mappings.
 10. Human and machine interfaces use the same canonical request/execution layer; only presentation differs.
+11. Periodic risk reports should retain framework version, source-refresh status, scope, and canonical JSON so results are reproducible.
