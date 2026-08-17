@@ -10,6 +10,7 @@ from preservation_risk_manager.data_access import JsonRegistryStore, RegistryRea
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
+from preservation_risk_manager.policy_proposals import build_policy_change_proposal
 from preservation_risk_manager.posture import compute_local_risk_posture
 from preservation_risk_manager.scoring import score_answers
 
@@ -245,7 +246,7 @@ def _criterion_claims_summary(claims: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
+def _resolved_analysis_context(args: argparse.Namespace) -> dict[str, Any]:
     framework_path = _require_file(args.framework, label="Framework file")
     framework = load_framework(framework_path)
     reader = _registry_reader_from_args(args)
@@ -257,30 +258,46 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
     criterion_claim_canonical_ids = reader.criterion_claim_canonical_ids(resolution.format_doc)
     criterion_claims = reader.get_criterion_claims_for_format(
         resolution.format_doc,
-        institution_id=args.institution,
+        institution_id=getattr(args, "institution", None),
     )
     evidence_pack = build_evidence_pack(
         resolution.format_doc,
-        institution_id=args.institution,
+        institution_id=getattr(args, "institution", None),
         criterion_claims=criterion_claims,
-        include_unapproved=bool(args.include_unapproved),
+        include_unapproved=bool(getattr(args, "include_unapproved", False)),
     )
     answer_document = derive_answers(framework, evidence_pack)
     analysis = score_answers(framework, answer_document.get("scoring_answers") or answer_document["answers"])
-    output_answer_document = _compact_answer_document(answer_document) if args.compact_evidence else answer_document
-    result: dict[str, Any] = {
-        "status": "ok",
-        "resolution": _resolution_summary(resolution),
-        "format": evidence_pack.get("format"),
-        "scope": evidence_pack.get("scope", "global"),
-        "evidence_hash": evidence_hash(evidence_pack),
+    return {
+        "resolution": resolution,
         "criterion_claim_canonical_ids": criterion_claim_canonical_ids,
-        "criterion_claims_used": len(criterion_claims),
-        "derived_answers": output_answer_document,
+        "criterion_claims": criterion_claims,
+        "evidence_pack": evidence_pack,
+        "answer_document": answer_document,
         "analysis": analysis,
     }
+
+
+def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
+    context = _resolved_analysis_context(args)
+    output_answer_document = (
+        _compact_answer_document(context["answer_document"])
+        if args.compact_evidence
+        else context["answer_document"]
+    )
+    result: dict[str, Any] = {
+        "status": "ok",
+        "resolution": _resolution_summary(context["resolution"]),
+        "format": context["evidence_pack"].get("format"),
+        "scope": context["evidence_pack"].get("scope", "global"),
+        "evidence_hash": evidence_hash(context["evidence_pack"]),
+        "criterion_claim_canonical_ids": context["criterion_claim_canonical_ids"],
+        "criterion_claims_used": len(context["criterion_claims"]),
+        "derived_answers": output_answer_document,
+        "analysis": context["analysis"],
+    }
     if args.evidence_summary:
-        result["criterion_claims_summary"] = _criterion_claims_summary(criterion_claims)
+        result["criterion_claims_summary"] = _criterion_claims_summary(context["criterion_claims"])
 
     if args.institution:
         readiness_status, exposure_level = _posture_fields_from_args(args)
@@ -289,12 +306,54 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
             "readiness_status": readiness_status,
             "exposure_level": exposure_level,
             "local_risk_posture": compute_local_risk_posture(
-                analysis.get("analysed_band"),
+                context["analysis"].get("analysed_band"),
                 readiness_status,
                 exposure_level=exposure_level,
             ),
         })
     return result
+
+
+def propose_policy_change(args: argparse.Namespace) -> dict[str, Any]:
+    context = _resolved_analysis_context(args)
+    evidence_pack = context["evidence_pack"]
+    readiness_status, exposure_level = _posture_fields_from_args(args)
+    local_risk_posture = None
+    if args.institution:
+        local_risk_posture = compute_local_risk_posture(
+            context["analysis"].get("analysed_band"),
+            readiness_status,
+            exposure_level=exposure_level,
+        )
+    derived_answers = (
+        _compact_answer_document(context["answer_document"])
+        if args.compact_evidence
+        else context["answer_document"]
+    )
+    return build_policy_change_proposal(
+        goal=args.goal,
+        resolution=_resolution_summary(context["resolution"]),
+        format_doc=evidence_pack.get("format") or {},
+        scope=evidence_pack.get("scope", "global"),
+        evidence_hash=evidence_hash(evidence_pack),
+        analysis=context["analysis"],
+        criterion_claim_canonical_ids=context["criterion_claim_canonical_ids"],
+        criterion_claims_summary=_criterion_claims_summary(context["criterion_claims"]),
+        derived_answers=derived_answers,
+        institution_id=args.institution,
+        readiness_status=readiness_status,
+        exposure_level=exposure_level,
+        local_risk_posture=local_risk_posture,
+    )
+
+
+def _add_registry_source_args(parser: argparse.ArgumentParser) -> None:
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--registry-json", help="Path to registry_builder registry.json export.")
+    source.add_argument(
+        "--storage-config",
+        help="Path to a registry-builder storage block or full pipeline config containing 'storage'.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -315,12 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve one format from a registry export or registry-builder store and run deterministic risk analysis.",
     )
     analyze_registry.add_argument("--framework", required=True, help="Path to risk framework JSON.")
-    source = analyze_registry.add_mutually_exclusive_group(required=True)
-    source.add_argument("--registry-json", help="Path to registry_builder registry.json export.")
-    source.add_argument(
-        "--storage-config",
-        help="Path to a registry-builder storage block or full pipeline config containing 'storage'.",
-    )
+    _add_registry_source_args(analyze_registry)
     analyze_registry.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
     analyze_registry.add_argument("--institution", help="Optional institution ID for local posture analysis.")
     analyze_registry.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
@@ -337,6 +391,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Suppress long evidence claim bodies in derived_answers while retaining provenance fields.",
     )
     analyze_registry.set_defaults(func=analyze_format)
+
+    propose = subparsers.add_parser(
+        "propose-policy-change",
+        help="Prepare an evidence-grounded draft policy/action recommendation package for human approval.",
+    )
+    propose.add_argument("--framework", required=True, help="Path to risk framework JSON.")
+    _add_registry_source_args(propose)
+    propose.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
+    propose.add_argument("--institution", help="Optional institution ID for local policy proposal.")
+    propose.add_argument("--readiness-status", default="Unknown", help="Institution readiness status when --institution is used.")
+    propose.add_argument("--exposure-level", default="Unknown", help="Institution exposure level when --institution is used.")
+    propose.add_argument("--include-unapproved", action="store_true", help="Include draft/rejected/superseded evidence claims.")
+    propose.add_argument("--goal", required=True, help="Human goal for the draft policy/action recommendation.")
+    propose.add_argument(
+        "--compact-evidence",
+        action="store_true",
+        help="Suppress long evidence claim bodies in the LLM context while retaining provenance fields.",
+    )
+    propose.set_defaults(func=propose_policy_change)
     return parser
 
 
