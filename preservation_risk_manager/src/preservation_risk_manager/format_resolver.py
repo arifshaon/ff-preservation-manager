@@ -137,12 +137,15 @@ def _candidate_match(format_doc: dict[str, Any], query: str) -> tuple[int, str] 
         return (95, "verified_authority_identifier")
     if normalized in _identifier_values(format_doc):
         return (90, "authority_identifier")
+    # Human-facing exact names/short names should beat generic MIME/extension
+    # matches. A dotted token such as '.pdf' still falls through to extension
+    # matching because it does not exactly equal the name 'PDF'.
+    if normalized in _field_values(format_doc, ("name", "preferred_name", "label", "short_name", "display_name")):
+        return (85, "name")
     if normalized in _mime_values(format_doc):
         return (80, "mime_type")
     if normalized_ext and normalized_ext in _extension_values(format_doc):
         return (70, "extension")
-    if normalized in _field_values(format_doc, ("name", "preferred_name", "label", "short_name", "display_name")):
-        return (60, "name")
     if normalized in _field_values(format_doc, ("aliases", "alternative_names")):
         return (50, "alias")
     return None
@@ -153,8 +156,8 @@ def resolve_format(query: str, format_docs: Iterable[dict[str, Any]]) -> FormatR
 
     Resolution is strict by design: exact IDs and verified authority identifiers
     have highest precedence; copied/unverified strong authority identifiers are
-    weaker evidence; MIME, extensions, names, and aliases use their own matching
-    tiers. Ambiguity is reported instead of guessed.
+    weaker evidence; exact human names outrank generic MIME/extension matches.
+    Ambiguity is reported instead of guessed.
     """
     candidates: list[tuple[int, str, dict[str, Any]]] = []
     for format_doc in format_docs:
