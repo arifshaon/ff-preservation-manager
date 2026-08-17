@@ -286,6 +286,7 @@ def _assessment_for_doc(
     return {
         "format": _format_identity(format_doc),
         "risk_band": analysis.get("analysed_band"),
+        "band_suppressed_reason": analysis.get("band_suppressed_reason"),
         "score": analysis.get("score"),
         "max_score": analysis.get("max_score"),
         "analysis_status": analysis.get("analysis_status"),
@@ -312,6 +313,44 @@ def _rank_assessments(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             str((row.get("format") or {}).get("label") or ""),
         ),
     )
+
+
+def _assessment_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    band_counts = {"High": 0, "Moderate": 0, "Low": 0, "Unbanded": 0}
+    status_counts: dict[str, int] = {}
+    suppressed_reason_counts: dict[str, int] = {}
+    for row in rows:
+        band = row.get("risk_band")
+        if band in {"High", "Moderate", "Low"}:
+            band_counts[str(band)] += 1
+        else:
+            band_counts["Unbanded"] += 1
+        status = str(row.get("analysis_status") or "Unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        reason = row.get("band_suppressed_reason")
+        if reason:
+            text = str(reason)
+            suppressed_reason_counts[text] = suppressed_reason_counts.get(text, 0) + 1
+    return {
+        "band_counts": band_counts,
+        "analysis_status_counts": status_counts,
+        "band_suppressed_reason_counts": suppressed_reason_counts,
+        "banded_count": band_counts["High"] + band_counts["Moderate"] + band_counts["Low"],
+        "unbanded_count": band_counts["Unbanded"],
+    }
+
+
+def _compact_unbanded(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "format": deepcopy(row.get("format") or {}),
+        "analysis_status": row.get("analysis_status"),
+        "band_suppressed_reason": row.get("band_suppressed_reason"),
+        "evidence_completeness": row.get("evidence_completeness"),
+        "missing_count": row.get("missing_count"),
+        "abstention_count": row.get("abstention_count"),
+        "criterion_claims_used": row.get("criterion_claims_used"),
+        "evidence_hash": row.get("evidence_hash"),
+    }
 
 
 def _base_response(request: dict[str, Any], framework: RiskFramework) -> dict[str, Any]:
@@ -371,20 +410,35 @@ def execute_request(
         candidates = search_format_docs(reader, family, limit=request["limit"])
     else:
         candidates = _dedupe_format_docs(reader.list_canonical_formats())[: request["limit"]]
-    assessments = [
+    all_assessments = [
         _assessment_for_doc(reader, framework, row, institution_id=institution_id)
         for row in candidates
     ]
-    assessments = _rank_assessments(assessments)
+    all_assessments = _rank_assessments(all_assessments)
+    assessment_summary = _assessment_summary(all_assessments)
+    unbanded_results = [
+        _compact_unbanded(row)
+        for row in all_assessments
+        if row.get("risk_band") is None
+    ]
 
+    assessments = all_assessments
     if action == "list_at_risk_formats":
         allowed_bands = set(request["filters"].get("risk_bands") or DEFAULT_AT_RISK_BANDS)
-        assessments = [row for row in assessments if row.get("risk_band") in allowed_bands]
+        assessments = [row for row in all_assessments if row.get("risk_band") in allowed_bands]
 
     result.update({
         "filters": deepcopy(request["filters"]),
         "candidate_count": len(candidates),
+        "assessment_summary": assessment_summary,
+        "unbanded_count": len(unbanded_results),
+        "unbanded_results": unbanded_results,
         "results": assessments,
         "result_count": len(assessments),
     })
+    if action == "list_at_risk_formats" and unbanded_results:
+        result["coverage_warning"] = (
+            f"{len(unbanded_results)} candidate format(s) could not be assigned a risk band and are not "
+            "included in the at-risk result filter. Review unbanded_results before concluding that no risk was found."
+        )
     return result
