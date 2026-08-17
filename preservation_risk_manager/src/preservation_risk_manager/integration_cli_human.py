@@ -15,6 +15,7 @@ from preservation_risk_manager.request_api import normalize_request
 
 
 _RATE_LIMIT_REASON = "provider_rate_limit_circuit_open"
+_FORMAT_LIMIT_REASON = "human_ai_format_limit"
 _SIMPLE_RISK_QUERY = re.compile(
     r"^\s*(?:(?:what(?:'s|\s+is)?|tell\s+me)\s+)?(?:the\s+)?(?:preservation\s+)?risk\s+(?:of|for)\s+(.+?)\s*\??\s*$",
     re.IGNORECASE,
@@ -155,6 +156,27 @@ def _skipped_rate_limit_assessment(provider, *, ai_mode: str) -> dict[str, Any]:
     }
 
 
+def _skipped_format_limit_assessment(
+    provider,
+    *,
+    ai_mode: str,
+    configured_limit: int,
+    matched_count: int,
+) -> dict[str, Any]:
+    return {
+        "status": "skipped_format_limit",
+        "ai_mode": ai_mode,
+        "provider": provider.describe(),
+        "reason": _FORMAT_LIMIT_REASON,
+        "configured_limit": configured_limit,
+        "matched_format_count": matched_count,
+        "authority_boundary": (
+            "AI interpretation was intentionally limited for this broad human query; "
+            "the deterministic assessment was retained unchanged."
+        ),
+    }
+
+
 def _assess_human_puid_matches(
     reader,
     framework,
@@ -165,14 +187,28 @@ def _assess_human_puid_matches(
     ai_mode: str,
     max_evidence_items: int,
     user_question: str = "",
+    ai_format_limit: int = 10,
 ) -> dict[str, Any] | None:
-    """Assess each distinct human-matched PUID; batch fill-gaps across the set."""
+    """Assess each distinct human-matched PUID; constrain AI to a configured subset."""
     candidates = human_puid_candidates(reader, request, identification)
     if not candidates:
         return None
 
-    assessments: list[dict[str, Any]] = []
     total = len(candidates)
+    configured_limit = max(1, int(ai_format_limit))
+    ai_candidate_count = min(total, configured_limit) if ai_mode != "off" else 0
+    ai_limit_applied = ai_mode != "off" and total > configured_limit
+
+    if ai_limit_applied:
+        print(
+            f"[human-risk] {total} matching PUIDs found, which exceeds the configured AI assessment limit "
+            f"of {configured_limit}. AI risk assessment will be run only for the first {configured_limit}; "
+            f"the remaining {total - configured_limit} will be deterministic-only.",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    assessments: list[dict[str, Any]] = []
     for index, candidate in enumerate(candidates, start=1):
         if total > 1:
             print(
@@ -188,10 +224,21 @@ def _assess_human_puid_matches(
         subresponse["matched_version"] = candidate.get("version")
         assessments.append(subresponse)
 
+    selected_candidates = candidates[:ai_candidate_count]
+    selected_assessments = assessments[:ai_candidate_count]
+    skipped_assessments = assessments[ai_candidate_count:] if ai_mode != "off" else []
+    for subresponse in skipped_assessments:
+        subresponse["ai_risk_assessment"] = _skipped_format_limit_assessment(
+            provider,
+            ai_mode=ai_mode,
+            configured_limit=configured_limit,
+            matched_count=total,
+        )
+
     batch_meta: dict[str, Any] | None = None
-    if ai_mode == "fill-gaps" and len(candidates) > 1:
+    if ai_mode == "fill-gaps" and len(selected_candidates) > 1:
         print(
-            f"[human-risk] AI fill-gaps will be batched across {len(candidates)} matched PUIDs.",
+            f"[human-risk] AI fill-gaps will assess {len(selected_candidates)} of {total} matched PUIDs.",
             file=sys.stderr,
             flush=True,
         )
@@ -200,8 +247,8 @@ def _assess_human_puid_matches(
             reader,
             framework,
             request,
-            candidates,
-            assessments,
+            selected_candidates,
+            selected_assessments,
             user_question=user_question or str(request.get("format") or ""),
             max_evidence_items=max_evidence_items,
             max_puids_per_call=8,
@@ -214,9 +261,9 @@ def _assess_human_puid_matches(
                 file=sys.stderr,
                 flush=True,
             )
-    elif ai_mode != "off":
+    elif ai_mode != "off" and selected_candidates:
         reported_rate_limit = False
-        for candidate, subresponse in zip(candidates, assessments):
+        for candidate, subresponse in zip(selected_candidates, selected_assessments):
             candidate_request = dict(request)
             candidate_request["format"] = candidate["canonical_id"]
             if bool(getattr(provider, "rate_limited", False)):
@@ -259,6 +306,10 @@ def _assess_human_puid_matches(
         "matched_puids": [item["matched_puid"] for item in assessments],
         "ai_rate_limited": bool(getattr(provider, "rate_limited", False)),
         "ai_batch": batch_meta,
+        "ai_format_limit": configured_limit,
+        "ai_format_limit_applied": ai_limit_applied,
+        "ai_formats_assessed": ai_candidate_count,
+        "ai_formats_skipped": max(0, total - ai_candidate_count) if ai_mode != "off" else 0,
         "assessments": assessments,
     }
 
@@ -301,6 +352,7 @@ def _ask(args) -> dict[str, Any]:
         ai_mode=args.ai_mode,
         max_evidence_items=max_items,
         user_question=args.question,
+        ai_format_limit=config.human_ai_format_limit,
     )
     if response is None:
         response = base._identification_ambiguity_response(framework, routed_request, identification)
