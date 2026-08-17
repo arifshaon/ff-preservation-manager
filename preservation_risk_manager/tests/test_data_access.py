@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from preservation_risk_manager.data_access import RegistryAccessError, RegistryReader, load_storage_config
+from preservation_risk_manager.data_access import JsonRegistryStore, RegistryAccessError, RegistryReader, load_storage_config
 
 
 class FakeStore:
@@ -45,6 +45,61 @@ def test_load_storage_config_rejects_non_object_storage_value(tmp_path):
 
     with pytest.raises(RegistryAccessError, match="non-object 'storage' value"):
         load_storage_config(path)
+
+
+def test_json_registry_store_auto_loads_sibling_criterion_claims_jsonl(tmp_path):
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(
+        json.dumps([{"canonical_id": "fmt-pdf", "preferred_name": "PDF"}]),
+        encoding="utf-8",
+    )
+    claims_path = tmp_path / "criterion_claims.jsonl"
+    claims = [
+        {
+            "canonical_id": "fmt-pdf",
+            "criterion_id": "sustainability.disclosure",
+            "value": "public_specification",
+            "source_id": "loc_fdd_xml",
+            "mapping_rule_id": "loc.disclosure.v1",
+        },
+        {
+            "canonical_id": "fmt-pdf",
+            "criterion_id": "sustainability.adoption",
+            "value": "high",
+            "source_id": "loc_fdd_xml",
+            "mapping_rule_id": "loc.adoption.v1",
+        },
+    ]
+    claims_path.write_text("\n".join(json.dumps(row) for row in claims) + "\n", encoding="utf-8")
+
+    store = JsonRegistryStore.from_registry_json(registry_path)
+
+    assert store.query("canonical_formats", {"canonical_id": "fmt-pdf"}) == [
+        {"canonical_id": "fmt-pdf", "preferred_name": "PDF"}
+    ]
+    assert store.query("criterion_claims", {"canonical_id": "fmt-pdf"}) == claims
+
+
+def test_json_registry_store_accepts_explicit_criterion_claims_path(tmp_path):
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps([{"canonical_id": "fmt-pdf"}]), encoding="utf-8")
+    claims_dir = tmp_path / "claims"
+    claims_dir.mkdir()
+    claims_path = claims_dir / "claims.json"
+    claims_path.write_text(
+        json.dumps([
+            {
+                "canonical_id": "fmt-pdf",
+                "criterion_id": "sustainability.disclosure",
+                "value": "public_specification",
+            }
+        ]),
+        encoding="utf-8",
+    )
+
+    store = JsonRegistryStore.from_registry_json(registry_path, criterion_claims_path=claims_path)
+
+    assert len(store.query("criterion_claims", {"canonical_id": "fmt-pdf"})) == 1
 
 
 def test_registry_reader_queries_store_contract():
