@@ -24,18 +24,19 @@ _FORMAT_ID_HEADERS = {
 }
 
 
-def _clean_token(value: Any) -> str:
+def normalize_input_format_id(value: Any) -> str:
     text = str(value or "").strip().lstrip("\ufeff")
     if not text:
         return ""
-    return normalize_format_observation(text)
+    variants = normalize_format_observation(text)
+    return variants[0] if variants else text
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
-        cleaned = _clean_token(value)
+        cleaned = normalize_input_format_id(value)
         key = cleaned.lower()
         if not cleaned or key in seen:
             continue
