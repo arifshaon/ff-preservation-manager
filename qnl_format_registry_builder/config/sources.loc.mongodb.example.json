@@ -17,7 +17,7 @@
     "enabled": true,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings",
+    "mappings": "criterion_mappings/loc_fdd_xml.v1.approved.json",
     "include_drafts": false,
     "scope": "all",
     "notes": "Source-scoped operational config for adding or refreshing LOC FDD. Reconciliation still uses latest stored records from other completed sources, such as NARA and PRONOM."
