@@ -2,14 +2,20 @@
 
 File Format Preservation Manager is a multi-module repository for building, querying, assessing, monitoring, and managing file-format preservation evidence and risk.
 
-The repository deliberately separates **registry construction** from **risk assessment**:
+If this is your first checkout, start with:
+
+**[`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)**
+
+That guide takes a new user from installation to a criterion-mapped registry and then to a deterministic preservation-risk assessment. It is the canonical cross-package quickstart.
+
+## Architecture at a glance
 
 ```text
 Authoritative + institutional sources
           |
           v
 qnl_format_registry_builder
-  acquire -> normalize -> reconcile -> map evidence -> persist
+  acquire -> normalize -> reconcile -> map evidence -> persist/export
           |
           v
 Common registry data model / RegistryStore interface
@@ -26,59 +32,62 @@ preservation_risk_manager
           +--> periodic monitoring/reporting via external scheduler/service
 ```
 
-The registry is therefore not a static spreadsheet, and the risk manager is not an AI-only chatbot. Source provenance, identifier reconciliation, evidence claims, framework questions, scoring, risk bands, and institutional scope remain explicit and auditable.
+The registry is not a static spreadsheet, and the risk manager is not an AI-only chatbot. Source provenance, identifier reconciliation, criterion claims, framework questions, scoring, risk bands, evidence gaps, and institutional scope remain explicit and auditable.
 
 ## Active modules
 
 | Module | Purpose | Start here |
 | --- | --- | --- |
 | [`qnl_format_registry_builder/`](qnl_format_registry_builder/) | Builds and incrementally updates the local file-format evidence registry from NARA, PRONOM, LOC FDD, QNL/institutional evidence, and additional adapters. | [`qnl_format_registry_builder/README.md`](qnl_format_registry_builder/README.md) |
-| [`preservation_risk_manager/`](preservation_risk_manager/) | Reads the registry through the same storage abstraction and performs deterministic preservation-risk assessment, evidence-gap analysis, remediation planning, human Q&A, machine-readable queries, and scheduled/reporting integration. | [`preservation_risk_manager/README.md`](preservation_risk_manager/README.md) |
+| [`preservation_risk_manager/`](preservation_risk_manager/) | Reads the same evidence store/exports and performs deterministic risk assessment, gap diagnosis, remediation planning, human Q&A, machine queries, AI-assisted review, and monitoring/reporting integration. | [`preservation_risk_manager/README.md`](preservation_risk_manager/README.md) |
 
-## Repository-wide documentation
+## Where to start
 
 | Need | Document |
 | --- | --- |
-| Understand how the two modules fit together | [`docs/REPOSITORY_ARCHITECTURE.md`](docs/REPOSITORY_ARCHITECTURE.md) |
-| Understand the shared data model and storage/adapter contract | [`docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) |
+| First clone: build evidence and produce a real risk assessment | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) |
+| Understand how the modules fit together | [`docs/REPOSITORY_ARCHITECTURE.md`](docs/REPOSITORY_ARCHITECTURE.md) |
+| Understand the shared data/storage/adapter contract | [`docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) |
 | Navigate all documentation | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
-| Install, configure, and run the registry builder | [`qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md`](qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Install/configure/run the registry builder | [`qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md`](qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Add/map a new source or institution-level evidence | [`qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
-| Generate a DPC Bit List criterion-mapping draft with AI | [`qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
-| Install, configure, and run the risk manager | [`preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md`](preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md) |
-| Periodic source refresh, watchlists, Top 10/high-risk reports | [`preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
+| Draft a DPC Bit List mapping with an AI agent | [`qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md`](qnl_format_registry_builder/config/prompts/propose_mapping/dpc_bit_list.v1.md) |
+| Install/configure/run the risk manager | [`preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md`](preservation_risk_manager/docs/INSTALLATION_SETUP_AND_RUN.md) |
+| Understand the risk-analysis pipeline and band suppression | [`preservation_risk_manager/docs/RISK_ANALYSIS_WORKFLOW.md`](preservation_risk_manager/docs/RISK_ANALYSIS_WORKFLOW.md) |
+| Author/review risk frameworks | [`preservation_risk_manager/docs/FRAMEWORKS.md`](preservation_risk_manager/docs/FRAMEWORKS.md) |
 | Human questions and machine/system requests | [`preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md`](preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md) |
-| Full preservation-risk question domains | [`preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md`](preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md) |
+| CLI command reference | [`preservation_risk_manager/docs/CLI_REFERENCE.md`](preservation_risk_manager/docs/CLI_REFERENCE.md) |
+| AI-assisted analysis and local/Azure model modes | [`preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md`](preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md) |
+| Risk-manager module-by-module reference | [`preservation_risk_manager/docs/MODULE_REFERENCE.md`](preservation_risk_manager/docs/MODULE_REFERENCE.md) |
+| Periodic source refresh, watchlists, Top 10/high-risk reports | [`preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
+| Full 8-domain / 22-question preservation-risk set | [`preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md`](preservation_risk_manager/docs/PRESERVATION_RISK_QUESTIONS.md) |
 
-## What each module does
-
-### 1. Registry builder
-
-`qnl_format_registry_builder` is the ingestion, normalization, reconciliation, provenance, and persistence layer.
+## What the registry builder produces
 
 Typical flow:
 
 ```text
 source config
  -> source adapter
- -> content-addressed source snapshot
+ -> content-addressed snapshot
  -> RawFormatRecord
  -> identifier normalization
  -> conservative canonical reconciliation
- -> source/native evidence preservation
- -> criterion mapping
+ -> source-native evidence retention
+ -> approved criterion mapping
  -> criterion_claims
- -> RegistryStore backend
- -> change detection / exports / reports
+ -> RegistryStore and/or exports
+ -> change detection / reports
 ```
 
-Built-in source types include NARA Digital Preservation Framework, PRONOM registry/DROID data, LOC FDD XML, structured JSON, institutional policy workbooks, and QNL institutional format evidence. External source and storage plugins can be loaded by trusted `module:ClassName` paths.
+The builder owns normal registry **writes and updates**.
 
-The builder owns **writes and updates** to the registry. It can use memory, file/JSON document storage, MongoDB, or another backend implementing the shared storage contract.
+A key distinction for new users:
 
-### 2. Preservation risk manager
+- `config/sources.example.json` is primarily a registry-construction example and does **not** enable criterion mapping.
+- `config/sources.criterion-mapping.quickstart.json` explicitly enables criterion mapping and is the correct no-database quickstart when the goal is to hand evidence to the risk manager.
 
-`preservation_risk_manager` is the analysis and access layer.
+## What the preservation risk manager consumes
 
 Typical flow:
 
@@ -94,32 +103,20 @@ human prompt or structured request
  -> human renderer OR canonical JSON
 ```
 
-The risk manager reuses the registry-builder storage backend through a minimal query contract. It does not duplicate MongoDB logic.
+With persistent storage, the risk manager reads the same `RegistryStore` backend through `RegistryReader`.
 
-AI is bounded to specific roles such as natural-language request routing, interpretation of unresolved evidence in `fill-gaps`, independent raw-evidence review in `review-all`, or drafting a source-to-criterion mapping for human review. AI does not silently rewrite canonical evidence, deterministic answers, approved mappings, or approved scoring rules.
+With exports, it reads `registry.json` and automatically discovers a sibling:
 
-## Shared storage and adapter model
-
-The common persistence boundary is `RegistryStore`.
-
-At minimum, a storage backend implements:
-
-```python
-upsert(collection, key, document)
-query(collection, filter)
+```text
+criterion_claims.jsonl
+criterion_claims.json
 ```
 
-The registry builder uses both operations and provides named convenience methods for runs, source snapshots, source records, canonical formats, identifiers, criterion claims, institutional overlays, assessments, and change events.
+when present. This is the supported file-export handoff between the two packages.
 
-The risk manager consumes the read side through `RegistryReader`, whose minimum backend requirement is `query(...)`. This means the same risk code can read a MongoDB registry, file-backed registry, in-memory test store, or compatible future adapter without changing assessment logic.
-
-See [`docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](docs/DATA_MODEL_AND_STORAGE_INTERFACE.md) for the collection model, read/write ownership, MongoDB example, and plugin contract.
-
-## Install both modules in one environment
+## Install both modules
 
 Python 3.10 or later is required.
-
-From the repository root:
 
 ```powershell
 python -m venv .venv
@@ -134,42 +131,58 @@ python -m pip install -e ".[dev,ai]"
 cd ..
 ```
 
-Using an existing virtual environment is also supported. Installing both packages into the same environment allows the risk manager to reuse registry-builder storage adapters such as MongoDB.
-
-Run all package tests separately:
-
-```powershell
-cd qnl_format_registry_builder
-pytest -q
-
-cd ..\preservation_risk_manager
-pytest -q
-```
+Using an existing virtual environment is also supported.
 
 ## Minimal end-to-end example
 
-Build/update the registry:
+For the fully explained version, use [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md).
+
+Build an export-backed registry **with criterion mapping enabled**:
 
 ```powershell
 cd qnl_format_registry_builder
 python -m registry_builder run `
-  --config config\sources.example.json `
+  --config config\sources.criterion-mapping.quickstart.json `
   --workdir work `
   --out output
 ```
 
-Then ask a human question against the same MongoDB-backed registry:
+Verify claims exist:
+
+```powershell
+Test-Path output\registry.json
+Test-Path output\criterion_claims.jsonl
+(Get-Content output\criterion_claims.jsonl | Measure-Object -Line).Lines
+```
+
+Then analyse PDF:
 
 ```powershell
 cd ..\preservation_risk_manager
-python -m preservation_risk_manager ask `
-  "What are the software dependency and environment risks of PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
+python -m preservation_risk_manager analyze-format `
+  --framework examples\qnl_sustainability.framework.example.json `
+  --registry-json ..\qnl_format_registry_builder\output\registry.json `
+  --format PDF `
+  --evidence-summary
 ```
 
-Or bypass natural-language routing and execute a machine request:
+The risk manager loads the sibling criterion-claim export automatically.
+
+## Persistent/service integration
+
+For operational deployments, prefer persistent storage such as MongoDB or the file store:
+
+```text
+registry_builder -> RegistryStore
+                     |
+                     v
+              RegistryReader
+                     |
+                     v
+          preservation_risk_manager
+```
+
+Machine request example:
 
 ```json
 {
@@ -177,7 +190,8 @@ Or bypass natural-language routing and execute a machine request:
   "format": "PDF",
   "filters": {
     "domains": ["software_dependencies_environment"]
-  }
+  },
+  "scope": "global"
 }
 ```
 
@@ -188,55 +202,71 @@ python -m preservation_risk_manager query-json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
 ```
 
+## Human interface
+
+A preservation professional asks a normal question:
+
+```powershell
+python -m preservation_risk_manager ask `
+  "What are the software dependency and environment risks of PDF?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --ai-config config\ai.local.json
+```
+
+The AI routes intent/parameters. The deterministic registry/framework engine produces the assessment. Normal output is detailed human-readable text; `ask --json` exposes the canonical payload and router audit metadata.
+
+## AI provider examples
+
+Azure:
+
+```text
+preservation_risk_manager/examples/ai.azure.example.json
+```
+
+Local/OpenAI-compatible:
+
+```text
+preservation_risk_manager/examples/ai.local.example.json
+```
+
+See [`preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md`](preservation_risk_manager/docs/AI_ASSISTED_ANALYSIS.md).
+
 ## Periodic risk monitoring and reports
 
-The same commands can be orchestrated by Windows Task Scheduler, cron, Azure automation, Airflow, CI/CD, a dashboard backend, or another reporting service.
+The same machine interface can be orchestrated by Windows Task Scheduler, cron, Azure automation, Airflow, CI/CD, a dashboard backend, or another reporting service.
 
 Typical periodic flow:
 
 ```text
-refresh all configured sources
+refresh configured sources
  -> verify source/run status
  -> run selected-format / family / whole-registry risk requests
- -> save canonical JSON snapshot
- -> compare with previous snapshot
- -> render Top 10 / High-risk / watchlist / evidence-gap report
+ -> save canonical JSON snapshots
+ -> compare with previous snapshots
+ -> render Top 10 / High-risk / watchlist / evidence-gap reports
  -> distribute as PDF, email, dashboard, ticket or API result
 ```
 
-For the exact requests, the Top 10 ranking caveat, evidence-gap reporting, institution scope, and a sample PowerShell wrapper, see:
-
-[`preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
-
-## Adding a new evidence source to the risk model
-
-A new source normally needs:
-
-```text
-adapter/normalized source fields
- -> field audit
- -> source-to-criterion mapping
- -> validation
- -> human approval
- -> criterion-claim backfill/integrated build
- -> risk-manager verification
-```
-
-Use:
-
-[`qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
-
-That guide also covers institution-scoped evidence, adding a genuinely new neutral criterion, and a copy/paste AI prompt for turning a DPC Bit List source + field profile into an unreviewed mapping JSON draft in the tool's expected format.
+See [`preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md).
 
 ## Framework status
 
-Two example frameworks currently serve different purposes:
+Two framework examples serve different purposes:
 
-- `qnl_sustainability.framework.example.json` — a small three-question example used to exercise deterministic scoring and risk bands.
-- `qnl_preservation_risk_questions.framework.draft.json` — the broader 8-domain / 22-question preservation-risk question set. It is marked `draft_unvalidated`; overall Low/Moderate/High banding is intentionally disabled until QNL validates weights and thresholds.
+- `qnl_sustainability.framework.example.json` — small three-question example used to exercise deterministic scoring/banding.
+- `qnl_preservation_risk_questions.framework.draft.json` — broader 8-domain / 22-question working set with `calibration_status = draft_unvalidated` and `banding_enabled = false`.
 
-Do not interpret the draft question framework as approved QNL policy, and do not present its currently suppressed bands as an operational Top 10 risk ranking.
+Do not interpret the draft question framework as approved QNL policy or use its suppressed bands as an operational Top 10 ranking.
 
-## Current maturity
+## Tests
 
-Both modules are active and tested. The registry builder is the evidence-production layer; the preservation risk manager is the evidence-consumption and assessment layer. Production deployments should use pinned/reviewed configuration, persistent storage, retained source snapshots, approved criterion mappings, controlled credentials, reviewed/calibrated risk frameworks, and retained canonical JSON for recurring reports.
+```powershell
+cd qnl_format_registry_builder
+pytest -q
+
+cd ..\preservation_risk_manager
+pytest -q
+```
+
+Changes to cross-package handoff behavior should include an end-to-end-style regression that proves exported criterion claims are actually visible to risk analysis.
