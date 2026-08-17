@@ -58,6 +58,7 @@ class AzureOpenAIProvider(AIProvider):
             api_key=self.config.resolve_api_key(required=True),
             api_version=self.config.api_version or "2024-10-21",
             timeout=self.config.timeout_seconds,
+            max_retries=self.config.max_retries,
         )
 
     def generate(self, request: AIRequest) -> AIResponse:
