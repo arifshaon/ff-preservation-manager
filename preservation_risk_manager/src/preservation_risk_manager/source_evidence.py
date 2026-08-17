@@ -8,6 +8,7 @@ from preservation_risk_manager.data_access import RegistryReader
 
 _NATIVE_SUSTAINABILITY_FIELDS = {
     "disclosure": "sustainability.disclosure",
+    "documentation": "sustainability.disclosure",
     "adoption": "sustainability.adoption",
     "transparency": "sustainability.transparency_readability",
     "self_documentation": "sustainability.self_documentation",
@@ -112,6 +113,32 @@ def _source_url(source_record: dict[str, Any]) -> str | None:
     return None
 
 
+def _exact_authority_record_match(
+    source_record: dict[str, Any],
+    format_ids: dict[str, set[str]],
+) -> dict[str, str] | None:
+    """Return the authority identifier when this is the exact authority record.
+
+    Shared identifiers can also occur on family/related records. Matching the
+    source record's own authority ID is stronger: LOC fdd000248 is the exact LOC
+    record for a canonical format carrying loc=fdd000248, whereas an LOC family
+    record that merely mentions fmt/505 is related evidence rather than the exact
+    version record.
+    """
+    source_id = str(source_record.get("source_id") or source_record.get("source_type") or "").lower()
+    source_record_id = str(source_record.get("source_record_id") or "").strip()
+    normalized = source_record_id.lower()
+    if not normalized:
+        return None
+    if "loc" in source_id and normalized in format_ids.get("loc", set()):
+        return {"kind": "loc", "value": source_record_id}
+    if "pronom" in source_id and normalized in format_ids.get("puid", set()):
+        return {"kind": "puid", "value": source_record_id}
+    if "nara" in source_id and normalized in format_ids.get("nara", set()):
+        return {"kind": "nara", "value": source_record_id}
+    return None
+
+
 def _link_basis(
     source_record: dict[str, Any],
     *,
@@ -122,12 +149,23 @@ def _link_basis(
     source_record_id = str(source_record.get("source_record_id") or "").strip()
     direct = (source_id, source_record_id) in direct_refs
     shared = _shared_identifiers(format_ids, source_record)
-    if not direct and not shared:
+    exact_authority = _exact_authority_record_match(source_record, format_ids)
+    if not direct and not shared and exact_authority is None:
         return None
-    return {
+    if direct:
+        specificity = "direct_source_record"
+    elif exact_authority is not None:
+        specificity = "exact_authority_record"
+    else:
+        specificity = "shared_identifier_related_record"
+    result: dict[str, Any] = {
+        "specificity": specificity,
         "direct_source_record": direct,
         "shared_strong_identifiers": shared,
     }
+    if exact_authority is not None:
+        result["exact_authority_identifier"] = exact_authority
+    return result
 
 
 def _native_sustainability_items(source_record: dict[str, Any], link_basis: dict[str, Any]) -> list[dict[str, Any]]:
@@ -143,7 +181,11 @@ def _native_sustainability_items(source_record: dict[str, Any], link_basis: dict
             continue
         item = {
             "evidence_section": "ai_source_evidence",
-            "evidence_kind": "source_native_sustainability_factor",
+            "evidence_kind": (
+                "source_native_documentation"
+                if native_key == "documentation"
+                else "source_native_sustainability_factor"
+            ),
             "evidence_field": evidence_field,
             "native_field": f"native_fields.sustainability_factors.{native_key}",
             "source_id": source_record.get("source_id"),
@@ -185,6 +227,14 @@ def _generic_source_item(source_record: dict[str, Any], link_basis: dict[str, An
     return item
 
 
+def _specificity_rank(link_basis: dict[str, Any]) -> int:
+    return {
+        "direct_source_record": 0,
+        "exact_authority_record": 1,
+        "shared_identifier_related_record": 2,
+    }.get(str(link_basis.get("specificity") or ""), 3)
+
+
 def build_ai_source_evidence(
     reader: RegistryReader,
     format_doc: dict[str, Any],
@@ -198,10 +248,10 @@ def build_ai_source_evidence(
     derivation ignores ``ai_source_evidence``; the AI layer may inspect it only
     for questions that remain unresolved. A source record is eligible when it is
     directly attached to the canonical format or shares a strong identifier with
-    it. The latter permits source-family records to contribute when the authority
-    itself cross-references the exact format identifier. If the active registry
-    reader does not expose source records, this optional layer fails closed to an
-    empty list and the existing deterministic/AI-claim workflow continues.
+    it. Exact authority records are ranked ahead of broader related/family records.
+    If the active registry reader does not expose source records, this optional
+    layer fails closed to an empty list and the existing deterministic/AI-claim
+    workflow continues.
     """
     max_source_records = max(1, int(max_source_records))
     max_items = max(1, int(max_items))
@@ -216,16 +266,16 @@ def build_ai_source_evidence(
     except Exception:
         return []
 
-    linked: list[tuple[bool, str, str, dict[str, Any], dict[str, Any]]] = []
+    linked: list[tuple[int, str, str, dict[str, Any], dict[str, Any]]] = []
     for source_record in _latest_source_records(source_rows):
         link = _link_basis(source_record, direct_refs=direct_refs, format_ids=format_ids)
         if link is None:
             continue
         source_id = str(source_record.get("source_id") or source_record.get("source_type") or "")
         source_record_id = str(source_record.get("source_record_id") or "")
-        linked.append((bool(link.get("direct_source_record")), source_id, source_record_id, source_record, link))
+        linked.append((_specificity_rank(link), source_id, source_record_id, source_record, link))
 
-    linked.sort(key=lambda item: (not item[0], item[1], item[2]))
+    linked.sort(key=lambda item: (item[0], item[1], item[2]))
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for _, _, _, source_record, link in linked[:max_source_records]:
