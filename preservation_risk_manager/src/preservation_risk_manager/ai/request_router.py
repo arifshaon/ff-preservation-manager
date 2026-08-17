@@ -15,11 +15,14 @@ REQUEST_ROUTER_SYSTEM_PROMPT = (
     "invent formats, and do not use general preservation knowledge. The application will execute "
     "the request against its registry and deterministic framework. Use assess_format for one format, "
     "search_formats only for format discovery, assess_format_family for assessing all matching family "
-    "members, and list_at_risk_formats when the user asks which formats are risky, concerning, at "
-    "risk, Moderate, High, or should be worried about. For list_at_risk_formats, put the family term "
-    "in filters.family, not query. If the user asks for at-risk formats without bands, use Moderate "
-    "and High. If the user explicitly mentions QNL as the assessment scope, use scope institution "
-    "with institution_id qnl; otherwise use global unless another institution ID is explicitly supplied."
+    "members, list_at_risk_formats when the user asks which formats are risky, concerning, at risk, "
+    "Moderate, High, or should be worried about, and list_evidence_gaps when the user asks why a format "
+    "cannot be assessed, which formats need more evidence, what evidence is missing, or which formats "
+    "are unassessed/partially assessed. For family-level list_at_risk_formats or list_evidence_gaps, "
+    "put the family term in filters.family, not query. For a single-format evidence-gap question, put "
+    "the format in format. If the user asks for at-risk formats without bands, use Moderate and High. "
+    "If the user explicitly mentions QNL as the assessment scope, use scope institution with "
+    "institution_id qnl; otherwise use global unless another institution ID is explicitly supplied."
 )
 
 
@@ -60,13 +63,7 @@ def request_router_schema() -> dict[str, Any]:
 
 
 def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Repair mechanically inconsistent model routes without inferring risk.
-
-    The AI remains responsible for intent routing, but the application enforces
-    a valid canonical request shape. Repairs use only fields already returned by
-    the router; they do not inspect registry evidence or answer the preservation
-    question.
-    """
+    """Repair mechanically inconsistent model routes without inferring risk."""
     repaired = deepcopy(routed)
     repairs: list[str] = []
     filters = repaired.get("filters")
@@ -83,16 +80,12 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
     query = str(repaired.get("query") or "").strip() or None
     format_value = str(repaired.get("format") or "").strip() or None
 
-    # Common router slip: it recognizes a family and risk bands but labels the
-    # action as discovery. Preserve the structured family/bands and use the
-    # canonical at-risk action.
     if action == "search_formats" and family and risk_bands:
         repaired["action"] = "list_at_risk_formats"
         repaired["query"] = None
         repairs.append("search_formats_with_family_and_risk_bands->list_at_risk_formats")
         action = "list_at_risk_formats"
 
-    # A discovery request with a family but no query can be repaired directly.
     if action == "search_formats" and not query and family:
         repaired["query"] = family
         repairs.append("search_formats.query<-filters.family")
@@ -102,8 +95,6 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
         repairs.append("search_formats.query<-format")
         query = format_value
 
-    # Family actions sometimes receive the subject in query/format rather than
-    # filters.family. Move it into the canonical location.
     if action in {"assess_format_family", "list_at_risk_formats"} and not family:
         inferred_family = query or format_value
         if inferred_family:
@@ -112,6 +103,15 @@ def _repair_routed_request(routed: dict[str, Any]) -> tuple[dict[str, Any], list
             repaired["format"] = None
             repairs.append(f"{action}.filters.family<-query_or_format")
             family = inferred_family
+
+    # Evidence-gap requests support either one format or a family. If the model
+    # puts an otherwise unscoped subject in query, preserve it as a single-format
+    # subject rather than rejecting the request. Family prompts are instructed to
+    # use filters.family and therefore bypass this repair.
+    if action == "list_evidence_gaps" and not family and not format_value and query:
+        repaired["format"] = query
+        repaired["query"] = None
+        repairs.append("list_evidence_gaps.format<-query")
 
     return repaired, repairs
 
@@ -158,8 +158,6 @@ def route_natural_language_request(
     raw_routed = dict(response.structured)
     routed, repairs = _repair_routed_request(raw_routed)
 
-    # Apply caller defaults only when the model leaves the corresponding semantic
-    # scope global/null. Explicit institution scope from the user's wording wins.
     if routed.get("scope") == "global" and default_scope == "institution" and default_institution_id:
         routed["scope"] = "institution"
         routed["institution_id"] = default_institution_id
