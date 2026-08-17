@@ -49,11 +49,12 @@ def review_answers_with_ai(
 ) -> dict[str, Any]:
     """Independently review all framework questions without changing scoring answers.
 
-    This mode is for calibration and audit. The AI receives the same bounded,
-    application-supplied evidence used by the fill-gaps interpreter, but its
-    answer is recorded only as a comparison against the deterministic answer.
-    Deterministic answers and scoring inputs remain unchanged even when the AI
-    disagrees.
+    This mode is for calibration and audit. The AI receives bounded evidence
+    selected by the framework question's declared evidence fields. It does not
+    receive the deterministic answer, deterministic status, score, band, or
+    deterministic evidence preference before responding. Comparison happens only
+    after the AI answer has been validated. Deterministic scoring inputs remain
+    unchanged even when the AI disagrees.
     """
     result = deepcopy(deterministic_answer_document)
     derivation = result.setdefault("derivation", {})
@@ -88,6 +89,8 @@ def review_answers_with_ai(
                 evidence_pack,
                 deterministic_result,
                 max_evidence_items=max_evidence_items,
+                include_deterministic_context=False,
+                prefer_deterministic_evidence=False,
             )
         except (AIProviderError, ValueError) as exc:
             summary["attempted_questions"] += 1
@@ -140,7 +143,7 @@ def review_answers_with_ai(
             "deterministic_status": deterministic_status,
         }
 
-    result["derivation_method"] = "deterministic_with_ai_review"
+    result["derivation_method"] = "deterministic_with_independent_ai_review"
     result["ai_summary"] = summary
     result["ai_audit"] = audit
     return result
