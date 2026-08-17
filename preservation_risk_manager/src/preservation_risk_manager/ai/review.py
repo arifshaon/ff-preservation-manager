@@ -8,27 +8,95 @@ from preservation_risk_manager.ai.risk_analysis import interpret_question_with_a
 from preservation_risk_manager.frameworks import RiskFramework
 
 
-_AUDIT_EVIDENCE_KEYS = (
-    "claim_id",
-    "source_claim_id",
-    "_storage_key",
+_EVIDENCE_SECTIONS = (
+    "global_evidence",
+    "institution_evidence",
+    "migration_pathway_evidence",
+    "local_migration_readiness",
+)
+
+# Review-all is intended to validate deterministic mappings independently. Only
+# raw/source-facing evidence and provenance are exposed to the model. In
+# particular, normalized values, controlled answers, mapping IDs/versions,
+# storage keys, and mapping rationale are deliberately excluded.
+_RAW_REVIEW_EVIDENCE_KEYS = (
     "canonical_id",
     "criterion_id",
-    "value",
-    "answer_id",
     "source_id",
     "source_type",
     "source_record_id",
     "source_field",
-    "mapping_rule_id",
-    "mapping_version",
+    "source_value",
+    "native_vocabulary",
     "institution_id",
     "source_independence",
     "evidence_section",
-    "review_status",
-    "directness",
-    "covers",
+    "observed_at",
+    "current",
+    "source_url",
+    "url",
+    "uri",
+    "source_title",
+    "title",
+    "raw_value",
+    "raw_text",
+    "text",
+    "description",
+    "note",
+    "notes",
 )
+
+_RAW_PAYLOAD_KEYS = {
+    "source_value",
+    "raw_value",
+    "raw_text",
+    "text",
+    "description",
+    "note",
+    "notes",
+}
+
+_AUDIT_EVIDENCE_KEYS = _RAW_REVIEW_EVIDENCE_KEYS
+
+
+def _raw_review_item(item: dict[str, Any]) -> dict[str, Any] | None:
+    sanitized = {
+        key: deepcopy(item[key])
+        for key in _RAW_REVIEW_EVIDENCE_KEYS
+        if key in item and item[key] is not None
+    }
+    if not any(key in sanitized for key in _RAW_PAYLOAD_KEYS):
+        return None
+    return sanitized
+
+
+def _raw_review_evidence_pack(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    """Return the evidence-only view allowed to reach independent AI review.
+
+    The format identity, scope, institution, and question-matching criterion IDs
+    are retained, but deterministic normalization/mapping outputs are stripped.
+    Evidence items without a surviving raw payload are omitted rather than
+    allowing the model to infer from a normalized stub.
+    """
+    sanitized: dict[str, Any] = {
+        "scope": evidence_pack.get("scope", "global"),
+        "format": deepcopy(evidence_pack.get("format") or {}),
+    }
+    if evidence_pack.get("institution_id") is not None:
+        sanitized["institution_id"] = evidence_pack.get("institution_id")
+
+    for section in _EVIDENCE_SECTIONS:
+        value = evidence_pack.get(section) or []
+        items = [value] if isinstance(value, dict) else list(value)
+        sanitized_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_item = _raw_review_item(item)
+            if raw_item is not None:
+                sanitized_items.append(raw_item)
+        sanitized[section] = sanitized_items
+    return sanitized
 
 
 def _compact_cited_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -49,18 +117,21 @@ def review_answers_with_ai(
 ) -> dict[str, Any]:
     """Independently review all framework questions without changing scoring answers.
 
-    This mode is for calibration and audit. The AI receives bounded evidence
-    selected by the framework question's declared evidence fields. It does not
-    receive the deterministic answer, deterministic status, score, band, or
-    deterministic evidence preference before responding. Comparison happens only
-    after the AI answer has been validated. Deterministic scoring inputs remain
-    unchanged even when the AI disagrees.
+    This mode is for calibration and audit. The AI receives only raw/source-facing
+    evidence plus bounded provenance selected by the framework question's
+    declared evidence fields. It does not receive normalized criterion values,
+    deterministic answers/status, mapping rules, score, band, or deterministic
+    evidence preference before responding. Comparison happens only after the AI
+    answer has been validated. Deterministic scoring inputs remain unchanged even
+    when the AI disagrees.
     """
     result = deepcopy(deterministic_answer_document)
     derivation = result.setdefault("derivation", {})
+    review_evidence_pack = _raw_review_evidence_pack(evidence_pack)
 
     summary = {
         "mode": "review_all",
+        "evidence_view": "raw_source_only",
         "provider": provider.describe(),
         "eligible_questions": len(framework.questions),
         "attempted_questions": 0,
@@ -86,7 +157,7 @@ def review_answers_with_ai(
                 provider,
                 framework,
                 question,
-                evidence_pack,
+                review_evidence_pack,
                 deterministic_result,
                 max_evidence_items=max_evidence_items,
                 include_deterministic_context=False,
@@ -143,7 +214,7 @@ def review_answers_with_ai(
             "deterministic_status": deterministic_status,
         }
 
-    result["derivation_method"] = "deterministic_with_independent_ai_review"
+    result["derivation_method"] = "deterministic_with_independent_raw_evidence_ai_review"
     result["ai_summary"] = summary
     result["ai_audit"] = audit
     return result
