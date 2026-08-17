@@ -1,183 +1,231 @@
-# Next steps
+# Registry Builder next steps
 
-This roadmap lists remaining work. Completed work should not stay here as future work.
+This roadmap lists **remaining builder work**. Completed preservation-risk functionality now lives in the sibling `preservation_risk_manager` and should not remain here as future work.
+
+For the current repository architecture, see:
+
+- [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- [`../../preservation_risk_manager/README.md`](../../preservation_risk_manager/README.md)
 
 ## Current completed baseline
 
-The following are implemented and tested or now enabled in the default sample configuration:
+The registry builder now provides, with tests/CI:
 
 - source-adapter architecture;
-- NARA Digital Preservation Framework adapter enabled as the required baseline hazard source;
-- PRONOM registry adapter enabled as optional verified-PUID enrichment;
-- LOC FDD XML adapter enabled as optional FDD XML ZIP sustainability/evidence enrichment;
-- institutional policy XLSX adapter;
-- PRONOM/DROID XML adapter;
+- NARA Digital Preservation Framework adapter;
+- PRONOM registry/DROID evidence adapters;
+- LOC FDD XML evidence adapter;
+- institutional policy workbook adapter;
+- QNL institutional format evidence adapter;
 - generic identifier namespaces and configurable identifier rules;
-- verified-only strong identifier reconciliation;
-- source-by-source incremental augmentation using latest successful source evidence;
-- memory, file, and MongoDB storage backends;
-- Mongo-safe serialization;
-- baseline/change detection;
-- hazard-band, native-rating, identifier, divergence, record-added, and record-removed change events;
+- authority-aware verified strong-identifier reconciliation;
+- source-by-source incremental augmentation using active/latest source evidence;
+- memory, file/JSON, and MongoDB storage backends;
+- common `RegistryStore` interface and trusted external backend plugins;
+- content-addressed source snapshots and offline replay;
+- canonical format/source record/identifier/institutional evidence persistence;
+- declarative criterion vocabulary/mappings;
+- criterion-claim validation, audit, backfill, and supersession workflows;
+- change detection and assessment-change records;
 - optional exports and coverage reports;
 - preservation method profiles;
-- pytest test suite and GitHub Actions CI.
+- pytest suite and GitHub Actions CI.
 
-## 1. Multi-source run QA: NARA + PRONOM + LOC
+The sibling risk manager now provides the previously planned deterministic and AI-assisted analysis layer:
 
-The default sample config now enables NARA, PRONOM, and LOC. The next operational step is to validate the combined registry output and document expected counts/runtime.
+- configurable/versioned risk frameworks;
+- deterministic answer derivation/scoring;
+- human natural-language questions;
+- canonical system JSON requests;
+- targeted domain/question assessment;
+- evidence-gap diagnosis;
+- evidence-remediation planning;
+- provider-neutral AI interface;
+- `fill-gaps` and independent `review-all` modes;
+- human-readable rendering;
+- draft 8-domain / 22-question preservation-risk framework.
 
-Tasks:
+Those capabilities are documented under [`../../preservation_risk_manager/docs/`](../../preservation_risk_manager/docs/).
 
-- run the default config end-to-end;
-- verify that PRONOM PUIDs enrich existing NARA records rather than creating duplicates;
-- verify that LOC FDD IDs enrich existing NARA/PRONOM records where identifiers overlap;
-- verify that PUIDs from PRONOM are marked as verified authority identifiers;
-- verify that LOC FDD IDs from LOC XML are marked as verified LOC identifiers;
-- document expected runtime, record counts, and upstream rate-limit behavior;
-- add guidance for `GITHUB_TOKEN` when needed;
-- check common families such as PDF, TIFF, JPEG, WAV, MP4, XML, and ZIP for obvious duplicate canonical records.
+## 1. Multi-source operational QA and benchmark runs
 
-Success check:
-
-```text
-NARA contributes external hazard evidence.
-PRONOM contributes verified PUID identity evidence.
-LOC contributes FDD identifiers and sustainability evidence.
-Canonical records are enriched, not duplicated, where strong identifiers overlap.
-```
-
-## 2. Preservation risk analysis deterministic core
-
-The next user-facing capability is preservation risk analysis built on the populated evidence registry.
-
-The design spine is:
-
-```text
-Evidence -> Analysis -> Decision -> Action
-```
-
-First implementation slice:
-
-- configurable risk framework loader;
-- deterministic scoring engine;
-- shared predicate evaluator;
-- evidence pack builder with assessable/contextual split;
-- evidence-field resolver;
-- canonical evidence hash normalisation;
-- per-question evidence hashes;
-- NARA arithmetic regression test using imported NARA answers;
-- eligibility report for leakage-safe LLM calibration;
-- documentation committed with the implementation.
-
-Do not add the LLM layer until the deterministic scoring and evidence hashing behaviour is tested.
-
-## 3. Institutional decision and action workflow
-
-After the deterministic risk-analysis core exists, add the workflow that lets an institution turn registry evidence into local decisions and preservation actions.
-
-Possible workflows:
-
-1. filter formats by name, identifier, hazard band, missing evidence, or review state;
-2. export selected records to spreadsheet with `evidence_hash`;
-3. let the institution record analysis and decisions in its own terminology;
-4. import the completed review with conflict detection;
-5. generate or update preservation actions from approved decisions.
-
-A later interface can provide the same review flow without spreadsheet export/import.
-
-## 4. AI-assisted analysis behind the deterministic schema
-
-AI-assisted analysis may be useful for answering framework questions, summarizing evidence, and drafting recommendations.
-
-Guardrails:
-
-- the LLM answers only closed framework questions;
-- the framework computes points, ratings, bands, completeness, review triggers, and divergences;
-- calibration excludes NARA per-question answers and final ratings from the evidence pack;
-- every conversational analysis resolves to a stored `analysis_run` with explicit parameters.
-
-## 5. Preservation action manager
-
-`assessment_changes` is already a review queue. The next operational layer is persistent action tracking.
-
-Candidate collection/module:
-
-```text
-preservation_actions
-```
-
-Candidate fields:
-
-```text
-action_id
-canonical_id / format_id
-source_change_id
-source_analysis_result_id
-decision_id
-action_type
-recommended_action
-status
-priority
-assigned_to
-due_date
-created_at
-closed_at
-notes
-```
-
-Candidate statuses:
-
-```text
-open
-under_review
-accepted
-deferred
-implemented
-closed
-```
-
-## 6. Wikidata or other enrichment-source enablement
-
-Wikidata is already part of the identifier-rule model as a weak identifier source, but a full enrichment workflow is not yet operationally documented.
+Continue validating combined NARA + PRONOM + LOC + QNL evidence runs against persistent storage.
 
 Tasks:
 
-- decide whether Wikidata should be a first-class adapter, a linked-data enrichment step, or a later optional connector;
-- define which fields are useful and safe to import;
-- ensure Wikidata identifiers do not become strong reconciliation keys unless explicitly configured;
-- document how conflicting names, aliases, and external IDs should be treated.
+- periodically run the configured sources end-to-end;
+- record expected runtime and source-specific operational behavior for the pinned/current releases;
+- check common families such as PDF, TIFF, JPEG, WAV, MP4, XML, ZIP and major office/AV families for duplicate or weakly related canonical records;
+- verify verified PUID/FDD/NARA identifiers continue to enrich rather than incorrectly split/merge records;
+- inspect source failure/fallback behavior;
+- validate criterion-claim coverage after upstream source changes;
+- document any source rate-limit/authentication prerequisites such as GitHub token use where required.
 
-## 7. Trend evidence connectors
+Success criterion:
 
-Trend should remain `Insufficient Evidence` until connectors exist for specification vitality, implementation vitality, authority warnings, holdings exposure, or other reliable trend signals.
+```text
+active source contributions can be refreshed independently,
+provenance remains traceable,
+strong identifier relationships remain conservative,
+and current canonical/evidence views are reproducible.
+```
 
-Potential trend inputs:
+## 2. Improve explicit format-family relationships
 
-- NARA native-rating movement between releases;
-- PRONOM signature/status changes;
+Current family discovery can use explicit family metadata when available and falls back conservatively to human-readable names/aliases.
+
+Remaining work:
+
+- define a stable family/entity model (`family_id`, `member_of`, parent/version relationship or equivalent);
+- distinguish family, version, profile, subtype, container and encoding relationships;
+- populate relationships from reliable source identifiers/evidence;
+- avoid propagating family-level evidence to versions/profiles unless the mapping explicitly allows it;
+- add QA reports for orphan/ambiguous family members.
+
+This work is particularly important for batch risk questions such as "which PDF-family formats are at risk?".
+
+## 3. Expand criterion evidence coverage for the 22-question framework
+
+The new broad risk framework introduces evidence fields that are not yet populated for many formats.
+
+Priority work is to improve the registry evidence layer rather than fill unknowns with assumptions.
+
+Candidate criterion areas include:
+
+- specification governance and stability;
+- platform/software dependencies;
+- external assets;
+- open-source tooling;
+- third-party software support;
+- formal registry/identification support;
+- byte transparency;
+- compression and migration-loss risk;
+- IP constraints / DRM / encryption;
+- embedded metadata;
+- accessibility capabilities;
+- content-specific essential characteristics;
+- local management capability;
+- tested migration pathways;
+- storage/network overhead.
+
+Use the risk-manager actions:
+
+```text
+list_evidence_gaps
+plan_evidence_remediation
+```
+
+to distinguish new source evidence from missing mappings or framework-alignment work.
+
+## 4. Review and promote criterion mappings
+
+Continue treating source-to-criterion mappings as reviewed, versioned configuration.
+
+Tasks:
+
+- use `criterion-evidence-audit` to identify source-native fields with useful coverage;
+- add mapping rules only where semantics are defensible;
+- validate with `mapping validate`;
+- project draft mappings before approval;
+- backfill stored evidence after mapping changes;
+- use `--replace-source-claims` where old current claims must be superseded;
+- retain source field/value and mapping provenance for audit.
+
+Do not promote mappings merely to improve completeness percentages.
+
+## 5. Evidence date/currency model
+
+Current claim acquisition/observation timestamps do not always identify the period described by the underlying source statement.
+
+Add clearer distinction between:
+
+```text
+retrieved_at / observed_at
+source publication/update date
+evidence valid-from / valid-to or described timeframe
+```
+
+This is required before robust trend/currentness analysis such as "which formats have become riskier over the last year?".
+
+## 6. Trend evidence connectors
+
+Trend should remain evidence-driven.
+
+Potential inputs:
+
+- NARA rating changes across releases;
+- PRONOM status/signature changes;
 - LOC sustainability updates;
-- tool support changes;
-- local holdings growth or decline;
-- local incident history;
-- community or vendor deprecation notices.
+- software/tool support changes;
+- vendor/community deprecation notices;
+- local holdings/exposure trends;
+- local incidents and migration test outcomes.
 
 Principle:
 
 ```text
-Do not infer trend just because a format is high risk.
-Trend needs its own evidence.
+Do not infer trend from a static risk level.
+Trend requires time-stamped evidence of change.
 ```
 
-## 8. Exporter implementation cleanup
+## 7. Institutional evidence workflows
 
-The architecture treats exports as optional, and database-only runs are supported. The remaining implementation cleanup is to move the current JSON, JSONL, CSV, SQLite, and Markdown export-writing logic out of `pipeline.py` into exporter modules.
+Expand controlled local evidence ingestion beyond seed examples.
 
-This is hygiene, not a blocker for registry population.
+Areas include:
 
-## 9. MongoDB integration testing
+- QNL identification/validation/rendering capability;
+- supported preservation tools and versions;
+- staff/specialist dependencies;
+- tested migration pathways and validation results;
+- storage/network cost or capacity observations;
+- local incidents/failures;
+- holdings exposure and growth.
 
-The test suite currently avoids requiring a live MongoDB service for ordinary local testing. Add optional MongoDB integration tests when CI or local test infrastructure can reliably provide MongoDB.
+Keep local evidence separate from institutional policy overlays and from global format facts.
+
+## 8. Preservation action/history persistence
+
+The risk manager currently produces evidence-gap/remediation and policy-proposal outputs, but persistent lifecycle/action management is still a future layer.
+
+Potential persisted entities:
+
+```text
+analysis_runs
+preservation_actions
+decision_records
+migration_tests
+review_approvals
+```
+
+Any implementation should preserve:
+
+- source/evidence hashes;
+- framework/version;
+- assessment parameters/scope;
+- human approval state;
+- action status/history;
+- links back to triggering evidence/change events.
+
+Do not allow AI-generated recommendations to become approved policy/actions automatically.
+
+## 9. API/service layer above the common interfaces
+
+A future HTTP/service layer can expose:
+
+- canonical machine requests from `preservation_risk_manager.request_api`;
+- controlled registry reads through `RegistryReader`;
+- controlled registry update workflows through builder adapters/services.
+
+It should **not** expose raw MongoDB mutation as the application API.
+
+Shared interface: [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md).
+
+## 10. MongoDB integration testing
+
+The ordinary unit suite does not require a live MongoDB instance.
+
+Add optional real-service integration tests when CI/local infrastructure can provide MongoDB reliably.
 
 Suggested pattern:
 
@@ -185,16 +233,38 @@ Suggested pattern:
 MONGODB_URI=mongodb://localhost:27017 pytest -m mongodb
 ```
 
-These tests should prove the same source-by-source augmentation behavior through real MongoDB that file storage already proves.
+Tests should prove the same source replacement/augmentation and risk-manager read behavior against MongoDB that in-memory/file tests prove against their backends.
 
-## 10. Additional retrieval modes only when needed
+## 11. Exporter implementation cleanup
 
-Possible future modes:
+Exports remain optional. Database-only operation is supported.
 
-- NARA linked-data/API retrieval if/when available and stable;
-- PRONOM individual XML retrieval by appending `.xml` to format page URLs;
-- PRONOM DROID signature auto-discovery;
-- LOC FDD API or website retrieval beyond the XML ZIP;
-- DPC Bit List adapter.
+Remaining hygiene:
 
-Add these inside source-level adapters where possible rather than creating new source concepts for each file representation.
+- continue moving JSON/JSONL/CSV/SQLite/Markdown writing logic out of pipeline orchestration where appropriate;
+- keep export formats downstream of the common logical registry model;
+- avoid making any export file the authoritative write path.
+
+## 12. Additional sources only when evidence value is clear
+
+Potential sources/connectors include:
+
+- additional NARA retrieval modes if stable/needed;
+- PRONOM individual XML/signature updates;
+- LOC web/API enrichment beyond current FDD XML;
+- DPC Bit List or preservation action registries;
+- software-support/tool registries;
+- standards/governance metadata;
+- carefully scoped linked-data/Wikidata enrichment.
+
+New sources should answer a defined evidence need and use source-level adapters rather than creating a new source concept for every transport format.
+
+## 13. Documentation upkeep
+
+Whenever a capability moves from planned to implemented:
+
+1. update this roadmap;
+2. update the relevant installation/run guide;
+3. update data/interface docs if contracts changed;
+4. update human/system query docs if actions changed;
+5. keep historical implementation plans under `docs/history/` rather than presenting them as current guidance.
