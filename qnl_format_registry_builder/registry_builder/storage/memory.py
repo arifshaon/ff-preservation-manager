@@ -133,13 +133,18 @@ class MemoryRegistryStore(RegistryStore):
         ]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
-        for identifier in self.identifiers:
-            if identifier.get("type") == identifier_type and identifier.get("value") == value:
-                format_id = identifier.get("format_id") or identifier.get("canonical_id")
-                if format_id in self.canonical_formats:
-                    record = self.canonical_formats[format_id]
-                    if record.get("current", True) is not False:
-                        return deepcopy(record)
+        """Resolve using the current canonical identity index, not historical claims."""
+        kind = str(identifier_type or "").strip()
+        needle = str(value or "").strip()
+        if not kind or not needle:
+            return None
+        for record in self.canonical_formats.values():
+            if record.get("current", True) is False:
+                continue
+            identifiers = record.get("identifiers") or {}
+            values = identifiers.get(kind) if isinstance(identifiers, dict) else None
+            if isinstance(values, (list, tuple, set)) and needle in {str(item) for item in values}:
+                return deepcopy(record)
         return None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
