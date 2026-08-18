@@ -256,19 +256,18 @@ def test_unverified_spreadsheet_puid_does_not_merge_pdfa_version_conflict():
     assert {x.preferred_name for x in registry} == {"PDF/A-1a", "PDF/A-2b"}
 
 
-def test_unverified_spreadsheet_puid_asymmetric_version_bridge_is_marked_heuristic():
+def test_unverified_spreadsheet_puid_asymmetric_version_stays_separate_and_reviewable():
     records = [
-        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", name="Word for Macintosh 5.1", puids=["fmt/9999"], extensions=["doc"]),
-        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", name="Microsoft Word", puids=["fmt/9999"], extensions=["doc"]),
+        RawFormatRecord(source_id="qnl", source_type="institution_policy_xlsx", source_record_id="qnl-word-51", name="Word for Macintosh 5.1", puids=["fmt/9999"], extensions=["doc"]),
+        RawFormatRecord(source_id="pronom", source_type="pronom_droid_xml", source_record_id="fmt/9999", name="Microsoft Word", puids=["fmt/9999"], extensions=["doc"]),
     ]
 
     registry = reconcile(_norm(records))
 
-    assert len(registry) == 1
-    fmt = registry[0]
-    copied_claim = next(
-        c for c in fmt.identifier_claims
-        if c["kind"] == "puid" and c["value"] == "fmt/9999" and not c["verified"]
-    )
-    assert copied_claim["confidence"] == "heuristic"
-    assert "only one side carries" in copied_claim["confidence_reason"]
+    assert len(registry) == 2
+    assert {fmt.canonical_id for fmt in registry} == {"fmt-word-for-macintosh-5-1", "puid-fmt-9999"}
+    pronom = next(fmt for fmt in registry if fmt.canonical_id == "puid-fmt-9999")
+    qnl_ref = next(ref for ref in pronom.source_records if ref.get("source_record_id") == "qnl-word-51")
+    assert qnl_ref["relationship"] == "explicit_puid_cross_reference"
+    assert qnl_ref["evidence_scope"] == "version_ambiguous_puid_cross_reference"
+    assert qnl_ref["related_puids"] == ["fmt/9999"]
