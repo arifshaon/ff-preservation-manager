@@ -13,6 +13,11 @@ from preservation_risk_manager.ai import (
     review_answers_with_ai,
 )
 from preservation_risk_manager.answer_derivation import derive_answers
+from preservation_risk_manager.composite_risk import (
+    CompositeRiskError,
+    compute_composite_risk,
+    load_composite_risk_config,
+)
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
 from preservation_risk_manager.evidence_packs import build_evidence_pack, evidence_hash
 from preservation_risk_manager.format_resolver import FormatResolver
@@ -494,6 +499,48 @@ def build_corpus(args: argparse.Namespace) -> dict[str, Any]:
     return result
 
 
+def composite_risk(args: argparse.Namespace) -> dict[str, Any]:
+    """Deterministic composite obsolescence risk index for one format."""
+    reader = _registry_reader_from_args(args)
+    resolution = FormatResolver(reader).resolve(args.format)
+    if not resolution.resolved or not resolution.format_doc:
+        raise CliFailure({"status": resolution.status, "resolution": _resolution_summary(resolution)})
+    claims = reader.get_criterion_claims_for_format(
+        resolution.format_doc,
+        institution_id=getattr(args, "institution", None),
+    )
+    # Hazard bands may live on strong-identity sibling records, just as
+    # criterion claims do; fetch them through the same alias expansion.
+    primary_id = resolution.format_doc.get("canonical_id")
+    related_docs = [
+        doc
+        for cid in reader.criterion_claim_canonical_ids(resolution.format_doc)
+        if cid != primary_id and (doc := reader.get_canonical_format(cid)) is not None
+    ]
+    try:
+        config = load_composite_risk_config(getattr(args, "risk_config", None))
+        assessment = compute_composite_risk(
+            resolution.format_doc,
+            claims,
+            config=config,
+            e_tool=getattr(args, "e_tool", None),
+            related_format_docs=related_docs,
+        )
+    except CompositeRiskError as exc:
+        raise CliFailure({"status": "composite_risk_error", "error": str(exc)}) from exc
+    return {
+        "status": assessment.get("status", "ok"),
+        "resolution": _resolution_summary(resolution),
+        "format": {
+            "canonical_id": resolution.format_doc.get("canonical_id"),
+            "preferred_name": resolution.format_doc.get("preferred_name"),
+        },
+        "scope": "institution" if getattr(args, "institution", None) else "global",
+        "criterion_claims_used": len(claims),
+        "composite_risk": assessment,
+    }
+
+
 def init_literature_inbox(args: argparse.Namespace) -> dict[str, Any]:
     """Create the drop folder a curator puts PDFs and OCR text into."""
     return init_inbox(Path(args.path), out_hint=args.out_hint)
@@ -673,6 +720,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional cap on formats scanned, for smoke runs against a large registry.",
     )
     corpus.set_defaults(func=build_corpus)
+
+    composite = subparsers.add_parser(
+        "composite-risk",
+        help="Deterministic composite obsolescence risk index (NARA baseline + LoC sustainability + temporal term).",
+    )
+    _add_registry_source_args(composite)
+    composite.add_argument("--format", required=True, help="Canonical ID, authority ID, MIME, extension, or name to resolve.")
+    composite.add_argument("--institution", help="Optional institution ID; adds institution-scoped claims.")
+    composite.add_argument(
+        "--risk-config",
+        help="Optional JSON overriding gamma1/gamma2/alpha, tier bounds, criterion weights, and coverage minimum.",
+    )
+    composite.add_argument(
+        "--e-tool",
+        type=float,
+        help="Open-source tool availability in [0,1]. Omitted: neutral 0.5 until an FPR source exists.",
+    )
+    composite.set_defaults(func=composite_risk)
 
     inbox = subparsers.add_parser(
         "init-literature-inbox",
