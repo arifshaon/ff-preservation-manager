@@ -12,6 +12,10 @@ from preservation_risk_manager.data_access import (
 )
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.registry_audit import build_registry_risk_evidence_audit
+from preservation_risk_manager.registry_audit_conflict_classification import (
+    refine_conflict_semantics,
+    render_conflict_semantics_markdown,
+)
 from preservation_risk_manager.registry_audit_diagnostics import (
     refine_registry_risk_evidence_diagnostics,
     render_registry_audit_diagnostics_markdown,
@@ -112,6 +116,29 @@ def _compact_conflict_diagnostics(report: dict) -> dict:
     }
 
 
+def _compact_conflict_interpretation(report: dict) -> dict:
+    data = report.get("conflict_interpretation") or {}
+    return {
+        key: data.get(key)
+        for key in (
+            "raw_derived_conflict_count",
+            "genuine_evidence_conflicts",
+            "composite_aggregations",
+            "unclassified_conflicts",
+            "puid_genuine_evidence_conflicts",
+            "puid_composite_aggregations",
+            "by_classification",
+            "genuine_by_question",
+            "genuine_by_evidence_field",
+            "genuine_by_source_combination",
+            "genuine_by_mapping_rule_combination",
+            "composite_by_question",
+            "composite_field_combinations",
+            "note",
+        )
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -146,12 +173,21 @@ def main(argv: list[str] | None = None) -> int:
             institution_id=args.institution,
             sample_limit=args.sample_limit,
         )
+        report = refine_conflict_semantics(
+            report,
+            reader,
+            framework,
+            institution_id=args.institution,
+            sample_limit=args.sample_limit,
+        )
         if args.out_dir:
             paths = write_refined_registry_risk_evidence_audit(report, args.out_dir)
             markdown_path = Path(paths["markdown"])
             diagnostic_markdown = render_registry_audit_diagnostics_markdown(report)
+            conflict_markdown = render_conflict_semantics_markdown(report)
             with markdown_path.open("a", encoding="utf-8") as stream:
                 stream.write("\n" + diagnostic_markdown)
+                stream.write("\n" + conflict_markdown)
             result = {
                 "status": "ok",
                 "summary": report.get("summary"),
@@ -159,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                 "band_distribution": report.get("band_distribution"),
                 "puid_diagnostics": _compact_puid_diagnostics(report),
                 "conflict_diagnostics": _compact_conflict_diagnostics(report),
+                "conflict_interpretation": _compact_conflict_interpretation(report),
                 "draft_mapping_opportunities": report.get("draft_mapping_opportunities"),
                 "report_files": paths,
             }
