@@ -24,7 +24,7 @@ def test_full_nara_draft_mapping_config_validates_against_criteria_vocabulary():
     assert {rule["mapping_status"] for rule in mapping["maps"]} == {"needs_review"}
 
 
-def test_short_nara_approved_mapping_example_validates_against_criteria_vocabulary():
+def test_reviewed_nara_approved_mapping_validates_against_criteria_vocabulary():
     criteria = _criteria()
     mapping = load_mapping(MAPPING_DIR / "nara_digital_preservation_framework.v1.approved.json")
 
@@ -36,8 +36,10 @@ def test_short_nara_approved_mapping_example_validates_against_criteria_vocabula
     assert mapping["claim_review_status"] == "approved"
     assert 1 <= len(mapping["maps"]) < 27
     assert {rule["mapping_status"] for rule in mapping["maps"]} == {"accepted"}
-    assert all(rule.get("decided_by") for rule in mapping["maps"])
-    assert all(rule.get("decided_at") for rule in mapping["maps"])
+    assert mapping.get("decided_by")
+    assert mapping.get("decided_at")
+    assert all(rule.get("decided_by") or mapping.get("decided_by") for rule in mapping["maps"])
+    assert all(rule.get("decided_at") or mapping.get("decided_at") for rule in mapping["maps"])
 
 
 def test_nara_mapping_keeps_conclusions_and_decisions_out_of_criterion_rules():
