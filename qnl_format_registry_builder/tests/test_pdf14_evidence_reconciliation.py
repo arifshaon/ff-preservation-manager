@@ -1,13 +1,14 @@
 from pathlib import Path
 
 from registry_builder.criteria import load_criteria
-from registry_builder.criterion_mapping import build_criterion_claims, load_mappings
+from registry_builder.criterion_mapping import build_criterion_claims, load_mapping
 from registry_builder.models import RawFormatRecord
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAPPING_DIR = ROOT / "config" / "criterion_mappings"
 
 
 def test_pdf10_uses_exact_nara_evidence_and_keeps_loc_range_as_relationship_only():
@@ -85,7 +86,11 @@ def test_pdf10_uses_exact_nara_evidence_and_keeps_loc_range_as_relationship_only
     assert loc_ref["evidence_scope"] == "multi_puid_source_record"
 
     criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
-    mappings = load_mappings(ROOT / "config" / "criterion_mappings")
+    mappings = [
+        load_mapping(MAPPING_DIR / "pronom_registry.v1.approved.json"),
+        load_mapping(MAPPING_DIR / "nara_digital_preservation_framework.v1.approved.json"),
+        load_mapping(MAPPING_DIR / "loc_fdd_xml.v1.approved.json"),
+    ]
     claims = build_criterion_claims(
         canonical,
         [record.to_dict() for record in normalized],
