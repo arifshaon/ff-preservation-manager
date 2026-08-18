@@ -28,6 +28,9 @@ from registry_builder.validate import summarize_validation_warnings, validate_re
 from registry_builder.models import utc_now_iso
 
 
+_ACTIVE_MAPPING_STATUSES = {"accepted", "approved"}
+
+
 def _stored_source_summaries(records) -> list[dict[str, Any]]:
     counts = Counter((str(record.source_id or ""), str(record.source_type or "")) for record in records)
     rows: list[dict[str, Any]] = []
@@ -46,6 +49,59 @@ def _stored_source_summaries(records) -> list[dict[str, Any]]:
             "stored_records_reused": count,
         })
     return rows
+
+
+def _duplicate_active_mapping_rules(mappings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return duplicate production mapping rule IDs for the same source.
+
+    Mapping directories may legitimately contain approved and draft versions of
+    the same rule. Draft/needs-review rules are ignored here. Two accepted or
+    approved copies of the same source rule are unsafe because both would emit
+    deterministic criterion claims during a rebuild.
+    """
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    duplicates: list[dict[str, Any]] = []
+    for mapping in mappings:
+        source = str(mapping.get("source_id") or mapping.get("source_type") or "<unknown-source>")
+        mapping_version = str(mapping.get("mapping_version") or "<unknown-version>")
+        for rule in mapping.get("maps") or []:
+            status = str(rule.get("mapping_status") or mapping.get("review_status") or "").lower()
+            if status not in _ACTIVE_MAPPING_STATUSES:
+                continue
+            rule_id = str(rule.get("id") or "").strip()
+            if not rule_id:
+                # Mapping validation handles missing/generated IDs. Without an
+                # explicit ID there is no stable cross-file identity to compare.
+                continue
+            key = (source, rule_id)
+            current = {
+                "source": source,
+                "rule_id": rule_id,
+                "mapping_version": mapping_version,
+            }
+            previous = seen.get(key)
+            if previous is not None:
+                duplicates.append({"first": previous, "duplicate": current})
+            else:
+                seen[key] = current
+    return duplicates
+
+
+def _assert_no_duplicate_active_mapping_rules(mappings: list[dict[str, Any]]) -> None:
+    duplicates = _duplicate_active_mapping_rules(mappings)
+    if not duplicates:
+        return
+    sample = "; ".join(
+        f"{item['duplicate']['source']}:{item['duplicate']['rule_id']} "
+        f"({item['first']['mapping_version']} and {item['duplicate']['mapping_version']})"
+        for item in duplicates[:10]
+    )
+    remainder = len(duplicates) - min(len(duplicates), 10)
+    suffix = f"; plus {remainder} more" if remainder else ""
+    raise ValueError(
+        "Duplicate active criterion mapping rules detected. Keep only one accepted/approved "
+        f"copy of each source rule before rebuilding: {sample}{suffix}"
+    )
 
 
 def rebuild_registry_from_store(
@@ -103,6 +159,7 @@ def rebuild_registry_from_store(
     registry_dicts = [fmt.to_dict() for fmt in registry]
     if criterion_mapping_inputs is not None:
         criteria, mappings, criterion_mapping_report = criterion_mapping_inputs
+        _assert_no_duplicate_active_mapping_rules(mappings)
         source_record_dicts = [record.to_dict() for record in source_records]
         criterion_claims = build_criterion_claims(
             registry_dicts,
