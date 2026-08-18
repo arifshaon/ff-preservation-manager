@@ -2,7 +2,7 @@ from registry_builder.criteria import CriteriaVocabulary
 from registry_builder.criterion_mapping import build_criterion_claims
 
 
-def test_related_loc_source_record_generates_claim_for_puid_canonical():
+def _fixture():
     criteria = CriteriaVocabulary({
         "criteria_version": "v1",
         "criteria": {
@@ -32,7 +32,7 @@ def test_related_loc_source_record_generates_claim_for_puid_canonical():
         "source_record_id": "fdd000316",
         "native_fields": {"sustainability_factors": {"adoption": "Widely adopted"}},
     }]
-    mappings = [{
+    mapping = {
         "source_type": "loc_fdd_xml",
         "mapping_version": "test-v1",
         "criteria_version": "v1",
@@ -48,9 +48,23 @@ def test_related_loc_source_record_generates_claim_for_puid_canonical():
             "mapping_status": "accepted",
             "text_rules": [{"contains_any": ["widely adopted"], "value": "high"}],
         }],
-    }]
+    }
+    return criteria, canonical, source_records, mapping
 
-    claims = build_criterion_claims(canonical, source_records, mappings, criteria)
+
+def test_related_source_record_does_not_generate_deterministic_claim_by_default():
+    criteria, canonical, source_records, mapping = _fixture()
+
+    claims = build_criterion_claims(canonical, source_records, [mapping], criteria)
+
+    assert claims == []
+
+
+def test_related_source_record_requires_explicit_mapping_opt_in():
+    criteria, canonical, source_records, mapping = _fixture()
+    mapping["allow_related_source_records"] = True
+
+    claims = build_criterion_claims(canonical, source_records, [mapping], criteria)
 
     assert len(claims) == 1
     claim = claims[0]
@@ -58,3 +72,6 @@ def test_related_loc_source_record_generates_claim_for_puid_canonical():
     assert claim["criterion_id"] == "sustainability.adoption"
     assert claim["value"] == "high"
     assert claim["source_record_id"] == "fdd000316"
+    assert claim["relationship"] == "explicit_puid_cross_reference"
+    assert claim["evidence_scope"] == "multi_puid_source_record"
+    assert claim["related_puids"] == ["fmt/14", "fmt/15", "fmt/16", "fmt/17"]
