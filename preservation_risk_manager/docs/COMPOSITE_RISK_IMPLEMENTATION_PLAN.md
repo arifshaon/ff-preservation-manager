@@ -16,9 +16,64 @@ a fifth of what is stored.
 | The score is advisory and additive | It never replaces framework scoring, banding, or band suppression |
 | The score never enters an LLM prompt | Computed and attached entirely outside the AI boundary |
 | Unknown is not Low | Thin coverage suppresses the tier; it never produces a reassuring one |
-| Missing is not negative | An unassessed input is renormalized away, never scored as 0 |
+| Missing is not negative | An unassessed input is renormalized away, never scored as 0 — see decision 0.1 for NARA's `FALSE` marker |
 | NARA is a comparator, not a term | Its band is retained beside the score, never summed into it |
 | Every input is audited | Assessed vs imputed is recorded per input, and gates the tier |
+
+## 0.1 Decisions
+
+### 2026-08-18: NARA `FALSE` in rubric 6.x is unassessed, not a confirmed negative
+
+**Decision:** treat the literal string `FALSE` in NARA rubric items 6.1, 6.2 and
+6.5 as **unassessed**. It contributes nothing to `E_tool`, which is renormalized
+over the items that were actually assessed. It is never read as a score of 0.0.
+
+**Rationale:**
+
+- All 49 occurrences carry `FALSE` in *all three* 6.x columns simultaneously,
+  never partially, and 49 of 49 are "unspecified version" aggregate rows — the
+  family placeholders where NARA did not complete a version-specific rubric.
+  Verified against NARA's published CSV on GitHub, so this is a property of the
+  source, not of ingestion.
+- The affected formats include ASCII, HTML, CSS, GIF, Broadcast WAVE, TIFF,
+  AutoCAD and Illustrator. Reading `FALSE` as "no renderers, no open-source
+  tooling, no creation software" is factually wrong for every one of them.
+- Under the rejected reading each scores 77.31 — above the 70 boundary, which
+  triggers *mandatory transformation*. The system would order the normalization
+  of HTML and ASCII.
+- The decisive case is TIFF, where one family splits across both readings:
+
+  ```text
+  TIFF 1-6              6.x=(2,1,1)             E_tool=1.00    3.65  Low
+  TIFF unspecified      6.x=(FALSE,FALSE,FALSE) E_tool=0.00   77.31  High
+  TIFF-FX               6.x=(-4,0,-1)           E_tool=0.00   77.31  High
+  ```
+
+  TIFF-FX earns 77.31 from genuine assessed negatives and is scored correctly.
+  TIFF unspecified reaches the identical number from an unfilled row. Under the
+  rejected reading the two are indistinguishable in the output, so the system
+  cannot tell "we checked and there are no tools" from "we never checked".
+- The draft mapping rules already encode `"FALSE": "unknown"`, so this decision
+  aligns the scorer with the mapping layer rather than diverging from it.
+
+**Alternative considered and rejected:** keep `FALSE` → 0.0 as deliberate
+policy, and exclude the 49 aggregate rows from the mandatory-transformation
+trigger as a recorded false-positive class. Rejected because it preserves a
+known-wrong input semantics and repairs the symptom downstream, leaving any
+future consumer of `E_tool` exposed to the same error.
+
+**Consequences:**
+
+- `E_tool` is computed over assessed items only and renormalized by their
+  weights; a missing item never contributes 0.
+- The count of assessed tooling items is carried in the audit and gates the
+  tier — an `E_tool` resting on too few assessed items suppresses the tier
+  rather than producing one.
+- Confirmed-negative ordinals (`-4`, `-1`) are unaffected and continue to drive
+  `E_tool` toward 0, so genuine tool scarcity still escalates as intended.
+- A named regression fixture pins the distinction: TIFF-FX must reach the High
+  tier, TIFF/ASCII/HTML/CSS "unspecified version" must not reach it via the
+  `FALSE` path.
 
 ## 1. Stage map
 
@@ -160,7 +215,9 @@ def component_risk(claims, format_doc, config, related_docs=None):
 
     # --- 2. E_tool over ASSESSED items only ---------------------------------
     # Missing is renormalized away, never scored as 0. This is the fix for
-    # "partial assessment read as confirmed absence".
+    # "partial assessment read as confirmed absence", and it is where the
+    # FALSE-is-unassessed decision (section 0.1) takes effect: TOOL_MAP has no
+    # entry for FALSE, so such an item is simply absent from `present`.
     present = {name: (TOOL_MAP[name][normalise(c.value)], w)
                for name, w in TOOL_ITEMS.items()
                for c in claims
@@ -296,8 +353,15 @@ and the coverage minimums. Fitted constants ship as the default config file.
 | Conflicting claims take the conservative value | Optimistic conflict resolution |
 | Calibration reported on held-out formats only | Fitting to the evaluation set |
 
-Named regression fixtures: ASCII / HTML / CSS / Broadcast WAVE "unspecified
-version" must never reach the High tier through the `FALSE` path.
+Named regression fixtures, pinning decision 0.1 from both sides:
+
+- **Must not** reach the High tier via the `FALSE` path: TIFF, ASCII, HTML, CSS,
+  GIF and Broadcast WAVE "unspecified version".
+- **Must** reach the High tier: TIFF-FX (`6.x = -4, 0, -1`), which earns it from
+  genuine assessed negatives.
+
+The pair is the test — if both sides do not hold, the scorer has stopped
+distinguishing confirmed absence from unassessed data.
 
 ## 8. Source extensibility
 
