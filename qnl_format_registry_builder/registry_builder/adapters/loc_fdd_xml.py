@@ -142,6 +142,31 @@ def _has_excluded_ancestor(elem: ET.Element, parents: dict[ET.Element, ET.Elemen
     return False
 
 
+def _is_excluded_record_metadata_element(elem: ET.Element, parents: dict[ET.Element, ET.Element]) -> bool:
+    return (
+        _normalize_label(_local_name(elem.tag)) in _EXCLUDED_RECORD_METADATA_ANCESTORS
+        or _has_excluded_ancestor(elem, parents)
+    )
+
+
+def _record_text_excluding_related(root: ET.Element) -> str:
+    """Return current-record text while excluding related/reference subtrees.
+
+    Authority identifiers found inside relatedFormat/reference sections describe
+    other formats, not the current FDD record. Scanning the raw XML text caused
+    those identifiers to be copied onto the current record and then propagated
+    through reconciliation.
+    """
+    parents = _parent_map(root)
+    parts: list[str] = []
+    for elem in root.iter():
+        if elem is not root and _is_excluded_record_metadata_element(elem, parents):
+            continue
+        if elem.text and elem.text.strip():
+            parts.append(elem.text.strip())
+    return re.sub(r"\s+", " ", " ".join(parts)).strip()
+
+
 def _descendant_text_by_names_excluding_related(root: ET.Element, names: set[str]) -> str | None:
     normalized_names = {_normalize_label(name) for name in names}
     parents = _parent_map(root)
@@ -150,7 +175,7 @@ def _descendant_text_by_names_excluding_related(root: ET.Element, names: set[str
             continue
         if _normalize_label(_local_name(elem.tag)) not in normalized_names:
             continue
-        if _has_excluded_ancestor(elem, parents):
+        if _is_excluded_record_metadata_element(elem, parents):
             continue
         text = _text_content(elem)
         if text:
@@ -232,9 +257,6 @@ def _factor_key_from_label(value: str) -> str | None:
     normalized = _normalize_label(value)
     if not normalized:
         return None
-    # Prefer exact aliases before substring fallback. This prevents the nested
-    # LOC factor "selfDocumentation" from being misclassified as the separate
-    # "documentation" detail now retained for disclosure interpretation.
     for factor_key, aliases in _SUSTAINABILITY_FACTOR_ALIASES.items():
         if normalized in aliases:
             return factor_key
@@ -264,9 +286,6 @@ def _extract_sustainability_factors(root: ET.Element) -> dict[str, str]:
     """
     factors: dict[str, str] = {}
 
-    # Direct element form: <disclosure>...</disclosure>,
-    # <documentation>...</documentation>,
-    # <externalDependencies>...</externalDependencies>, etc.
     for elem in root.iter():
         factor_key = _factor_key_from_label(_local_name(elem.tag))
         if factor_key:
@@ -274,8 +293,6 @@ def _extract_sustainability_factors(root: ET.Element) -> dict[str, str]:
             if text:
                 factors.setdefault(factor_key, text)
 
-    # Attribute/labelled table form: <factor name="Disclosure">...</factor> or
-    # <row><label>Disclosure</label><value>...</value></row>.
     for elem in root.iter():
         factor_key = None
         label_text = ""
@@ -349,7 +366,8 @@ def _first_loc_id(root: ET.Element, text: str, source_file: str) -> str | None:
     xml_id = _fddid_from_xml(root)
     if xml_id:
         return xml_id
-    match = re.search(r"\bfdd\d{6}\b", text, flags=re.I)
+    record_text = _record_text_excluding_related(root)
+    match = re.search(r"\bfdd\d{6}\b", record_text or text, flags=re.I)
     return match.group(0).lower() if match else None
 
 
@@ -360,8 +378,9 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     name = _record_name(root)
     category = _record_category(root)
 
-    puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
-    wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
+    record_text = _record_text_excluding_related(root)
+    puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", record_text, flags=re.I)})
+    wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", record_text, flags=re.I)})
     extensions = _declared_extensions(root)
     sustainability_factors = _extract_sustainability_factors(root)
     if not loc_id and not name:
