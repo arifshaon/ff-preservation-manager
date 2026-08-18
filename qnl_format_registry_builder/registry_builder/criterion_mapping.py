@@ -358,11 +358,14 @@ def _matches_where(item: dict[str, Any], where: dict[str, Any] | None) -> bool:
 
 
 def _source_matches(mapping: dict[str, Any], source_ref: dict[str, Any], source_record: dict[str, Any] | None) -> bool:
-    # Related/range/family source records are retained for provenance and AI,
-    # but must not silently create deterministic criterion claims for another
-    # canonical format. A mapping must explicitly opt in before such propagation.
-    if source_ref.get("relationship") and not bool(mapping.get("allow_related_source_records", False)):
-        return False
+    # Exact PUID cross-references are scoped to one canonical format and may
+    # contribute deterministic claims. Multi-PUID/range/family relationships,
+    # and relationship records with unknown scope, remain provenance/AI-only
+    # unless the mapping explicitly opts into related-record propagation.
+    if source_ref.get("relationship"):
+        evidence_scope = str(source_ref.get("evidence_scope") or "").strip()
+        if evidence_scope != "exact_puid_cross_reference" and not bool(mapping.get("allow_related_source_records", False)):
+            return False
     expected_id = mapping.get("source_id")
     expected_type = mapping.get("source_type")
     source_id = source_ref.get("source_id") or (source_record or {}).get("source_id")
