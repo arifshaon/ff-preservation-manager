@@ -358,6 +358,11 @@ def _matches_where(item: dict[str, Any], where: dict[str, Any] | None) -> bool:
 
 
 def _source_matches(mapping: dict[str, Any], source_ref: dict[str, Any], source_record: dict[str, Any] | None) -> bool:
+    # Related/range/family source records are retained for provenance and AI,
+    # but must not silently create deterministic criterion claims for another
+    # canonical format. A mapping must explicitly opt in before such propagation.
+    if source_ref.get("relationship") and not bool(mapping.get("allow_related_source_records", False)):
+        return False
     expected_id = mapping.get("source_id")
     expected_type = mapping.get("source_type")
     source_id = source_ref.get("source_id") or (source_record or {}).get("source_id")
@@ -504,6 +509,9 @@ def build_criterion_claims(
                             "review_status": _claim_review_status(mapping, rule),
                             "observed_at": observed_at,
                         }
+                        for relationship_key in ("relationship", "evidence_scope", "related_puids"):
+                            if source_ref.get(relationship_key) is not None:
+                                claim[relationship_key] = source_ref[relationship_key]
                         for optional_key in ("confidence_reason", "covers_note", "rationale"):
                             if rule.get(optional_key):
                                 claim[optional_key] = rule[optional_key]
