@@ -30,8 +30,8 @@ and why — the implementation deliberately deviates.
 | TNA PRONOM (PUIDs, signatures) | Identification anchor | **Ingested** (`pronom_registry` source; PUID-anchored canonical records; `source.currency` claims) |
 | NARA Digital Preservation Framework | Quantified baseline risk + action plans | **Ingested** (`nara_digital_preservation_framework` source; hazard assessments on the NARA scale; rubric-derived criterion claims) |
 | LoC Sustainability / FDDs | Seven sustainability criteria + narrative | **Ingested** (`loc_fdd_xml` source; the registry's `sustainability.*` criteria are exactly the LoC seven; narrative documents belong in the literature corpus) |
-| Archivematica FPR | Executable normalization/migration policy | **Planned** — the E_tool input and the migration-action layer depend on it |
-| Wikidata linked-data graph | Cross-registry identifier resolution | **Planned** — as an `IdentificationResolver` plugin behind the existing `FormatIdentificationPlugin` protocol |
+| Archivematica FPR | Executable normalization/migration policy (Tier 4, operational) | **Planned, demoted.** Central registry decommissioned in Archivematica 1.7 and the admin repository archived in 2019, so it is a release-pinned preset library, not a maintained registry. The migration-action layer depends on it; `E_tool` does **not** — that comes from NARA rubric 6.x. |
+| Wikidata linked-data graph | Cross-registry identifier resolution (Tier 3, linking) | **Partially present.** Already modelled as a `weak` identifier kind; QIDs arrive passively via NARA/LoC crosswalks on 952 of 3,365 formats. No SPARQL adapter yet. It adds no reach — no format carries a QID without another authority ID — but 2,513 formats (74%) are anchored to a single authority, which is the fragmentation it would resolve. Proposes links for review; does not contribute criterion evidence. |
 
 ### Blueprint layers → modules
 
@@ -77,8 +77,9 @@ and why — the implementation deliberately deviates.
 | 1 | Harvesting + entity resolution (PRONOM/NARA/LoC) | Done (registry builder) |
 | 2 | Knowledge base + retrieval (Corpus A/B) | Done (`training_corpus.py`, `literature_corpus.py`) |
 | 3 | Mathematical risk module | Done (`composite_risk.py`) |
-| 4 | FPR ingestion → `E_tool` input + migration-action layer | Planned |
+| 4 | Promote the remaining NARA mapping rules (4 of 27 live) → `S_LoC`, `E_tool`, `A_spec` | Planned — see [`COMPOSITE_RISK_IMPLEMENTATION_PLAN.md`](COMPOSITE_RISK_IMPLEMENTATION_PLAN.md) |
 | 5 | Wikidata cross-walk resolver plugin | Planned (fixes identifier fragmentation, e.g. PDF/A's unlinked NARA record) |
+| 5b | COPTR tooling evidence + release-pinned FPR recipes | Planned — COPTR is the only route to a NARA-independent `E_tool` |
 | 6 | REST facade + scheduled source synchronization | Planned |
 
 ## End-to-end assessment flow

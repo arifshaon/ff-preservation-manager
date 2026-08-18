@@ -17,7 +17,7 @@ R_composite = min(100, 100 · [ γ₁·R_NARA
 | `w_k` | Institutional weight for criterion k (default 1/7 each) | `--risk-config` |
 | `R_NARA` | NARA baseline: Low = 0.2, Moderate = 0.5, High = 0.9 | `hazard_assessment` on the canonical record or a strong-identity sibling |
 | `A_spec` | Years since the specification's last update | `source.currency` claims (stored as days; most recent wins) |
-| `E_tool` | Open-source tool availability in [0,1] | **No source yet** — neutral 0.5 default until FPR ingestion lands |
+| `E_tool` | Open-source tool availability in [0,1] | NARA rubric 6.1/6.2/6.5, stored for all 758 NARA formats; neutral 0.5 default only until those mapping rules are promoted |
 | `γ₁, γ₂, α` | 0.45, 0.55, 0.08 | blueprint defaults, `--risk-config` overridable |
 
 Risk tiers: `Low < 35 ≤ Moderate < 65 ≤ High`. The Low/Moderate boundary (35) is
@@ -104,9 +104,13 @@ independent comparator) is specified in
 
 ## Known gaps, in priority order
 
-1. **`E_tool` has no evidence source.** Archivematica FPR ingestion (roadmap)
-   supplies it; until then the neutral default makes the temporal multiplier
-   exactly 1.0 and is flagged in the audit.
+1. **`E_tool` is unmapped, not unavailable.** NARA rubric items 6.1 (renderers),
+   6.2 (open-source renderer) and 6.5 (creation software) are stored for all 758
+   NARA formats; the draft mapping rules exist but are not yet promoted. Until
+   then the neutral default is used and flagged in the audit. Archivematica FPR
+   is *not* required for this input — an earlier revision of this document said
+   it was. A NARA-independent tooling source (COPTR) is still needed before
+   divergence against NARA can claim to detect staleness.
 2. **Identifier fragmentation limits NARA coverage.** PDF/A (`fmt/354`) has no
    linked `nara-*` sibling in the current registry build, so its tier is
    suppressed despite NARA assessing PDF/A. The blueprint's Wikidata
