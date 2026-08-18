@@ -41,9 +41,44 @@ def _exercise_store(store):
     assert store.find_by_identifier("loc", "fdd000316") is None
 
 
+def _exercise_legacy_store_fallback(store):
+    # Older/minimal store records may predate the canonical `identifiers` field
+    # and depend on the separate format_identifiers collection for lookup.
+    store.upsert_canonical_format({
+        "canonical_id": "puid-fmt-353",
+        "format_id": "puid-fmt-353",
+        "preferred_name": "Tagged Image File Format",
+        "current": True,
+    })
+    store.upsert_identifier({
+        "format_id": "puid-fmt-353",
+        "canonical_id": "puid-fmt-353",
+        "type": "puid",
+        "value": "fmt/353",
+        "source": "pronom_registry",
+        "verified": True,
+    })
+
+    assert store.find_by_identifier("puid", "fmt/353")["canonical_id"] == "puid-fmt-353"
+
+    # As soon as an explicit canonical identity index exists, it is authoritative
+    # and the old separate row must no longer be allowed to supply the identity.
+    record = store.find_by_identifier("puid", "fmt/353")
+    store.upsert_canonical_format({**record, "identifiers": {"extension": ["tif"]}})
+    assert store.find_by_identifier("puid", "fmt/353") is None
+
+
 def test_memory_store_uses_current_canonical_identifier_index():
     _exercise_store(MemoryRegistryStore())
 
 
 def test_file_store_uses_current_canonical_identifier_index(tmp_path):
     _exercise_store(FileRegistryStore({"type": "file", "path": str(tmp_path / "store")}))
+
+
+def test_memory_store_supports_legacy_identifier_rows_only_without_canonical_index():
+    _exercise_legacy_store_fallback(MemoryRegistryStore())
+
+
+def test_file_store_supports_legacy_identifier_rows_only_without_canonical_index(tmp_path):
+    _exercise_legacy_store_fallback(FileRegistryStore({"type": "file", "path": str(tmp_path / "store")}))
