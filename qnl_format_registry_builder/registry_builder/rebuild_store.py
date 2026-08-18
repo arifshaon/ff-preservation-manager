@@ -48,17 +48,26 @@ def _stored_source_summaries(records) -> list[dict[str, Any]]:
     return rows
 
 
-def rebuild_registry_from_store(config_path: str | Path, outdir: str | Path) -> dict[str, Any]:
+def rebuild_registry_from_store(
+    config_path: str | Path,
+    outdir: str | Path,
+    *,
+    apply: bool = False,
+) -> dict[str, Any]:
     """Rebuild canonical formats and criterion claims from stored source records.
 
     This performs no network/source acquisition. It reuses the latest completed
     source-record set already held by the configured RegistryStore, then reruns
     normalization, reconciliation, validation, method-profile assignment,
-    criterion mapping, change detection, and canonical/claim persistence.
+    criterion mapping, and change detection.
 
-    Source records and source snapshots themselves are not rewritten. This keeps
-    the last real acquisition run authoritative for future incremental source
-    augmentation.
+    By default this is a dry run: rebuilt exports/report are written but persistent
+    canonical/criterion/change state is untouched. Pass ``apply=True`` (CLI:
+    ``--apply``) only after reviewing the dry-run output.
+
+    Source records and source snapshots themselves are never rewritten. This
+    keeps the last real acquisition run authoritative for future incremental
+    source augmentation.
     """
     config_path = Path(config_path)
     outdir = ensure_dir(outdir)
@@ -125,9 +134,11 @@ def rebuild_registry_from_store(config_path: str | Path, outdir: str | Path) -> 
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": utc_now_iso(),
-        "status": "completed",
+        "status": "completed" if apply else "dry_run_completed",
         "run_kind": "rebuild_from_store",
         "rebuild_from_store": True,
+        "dry_run": not apply,
+        "persisted": bool(apply),
         "config_path": str(config_path),
         "offline": True,
         "incremental_source_updates": bool(config.get("incremental_source_updates", True)),
@@ -160,19 +171,8 @@ def rebuild_registry_from_store(config_path: str | Path, outdir: str | Path) -> 
         "outputs": [],
     }
 
-    # Persist only rebuilt canonical/claim/change state. Stored source records
-    # were acquired previously and must not be duplicated under this rebuild run.
-    _persist_registry_to_store(
-        store,
-        run_id=run_id,
-        snapshots=[],
-        raw_records=[],
-        registry=registry,
-        criterion_claims=criterion_claims,
-        previous_registry=previous_registry,
-        changes=change_detection.get("changes", []),
-    )
-
+    # Always write dry-run/rebuild exports before any optional persistence so the
+    # exact proposed registry and claim set is reviewable.
     if _exports_enabled(config):
         report["outputs"] = _write_file_exports(
             outdir,
@@ -183,29 +183,55 @@ def rebuild_registry_from_store(config_path: str | Path, outdir: str | Path) -> 
             criterion_claims if criterion_mapping_inputs is not None else None,
         )
 
-    store.create_run(report)
+    if apply:
+        # Persist only rebuilt canonical/claim/change state. Stored source records
+        # were acquired previously and must not be duplicated under this rebuild run.
+        _persist_registry_to_store(
+            store,
+            run_id=run_id,
+            snapshots=[],
+            raw_records=[],
+            registry=registry,
+            criterion_claims=criterion_claims,
+            previous_registry=previous_registry,
+            changes=change_detection.get("changes", []),
+        )
+        store.create_run(report)
+
     return report
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m registry_builder.rebuild_store",
-        description="Rebuild canonical formats and criterion claims from source records already stored in the registry database.",
+        description=(
+            "Rebuild canonical formats and criterion claims from source records already stored in the registry database. "
+            "Dry-run by default; pass --apply to persist the rebuilt canonical/claim state."
+        ),
     )
     parser.add_argument("--config", required=True, help="Pipeline config containing persistent storage, identifier, mapping, and method-profile settings.")
     parser.add_argument("--out", default="output-rebuild", help="Output directory for rebuilt exports/report. Default: output-rebuild")
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist the rebuilt canonical formats, criterion claims, and change records. Without this flag the command is a dry run.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    report = rebuild_registry_from_store(args.config, args.out)
-    print(f"Rebuild complete: {report['canonical_formats']} canonical formats")
+    report = rebuild_registry_from_store(args.config, args.out, apply=args.apply)
+    mode = "APPLIED" if report["persisted"] else "DRY RUN"
+    print(f"Rebuild {mode}: {report['canonical_formats']} canonical formats")
     print(f"Stored source records reused: {report['stored_source_records_reused']}")
     print(f"Criterion claims generated: {report['criterion_mapping'].get('claims_generated', 0)}")
     print(f"Validation warnings: {len(report['validation_warnings'])}")
     print(f"Changes detected: {report['change_detection'].get('total_changes', 0)}")
+    print(f"Persisted to store: {report['persisted']}")
     print(f"Output directory: {Path(args.out).resolve()}")
+    if not report["persisted"]:
+        print("Review registry.json, criterion_claims.json, and run_report.json, then rerun with --apply to update the store.")
     return 0
 
 
