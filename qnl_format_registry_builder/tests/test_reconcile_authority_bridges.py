@@ -33,8 +33,8 @@ def test_nara_authority_record_bridges_to_verified_pronom_puid():
     assert len(registry) == 1
     fmt = registry[0]
     assert fmt.canonical_id == "puid-fmt-1451"
+    assert fmt.identifiers["puid"] == ["fmt/1451"]
     assert "NF00792" in fmt.identifiers["nara"]
-    assert "fmt/1451" in fmt.identifiers["puid"]
     assert any(
         claim["kind"] == "nara" and claim["value"] == "NF00792" and claim["verified"]
         for claim in fmt.identifier_claims
@@ -43,14 +43,15 @@ def test_nara_authority_record_bridges_to_verified_pronom_puid():
         claim["kind"] == "puid" and claim["value"] == "fmt/1451" and claim["verified"]
         for claim in fmt.identifier_claims
     )
-    # The copied NARA PUID remains visible as source-record cross-reference
-    # metadata, but it is not duplicated as an exact canonical identifier.
-    nara_ref = next(ref for ref in fmt.source_records if ref["source_record_id"] == "NF00792")
-    assert {"kind": "puid", "value": "fmt/1451"} in nara_ref["identifier_cross_references"]
-    assert not any(
+    # The copied NARA PUID remains visible as provenance and source-record
+    # cross-reference metadata, but it does not create a second exact PUID in
+    # CanonicalFormat.identifiers.
+    assert any(
         claim["kind"] == "puid" and claim["value"] == "fmt/1451" and not claim["verified"]
         for claim in fmt.identifier_claims
     )
+    nara_ref = next(ref for ref in fmt.source_records if ref["source_record_id"] == "NF00792")
+    assert {"kind": "puid", "value": "fmt/1451"} in nara_ref["identifier_cross_references"]
 
 
 def test_source_authority_bridge_respects_version_conflict():
