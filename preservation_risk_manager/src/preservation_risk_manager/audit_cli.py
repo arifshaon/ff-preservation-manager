@@ -4,7 +4,12 @@ import argparse
 import json
 from pathlib import Path
 
-from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader, load_storage_config
+from preservation_risk_manager.data_access import (
+    JsonRegistryStore,
+    RegistryAccessError,
+    RegistryReader,
+    load_storage_config,
+)
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.registry_audit import (
     build_registry_risk_evidence_audit,
@@ -96,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             }
         else:
             result = report
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, RegistryAccessError, ValueError) as exc:
         parser.exit(2, f"error: {exc}\n")
 
     print(json.dumps(result, indent=2, sort_keys=True, default=str))
