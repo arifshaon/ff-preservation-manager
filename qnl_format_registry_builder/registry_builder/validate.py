@@ -69,12 +69,32 @@ def validate_registry(registry: list[CanonicalFormat]) -> tuple[list[str], list[
                     f"{fmt.canonical_id}@row:{policy.get('source_row', 'unknown')}"
                 )
 
+    # Strong identifiers in CanonicalFormat.identifiers are exact canonical
+    # identity assertions. Cross-authority copied IDs are retained on
+    # source_records as cross-reference metadata and must never make the same
+    # PUID/LOC/NARA identifier appear on competing canonical records.
+    for (kind, value), owners in identifier_seen.items():
+        unique_owners = sorted(set(owners))
+        if len(unique_owners) <= 1:
+            continue
+        if kind in _STRONG_IDENTIFIER_KINDS:
+            errors.append(
+                f"strong identifier {kind}:{value} appears in multiple canonical records: {unique_owners}"
+            )
+        else:
+            warnings.append(
+                f"weak identifier {kind}:{value} appears in multiple canonical records: {unique_owners}"
+            )
+
+    # Keep the verified-claim check as an additional integrity guard in case a
+    # future code path accidentally omits a verified identifier from the compact
+    # identifiers dictionary while retaining the provenance claim.
     for (kind, value), owners in verified_identifier_seen.items():
         if len(set(owners)) > 1 and kind in _STRONG_IDENTIFIER_KINDS:
-            errors.append(f"verified identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
-    for (kind, value), owners in identifier_seen.items():
-        if len(set(owners)) > 1 and kind not in _STRONG_IDENTIFIER_KINDS:
-            warnings.append(f"weak identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}")
+            message = f"verified identifier {kind}:{value} appears in multiple canonical records: {sorted(set(owners))}"
+            if message not in errors:
+                errors.append(message)
+
     for bridge in build_collision_report(registry).get("heuristic_identifier_bridges", []):
         warnings.append(
             "heuristic identifier bridge "
