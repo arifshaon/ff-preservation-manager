@@ -11,9 +11,8 @@ def _save_source_record(store, run_id, record):
     store.save_source_record(payload)
 
 
-def test_rebuild_from_store_rereconciles_latest_source_records_without_acquisition(tmp_path):
+def _setup_store(tmp_path):
     store_path = tmp_path / "store"
-    out_path = tmp_path / "out"
     store = FileRegistryStore({"type": "file", "path": str(store_path)})
     source_run = "run-source-1"
     store.create_run({
@@ -106,8 +105,32 @@ def test_rebuild_from_store_rereconciles_latest_source_records_without_acquisiti
             "wikidata": {"strength": "weak", "verified_from": []},
         },
     }), encoding="utf-8")
+    return store, source_run, config_path
+
+
+def test_rebuild_from_store_dry_run_does_not_mutate_store(tmp_path):
+    store, source_run, config_path = _setup_store(tmp_path)
+    out_path = tmp_path / "dry-run"
+    before = {row["canonical_id"]: row for row in store.get_current_registry_view()}
 
     report = rebuild_registry_from_store(config_path, out_path)
+
+    after = {row["canonical_id"]: row for row in store.get_current_registry_view()}
+    assert after == before
+    assert "nara-nf00362" in after
+    assert report["dry_run"] is True
+    assert report["persisted"] is False
+    assert report["status"] == "dry_run_completed"
+    assert (out_path / "registry.json").is_file()
+    assert (out_path / "run_report.json").is_file()
+    assert {row["run_id"] for row in store.query("source_records")} == {source_run}
+
+
+def test_rebuild_from_store_rereconciles_latest_source_records_without_acquisition(tmp_path):
+    store, source_run, config_path = _setup_store(tmp_path)
+    out_path = tmp_path / "applied"
+
+    report = rebuild_registry_from_store(config_path, out_path, apply=True)
 
     current = {row["canonical_id"]: row for row in store.get_current_registry_view()}
     assert "puid-fmt-14" in current
@@ -143,6 +166,8 @@ def test_rebuild_from_store_rereconciles_latest_source_records_without_acquisiti
     assert {row["run_id"] for row in source_records_after} == {source_run}
 
     assert report["run_kind"] == "rebuild_from_store"
+    assert report["dry_run"] is False
+    assert report["persisted"] is True
     assert report["validation_errors"] == []
     assert (out_path / "registry.json").is_file()
     assert (out_path / "run_report.json").is_file()
