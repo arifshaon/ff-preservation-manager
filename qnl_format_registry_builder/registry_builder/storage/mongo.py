@@ -206,17 +206,19 @@ class MongoRegistryStore(RegistryStore):
         return [dict(item) for item in cursor]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
-        """Resolve against the current canonical identity index.
+        """Resolve current canonical identity, with a legacy-only fallback.
 
-        `format_identifiers` is retained as provenance/history and can contain
-        identifier claims written by older runs. Current identity is defined by
-        `canonical_formats.identifiers`, which is rebuilt atomically and excludes
-        copied/unverified strong cross-references.
+        Current identity is defined by ``canonical_formats.identifiers``. The
+        historical ``format_identifiers`` collection is consulted only for a
+        current canonical record that has no ``identifiers`` field at all. This
+        preserves compatibility with older/minimal store records without letting
+        stale cross-authority rows override a rebuilt canonical identity index.
         """
         kind = str(identifier_type or "").strip()
         needle = str(value or "").strip()
         if not kind or not needle:
             return None
+
         result = self._collection("canonical_formats").find_one(
             {
                 f"identifiers.{kind}": needle,
@@ -224,7 +226,28 @@ class MongoRegistryStore(RegistryStore):
             },
             {"_id": 0},
         )
-        return dict(result) if result else None
+        if result:
+            return dict(result)
+
+        identifiers = self._collection("format_identifiers").find(
+            {"type": kind, "value": needle},
+            {"_id": 0},
+        )
+        for identifier in identifiers:
+            format_id = identifier.get("format_id") or identifier.get("canonical_id")
+            if not format_id:
+                continue
+            legacy = self._collection("canonical_formats").find_one(
+                {
+                    "canonical_id": format_id,
+                    "current": {"$ne": False},
+                    "identifiers": {"$exists": False},
+                },
+                {"_id": 0},
+            )
+            if legacy:
+                return dict(legacy)
+        return None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
         query = {"institution_id": institution_id} if institution_id else {}
