@@ -60,6 +60,22 @@ def test_related_source_record_does_not_generate_deterministic_claim_by_default(
     assert claims == []
 
 
+def test_exact_puid_cross_reference_generates_deterministic_claim_by_default():
+    criteria, canonical, source_records, mapping = _fixture()
+    source_ref = canonical[0]["source_records"][0]
+    source_ref["evidence_scope"] = "exact_puid_cross_reference"
+    source_ref["related_puids"] = ["fmt/14"]
+
+    claims = build_criterion_claims(canonical, source_records, [mapping], criteria)
+
+    assert len(claims) == 1
+    claim = claims[0]
+    assert claim["canonical_id"] == "puid-fmt-14"
+    assert claim["value"] == "high"
+    assert claim["evidence_scope"] == "exact_puid_cross_reference"
+    assert claim["related_puids"] == ["fmt/14"]
+
+
 def test_related_source_record_requires_explicit_mapping_opt_in():
     criteria, canonical, source_records, mapping = _fixture()
     mapping["allow_related_source_records"] = True
