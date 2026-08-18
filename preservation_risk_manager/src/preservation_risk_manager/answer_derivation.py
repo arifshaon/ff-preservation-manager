@@ -63,6 +63,18 @@ DERIVATION_VALUE_MAP: dict[str, dict[str, str]] = {
         "specialist": "specialist_dependency",
         "specialist_dependency": "specialist_dependency",
     },
+    "technical.hardware_dependency": {
+        "none": "no_special_dependency",
+        "low": "no_special_dependency",
+        "moderate": "specialist_dependency",
+        "high": "specialist_dependency",
+    },
+    "technical.plugin_script_dependency": {
+        "none": "no_special_dependency",
+        "low": "no_special_dependency",
+        "moderate": "specialist_dependency",
+        "high": "specialist_dependency",
+    },
 }
 
 _EVIDENCE_SECTIONS = (
