@@ -349,7 +349,7 @@ def _assessment_for_doc(
             "derivation_status": row.get("derivation_status"),
         }
         for row in analysis.get("question_results", [])
-        if float(row.get("weighted_points") or 0) > 0
+        if not bool(row.get("abstention")) and float(row.get("weighted_points") or 0) > 0
     ]
     return {
         "format": _format_identity(format_doc),
