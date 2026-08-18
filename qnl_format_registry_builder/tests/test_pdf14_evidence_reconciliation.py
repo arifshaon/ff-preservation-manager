@@ -10,7 +10,7 @@ from registry_builder.reconcile import reconcile
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_pdf10_combines_approved_nara_and_loc_evidence_on_pronom_puid():
+def test_pdf10_uses_exact_nara_evidence_and_keeps_loc_range_as_relationship_only():
     records = [
         RawFormatRecord(
             source_id="pronom_registry",
@@ -36,7 +36,10 @@ def test_pdf10_combines_approved_nara_and_loc_evidence_on_pronom_puid():
                 "row": {
                     "1．2: Does the format have a published open specification?": 2,
                     "3．2: Is there an internal signature in an authoritative format registry that can be used to identify a file in this format?": 2,
+                    "5．1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?": 2,
+                    "5．2: Does the format require specific playback hardware (e．g．, Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?": 2,
                     "6．1: Are renderers available?": 2,
+                    "6．3: Does the format rely on plug-ins and/or scripts, etc． to render or execute files?": 2,
                     "8．3: Does the format natively allow the use of technical protection measures (e.g. digital rights management)?": -2,
                 }
             },
@@ -52,8 +55,8 @@ def test_pdf10_combines_approved_nara_and_loc_evidence_on_pronom_puid():
             native_fields={
                 "sustainability_factors": {
                     "disclosure": "Fully documented with a publicly available specification.",
-                    "adoption": "Widely adopted and widely used.",
-                    "external_dependencies": "None.",
+                    "adoption": "PDF 1.3 has been very widely used.",
+                    "external_dependencies": "See PDF_family.",
                 }
             },
         ),
@@ -77,7 +80,9 @@ def test_pdf10_combines_approved_nara_and_loc_evidence_on_pronom_puid():
     pdf10 = next(item for item in canonical if item["canonical_id"] == "puid-fmt-14")
     assert pdf10["identifiers"]["puid"] == ["fmt/14"]
     assert pdf10["identifiers"]["nara"] == ["NF00362"]
-    assert any(ref.get("source_record_id") == "fdd000316" for ref in pdf10["source_records"])
+    loc_ref = next(ref for ref in pdf10["source_records"] if ref.get("source_record_id") == "fdd000316")
+    assert loc_ref["relationship"] == "explicit_puid_cross_reference"
+    assert loc_ref["evidence_scope"] == "multi_puid_source_record"
 
     criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
     mappings = load_mappings(ROOT / "config" / "criterion_mappings")
@@ -94,9 +99,17 @@ def test_pdf10_combines_approved_nara_and_loc_evidence_on_pronom_puid():
     for claim in pdf_claims:
         by_criterion.setdefault(claim["criterion_id"], []).append(claim)
 
-    assert "sustainability.disclosure" in by_criterion
-    assert "sustainability.adoption" in by_criterion
-    assert "sustainability.external_dependencies" in by_criterion
-    assert any(claim["source_id"] == "nara_digital_preservation_framework" for claim in by_criterion["sustainability.disclosure"])
-    assert any(claim["source_id"] == "loc_fdd_xml" and claim["value"] == "high" for claim in by_criterion["sustainability.adoption"])
-    assert any(claim["source_id"] == "loc_fdd_xml" and claim["value"] == "none" for claim in by_criterion["sustainability.external_dependencies"])
+    # Exact NARA observations remain usable for the exact PUID.
+    assert any(
+        claim["source_id"] == "nara_digital_preservation_framework"
+        and claim["value"] == "public_specification"
+        for claim in by_criterion["sustainability.disclosure"]
+    )
+    assert [claim["value"] for claim in by_criterion["technical.hardware_dependency"]] == ["none", "none"]
+    assert [claim["value"] for claim in by_criterion["technical.plugin_script_dependency"]] == ["none"]
+
+    # The LOC range record remains linked for provenance/AI, but its criterion
+    # prose must not automatically become deterministic evidence for PDF 1.0.
+    assert not any(claim["source_id"] == "loc_fdd_xml" for claim in pdf_claims)
+    assert "sustainability.adoption" not in by_criterion
+    assert "sustainability.external_dependencies" not in by_criterion
