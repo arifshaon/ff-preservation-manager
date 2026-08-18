@@ -3,7 +3,7 @@ from registry_builder.criterion_mapping import build_criterion_claims
 
 
 def test_related_loc_source_record_generates_claim_for_puid_canonical():
-    criteria = CriteriaVocabulary.from_dict({
+    criteria = CriteriaVocabulary({
         "criteria_version": "v1",
         "criteria": {
             "sustainability.adoption": {
