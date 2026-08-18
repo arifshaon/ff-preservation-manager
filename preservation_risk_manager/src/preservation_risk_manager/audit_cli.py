@@ -12,6 +12,10 @@ from preservation_risk_manager.data_access import (
 )
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.registry_audit import build_registry_risk_evidence_audit
+from preservation_risk_manager.registry_audit_diagnostics import (
+    refine_registry_risk_evidence_diagnostics,
+    render_registry_audit_diagnostics_markdown,
+)
 from preservation_risk_manager.registry_audit_governance import (
     refine_registry_risk_evidence_audit,
     write_refined_registry_risk_evidence_audit,
@@ -31,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Audit deterministic preservation-risk coverage across the whole registry, "
             "including question gaps, evidence sources, conflicts, band eligibility, "
-            "LOC relationship scopes, and optional draft mapping uplift."
+            "PUID production-path diagnostics, LOC relationship scopes, and optional draft mapping uplift."
         ),
     )
     parser.add_argument("--framework", required=True, help="Path to risk framework JSON.")
@@ -71,6 +75,43 @@ def _reader_from_args(args: argparse.Namespace) -> RegistryReader:
     return RegistryReader(storage_config=load_storage_config(storage_path))
 
 
+def _compact_puid_diagnostics(report: dict) -> dict:
+    puid = report.get("puid_diagnostics") or {}
+    return {
+        key: puid.get(key)
+        for key in (
+            "formats",
+            "band_eligible_formats",
+            "band_eligible_percent",
+            "average_evidence_completeness",
+            "coverage_by_answered_questions",
+            "analysis_status_distribution",
+            "band_distribution",
+            "band_suppressed_reasons",
+            "question_coverage",
+            "gap_patterns",
+            "source_support",
+        )
+    }
+
+
+def _compact_conflict_diagnostics(report: dict) -> dict:
+    conflicts = report.get("conflict_diagnostics") or {}
+    return {
+        key: conflicts.get(key)
+        for key in (
+            "total",
+            "puid_format_conflicts",
+            "non_puid_format_conflicts",
+            "matches_base_audit_count",
+            "by_question",
+            "by_answer_combination",
+            "by_source_combination",
+            "by_question_and_source_combination",
+        )
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -98,13 +139,26 @@ def main(argv: list[str] | None = None) -> int:
             criteria_path=args.criteria,
             mappings_path=args.mappings_path,
         )
+        report = refine_registry_risk_evidence_diagnostics(
+            report,
+            reader,
+            framework,
+            institution_id=args.institution,
+            sample_limit=args.sample_limit,
+        )
         if args.out_dir:
             paths = write_refined_registry_risk_evidence_audit(report, args.out_dir)
+            markdown_path = Path(paths["markdown"])
+            diagnostic_markdown = render_registry_audit_diagnostics_markdown(report)
+            with markdown_path.open("a", encoding="utf-8") as stream:
+                stream.write("\n" + diagnostic_markdown)
             result = {
                 "status": "ok",
                 "summary": report.get("summary"),
                 "coverage_by_answered_questions": report.get("coverage_by_answered_questions"),
                 "band_distribution": report.get("band_distribution"),
+                "puid_diagnostics": _compact_puid_diagnostics(report),
+                "conflict_diagnostics": _compact_conflict_diagnostics(report),
                 "draft_mapping_opportunities": report.get("draft_mapping_opportunities"),
                 "report_files": paths,
             }
