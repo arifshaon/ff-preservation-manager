@@ -44,6 +44,10 @@ a fifth of what is stored.
 [S7] CLI + docs + regression tests
 ```
 
+Further sources (Wikidata linking, COPTR tooling, FPR recipes) plug in through
+the existing adapter + criterion-mapping contract without changing the scorer —
+see section 8.
+
 S1, S2, S4, S5 are mechanical. S3 needs the AI provider. S6 needs S1–S5 complete.
 
 ## 2. Data mapping
@@ -295,7 +299,132 @@ and the coverage minimums. Fitted constants ship as the default config file.
 Named regression fixtures: ASCII / HTML / CSS / Broadcast WAVE "unspecified
 version" must never reach the High tier through the `FALSE` path.
 
-## 8. Sequence and risk
+## 8. Source extensibility
+
+The plan above names NARA, PRONOM, and LoC because those are the sources whose
+data is already harvested and which the scorer's terms depend on. They are not
+the closed set. This section records how further sources plug in, what Wikidata
+specifically contributes, and the one rule the scorer must enforce regardless of
+which sources are present.
+
+### 8.1 The extension contract already exists
+
+No new mechanism is needed. Adding a source is three pieces of configuration and
+(only if the format is novel) one adapter class:
+
+```text
+1. adapter        registry_builder/adapters/<source>.py  subclassing SourceAdapter
+                  -> registered by short name in ADAPTERS, OR shipped outside this
+                     repository entirely and referenced as "package.module:ClassName"
+                     (resolve_plugin already supports external adapters, so a
+                     third-party source needs no core edit)
+
+2. source config  sources.<name>.json
+                  -> id, type, uris, offline flag, identifier_kinds
+
+3. criterion map  config/criterion_mappings/<source>.v1.draft.json
+                  -> rules promoted to .approved.json after archivist review,
+                     identical schema and lifecycle to the NARA rules in S1
+```
+
+The scorer consumes `criterion_claims`, never sources directly. A new source
+that emits claims for criteria the scorer already knows raises coverage with
+**no scorer change at all**. That is the intended extension path and it is why
+S4 is written against criteria rather than against NARA fields.
+
+### 8.2 Wikidata — Tier 3, identity resolution
+
+Wikidata is already modelled in the codebase, and deliberately not as an
+evidence source:
+
+```text
+identifier_kinds:
+  puid      strength=strong   verified_from=[pronom_registry, pronom_droid_xml, wikidata]
+  loc       strength=strong   verified_from=[loc_fdd_xml]
+  nara      strength=strong   verified_from=[nara_digital_preservation_framework, ...]
+  wikidata  strength=weak     verified_from=[wikidata]
+```
+
+QIDs are marked **weak** and today arrive passively through NARA (666 records)
+and LoC (340) crosswalks — 952 of 3,365 canonical formats (28%) carry one. There
+is no Wikidata adapter; nothing queries SPARQL.
+
+What a Wikidata adapter would add, measured rather than assumed:
+
+| Measure | Value |
+| --- | --- |
+| Formats anchored to a single authority | **2,513 of 3,365 (74%)** |
+| Formats with a QID but no PUID/NARA/LoC | 0 |
+
+So Wikidata adds no *reach* — every format it knows about is already present —
+but it is the natural instrument for the **fragmentation** problem: 74% of
+formats are linked to only one authority, which is why PDF/A (`fmt/354`) cannot
+see its own NARA record and why its composite tier is suppressed. Wikidata's
+`P2749` (PRONOM ID), `P3267` (LoC FDD ID), and related properties are exactly
+the join that is missing.
+
+Its role therefore is:
+
+- **In scope:** proposing links between existing canonical records, so claims
+  already held under one authority reach a format anchored to another.
+- **Out of scope:** contributing criterion claims. A crowd-maintained graph must
+  not supply sustainability evidence on equal footing with a national archive.
+
+Because QIDs are `weak`, a Wikidata-proposed link must not silently merge
+records. It should be emitted as a **candidate link with provenance**, subject
+to the same review lifecycle as a draft mapping rule, and the resulting claims
+must remain attributable to their original authority rather than to Wikidata.
+
+### 8.3 Operational sources — Tier 4
+
+COPTR and release-pinned Archivematica FPR presets supply CLI invocation
+templates and tool-capability observations. Two constraints:
+
+- Command templates are **not criterion claims**. They belong in a migration
+  pathways collection keyed by PUID, under institutional override
+  (`local_fpr_rules.json`), and are never composed by an LLM.
+- Tool-capability observations from COPTR *are* legitimate criterion evidence,
+  and are the only route to a genuinely independent `E_tool`. Until such a
+  source exists, `E_tool` derives from NARA's rubric and the divergence
+  comparator therefore cannot claim to detect NARA staleness (see section 4).
+
+### 8.4 The rule the scorer must enforce
+
+Every claim already carries `source_id`, `directness`, `covers`,
+`source_independence`, and `review_status`. The scorer must respect governance
+tier when combining them:
+
+```python
+# Corroboration counts only across INDEPENDENT sources. Two claims that trace
+# to the same authority are one observation, not two.
+def corroboration(claims):
+    return len({authority_of(c.source_id) for c in claims})
+
+# A weak-tier source may corroborate a factor but must not be its sole basis.
+def usable(claims_for_factor):
+    return any(TIER[authority_of(c.source_id)] in ("identification", "evaluative")
+               for c in claims_for_factor)
+```
+
+Without this, adding sources inflates apparent confidence: three claims from
+three mirrors of the same authority would read as three independent
+observations. The tier map belongs in config beside the weights, so adding a
+source is still configuration rather than code.
+
+### 8.5 Candidate sources, and what each would unblock
+
+| Source | Tier | Would unblock | Status |
+| --- | --- | --- | --- |
+| Wikidata SPARQL | 3 linking | Cross-authority joins for 2,513 single-anchor formats | No adapter; QIDs arrive passively |
+| COPTR | 4 operational | NARA-independent `E_tool`; real divergence detection | Not ingested |
+| Archivematica FPR (pinned) | 4 operational | CLI templates for the migration layer | Not ingested; central registry decommissioned, use release-pinned presets |
+| DPC Bit List | 2 evaluative | Trend / at-risk signal absent from all current sources | Suits the literature corpus (Corpus B) rather than a structured adapter |
+| Institutional evidence | 2 evaluative, scoped | Local overlays | Already supported (`qnl_institution_format_evidence`) |
+
+None of these blocks S1–S7. Each raises coverage of criteria the scorer already
+consumes, which is the property the design is built to preserve.
+
+## 9. Sequence and risk
 
 | Step | Depends on | Type | Risk if skipped |
 | --- | --- | --- | --- |
