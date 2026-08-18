@@ -43,7 +43,11 @@ def test_nara_authority_record_bridges_to_verified_pronom_puid():
         claim["kind"] == "puid" and claim["value"] == "fmt/1451" and claim["verified"]
         for claim in fmt.identifier_claims
     )
-    assert any(
+    # The copied NARA PUID remains visible as source-record cross-reference
+    # metadata, but it is not duplicated as an exact canonical identifier.
+    nara_ref = next(ref for ref in fmt.source_records if ref["source_record_id"] == "NF00792")
+    assert {"kind": "puid", "value": "fmt/1451"} in nara_ref["identifier_cross_references"]
+    assert not any(
         claim["kind"] == "puid" and claim["value"] == "fmt/1451" and not claim["verified"]
         for claim in fmt.identifier_claims
     )
