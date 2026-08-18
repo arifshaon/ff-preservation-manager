@@ -1,14 +1,14 @@
 {
   "source_type": "nara_digital_preservation_framework",
-  "mapping_version": "2026-08-16-approved-example",
+  "mapping_version": "2026-08-18-approved-dependency-expansion",
   "criteria_version": "v1",
   "native_vocabulary": "nara_file_format_risk_matrix",
-  "mapping_mode": "manual_approved_example",
+  "mapping_mode": "manual_approved",
   "review_status": "approved",
   "claim_review_status": "approved",
   "decided_by": "QNL DCPA",
-  "decided_at": "2026-08-16",
-  "notes": "Short approved example showing how a reviewed NARA mapping should be represented. This is intentionally not the full 27-rule NARA mapping; use the draft file as the complete rule scaffold and promote reviewed rules into an operational approved mapping when ready.",
+  "decided_at": "2026-08-18",
+  "notes": "Reviewed production mapping. The original four approved rules are retained and three direct dependency observations (NARA 5.1, 5.2 and 6.3) are added after registry-wide reconciliation review. The remaining NARA draft scaffold stays unapproved. Composite NARA ratings remain hazard estimators rather than criterion evidence.",
   "excluded_from_criteria": [
     {
       "field": "NARA Risk Level",
@@ -112,9 +112,7 @@
         "Unknown": "unknown"
       },
       "mapping_status": "accepted",
-      "decided_by": "QNL DCPA",
-      "decided_at": "2026-08-16",
-      "rationale": "Approved example. NARA question 1.2 is the strongest NARA disclosure signal because it asks whether a published open specification exists. It remains derived because stored values are rubric scores, not literal answers."
+      "rationale": "NARA question 1.2 directly asks whether a published open specification exists. Stored values are rubric scores, so the resulting observation is recorded as derived source evidence."
     },
     {
       "id": "nara.rubric.3_2.technical_identifiability.v1",
@@ -132,9 +130,53 @@
         "Unknown": "unknown"
       },
       "mapping_status": "accepted",
-      "decided_by": "QNL DCPA",
-      "decided_at": "2026-08-16",
-      "rationale": "Approved example. NARA question 3.2 directly supports technical identifiability."
+      "rationale": "NARA question 3.2 directly supports technical identifiability."
+    },
+    {
+      "id": "nara.rubric.5_1.technical_hardware_dependency.v1",
+      "criterion": "technical.hardware_dependency",
+      "from_field": "raw.row.5．1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?",
+      "alternate_fields": [
+        "raw.row.5.1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?",
+        "native_fields.rubric_answers.5．1",
+        "native_fields.rubric_answers.5.1"
+      ],
+      "nara_question_id": "5.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "none",
+        "-6": "high",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "rationale": "NARA question 5.1 directly tests whether processing the format requires a specific hardware environment."
+    },
+    {
+      "id": "nara.rubric.5_2.technical_hardware_dependency.v1",
+      "criterion": "technical.hardware_dependency",
+      "from_field": "raw.row.5．2: Does the format require specific playback hardware (e．g．, Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?",
+      "alternate_fields": [
+        "raw.row.5.2: Does the format require specific playback hardware (e.g., Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?",
+        "native_fields.rubric_answers.5．2",
+        "native_fields.rubric_answers.5.2"
+      ],
+      "nara_question_id": "5.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "none",
+        "-4": "high",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "rationale": "NARA question 5.2 directly tests whether transfer requires specific playback hardware."
     },
     {
       "id": "nara.rubric.6_1.technical_renderer_availability.v1",
@@ -152,9 +194,30 @@
         "Unknown": "unknown"
       },
       "mapping_status": "accepted",
-      "decided_by": "QNL DCPA",
-      "decided_at": "2026-08-16",
-      "rationale": "Approved example. NARA question 6.1 directly supports renderer availability."
+      "rationale": "NARA question 6.1 directly supports renderer availability."
+    },
+    {
+      "id": "nara.rubric.6_3.technical_plugin_script_dependency.v1",
+      "criterion": "technical.plugin_script_dependency",
+      "from_field": "raw.row.6．3: Does the format rely on plug-ins and/or scripts, etc． to render or execute files?",
+      "alternate_fields": [
+        "raw.row.6.3: Does the format rely on plug-ins and/or scripts, etc. to render or execute files?",
+        "native_fields.rubric_answers.6．3",
+        "native_fields.rubric_answers.6.3"
+      ],
+      "nara_question_id": "6.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "values": {
+        "2": "none",
+        "-4": "high",
+        "0": "unknown",
+        "FALSE": "unknown",
+        "Unknown": "unknown"
+      },
+      "mapping_status": "accepted",
+      "rationale": "NARA question 6.3 directly tests plug-in/script dependency for rendering or execution."
     },
     {
       "id": "nara.rubric.8_3.sustainability_tpm_encryption.v1",
@@ -172,9 +235,7 @@
         "Unknown": "unknown"
       },
       "mapping_status": "accepted",
-      "decided_by": "QNL DCPA",
-      "decided_at": "2026-08-16",
-      "rationale": "Approved example. NARA question 8.3 directly supports TPM/DRM possibility evidence."
+      "rationale": "NARA question 8.3 directly supports TPM/DRM possibility evidence."
     }
   ]
 }
