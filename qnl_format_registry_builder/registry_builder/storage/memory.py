@@ -133,11 +133,19 @@ class MemoryRegistryStore(RegistryStore):
         ]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
-        """Resolve using the current canonical identity index, not historical claims."""
+        """Resolve current canonical identity, with a legacy-only fallback.
+
+        Rebuilt canonical records carry an explicit ``identifiers`` index and
+        that index is authoritative. Historical ``format_identifiers`` rows are
+        consulted only for older/minimal canonical records that have no
+        ``identifiers`` field at all, preserving the storage contract without
+        allowing stale rows to override rebuilt identity.
+        """
         kind = str(identifier_type or "").strip()
         needle = str(value or "").strip()
         if not kind or not needle:
             return None
+
         for record in self.canonical_formats.values():
             if record.get("current", True) is False:
                 continue
@@ -145,6 +153,17 @@ class MemoryRegistryStore(RegistryStore):
             values = identifiers.get(kind) if isinstance(identifiers, dict) else None
             if isinstance(values, (list, tuple, set)) and needle in {str(item) for item in values}:
                 return deepcopy(record)
+
+        for identifier in self.identifiers:
+            if identifier.get("type") != kind or str(identifier.get("value") or "") != needle:
+                continue
+            format_id = identifier.get("format_id") or identifier.get("canonical_id")
+            record = self.canonical_formats.get(str(format_id)) if format_id is not None else None
+            if not record or record.get("current", True) is False:
+                continue
+            if "identifiers" in record:
+                continue
+            return deepcopy(record)
         return None
 
     def list_institution_policy_formats(self, institution_id: str | None = None) -> list[dict[str, Any]]:
