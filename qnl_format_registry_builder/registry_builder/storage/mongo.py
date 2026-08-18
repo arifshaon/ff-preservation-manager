@@ -206,14 +206,23 @@ class MongoRegistryStore(RegistryStore):
         return [dict(item) for item in cursor]
 
     def find_by_identifier(self, identifier_type: str, value: str) -> dict[str, Any] | None:
-        identifier = self._collection("format_identifiers").find_one(
-            {"type": identifier_type, "value": value}, {"_id": 0}
-        )
-        if not identifier:
+        """Resolve against the current canonical identity index.
+
+        `format_identifiers` is retained as provenance/history and can contain
+        identifier claims written by older runs. Current identity is defined by
+        `canonical_formats.identifiers`, which is rebuilt atomically and excludes
+        copied/unverified strong cross-references.
+        """
+        kind = str(identifier_type or "").strip()
+        needle = str(value or "").strip()
+        if not kind or not needle:
             return None
-        format_id = identifier.get("format_id") or identifier.get("canonical_id")
         result = self._collection("canonical_formats").find_one(
-            {"canonical_id": format_id, "current": {"$ne": False}}, {"_id": 0}
+            {
+                f"identifiers.{kind}": needle,
+                "current": {"$ne": False},
+            },
+            {"_id": 0},
         )
         return dict(result) if result else None
 
