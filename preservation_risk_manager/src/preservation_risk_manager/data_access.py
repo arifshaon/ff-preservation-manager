@@ -29,7 +29,7 @@ def _matches_filter(row: dict[str, Any], filt: dict[str, Any]) -> bool:
 
 
 def _is_current(row: dict[str, Any]) -> bool:
-    """Return True unless registry-builder explicitly marked a format inactive."""
+    """Return True unless registry-builder explicitly marked a record inactive."""
     return row.get("current") is not False
 
 
@@ -345,13 +345,19 @@ class RegistryReader:
         canonical_id: str,
         institution_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Return criterion claims for a format in the requested scope.
+        """Return current criterion claims for a format in the requested scope.
 
         Global analysis must not consume institution-scoped claims. Institution
         analysis gets global claims plus matching claims for that institution.
+        Superseded claims remain in persistent storage for audit/history but are
+        never valid scoring evidence once registry-builder marks current=false.
         """
         rows = self.query("criterion_claims", {"canonical_id": canonical_id})
-        return [row for row in rows if _claim_matches_scope(row, institution_id=institution_id)]
+        return [
+            row
+            for row in rows
+            if _is_current(row) and _claim_matches_scope(row, institution_id=institution_id)
+        ]
 
     def get_criterion_claims_for_format(
         self,
