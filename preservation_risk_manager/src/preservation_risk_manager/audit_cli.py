@@ -11,9 +11,10 @@ from preservation_risk_manager.data_access import (
     load_storage_config,
 )
 from preservation_risk_manager.frameworks import load_framework
-from preservation_risk_manager.registry_audit import (
-    build_registry_risk_evidence_audit,
-    write_registry_risk_evidence_audit,
+from preservation_risk_manager.registry_audit import build_registry_risk_evidence_audit
+from preservation_risk_manager.registry_audit_governance import (
+    refine_registry_risk_evidence_audit,
+    write_refined_registry_risk_evidence_audit,
 )
 
 
@@ -89,8 +90,16 @@ def main(argv: list[str] | None = None) -> int:
             mappings_path=args.mappings_path,
             sample_limit=args.sample_limit,
         )
+        report = refine_registry_risk_evidence_audit(
+            report,
+            reader,
+            framework,
+            institution_id=args.institution,
+            criteria_path=args.criteria,
+            mappings_path=args.mappings_path,
+        )
         if args.out_dir:
-            paths = write_registry_risk_evidence_audit(report, args.out_dir)
+            paths = write_refined_registry_risk_evidence_audit(report, args.out_dir)
             result = {
                 "status": "ok",
                 "summary": report.get("summary"),
