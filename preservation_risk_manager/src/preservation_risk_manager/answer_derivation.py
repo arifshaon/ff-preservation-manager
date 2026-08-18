@@ -13,6 +13,7 @@ DERIVATION_VALUE_MAP: dict[str, dict[str, str]] = {
         "public_specification_available": "public_specification",
         "partial_specification": "limited_or_unclear_specification",
         "proprietary_documented": "limited_or_unclear_specification",
+        "undocumented": "limited_or_unclear_specification",
         "limited": "limited_or_unclear_specification",
         "limited_documentation": "limited_or_unclear_specification",
         "limited_or_unclear": "limited_or_unclear_specification",
