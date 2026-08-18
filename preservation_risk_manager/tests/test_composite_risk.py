@@ -53,6 +53,48 @@ def test_blueprint_formula_reproduced_exactly():
     assert result["risk_tier"] == "High"
 
 
+def test_module_matches_blueprint_pseudocode_exactly():
+    """Fuzz the module against the blueprint's pseudocode, implemented verbatim.
+
+    Guards against intermediate rounding or term drift: for fully evidenced
+    inputs the module must equal round(reference, 2) exactly, not approximately.
+    """
+    import random
+
+    from preservation_risk_manager.composite_risk import (
+        CRITERION_VALUE_SCORES,
+        DAYS_PER_YEAR,
+        NARA_BAND_VALUES,
+    )
+
+    def reference(w, C, r_nara, a_spec, e_tool):
+        s_loc = sum(w[k] * C[k] for k in range(7))
+        return min(100.0, 100.0 * (0.45 * r_nara + 0.55 * (1.0 - s_loc)
+                                   + 0.08 * math.log(1.0 + a_spec) * (1.5 - e_tool)))
+
+    choices = {c: sorted(CRITERION_VALUE_SCORES[c].items()) for c in SEVEN_CRITERIA}
+    rng = random.Random(20260818)
+    for _ in range(200):
+        picked = {c: rng.choice(choices[c]) for c in SEVEN_CRITERIA}
+        band = rng.choice(["Low", "Moderate", "High"])
+        a_spec = rng.uniform(0, 40)
+        e_tool = rng.uniform(0, 1)
+        raw = [rng.uniform(0.01, 1) for _ in SEVEN_CRITERIA]
+        weights = {c: r / sum(raw) for c, r in zip(SEVEN_CRITERIA, raw)}
+        claims = [{"criterion_id": c, "value": v} for c, (v, _) in picked.items()]
+        claims.append({"criterion_id": "source.currency", "value": a_spec * DAYS_PER_YEAR})
+        result = compute_composite_risk(
+            _format(band), claims,
+            config=CompositeRiskConfig(weights=weights), e_tool=e_tool,
+        )
+        expected = reference(
+            [weights[c] for c in SEVEN_CRITERIA],
+            [picked[c][1] for c in SEVEN_CRITERIA],
+            NARA_BAND_VALUES[band.lower()], a_spec, e_tool,
+        )
+        assert result["composite_score"] == round(expected, 2)
+
+
 def test_nara_band_mapping_low_moderate_high():
     for band, value in (("Low", 0.2), ("Moderate", 0.5), ("High", 0.9)):
         assert nara_baseline(_format(band))["r_nara"] == value

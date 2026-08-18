@@ -240,7 +240,9 @@ def sustainability_score(
         s_loc = None
 
     return {
-        "s_loc": None if s_loc is None else round(s_loc, 4),
+        # Exact value — computation must not consume rounded intermediates.
+        # Presentation rounding happens once, in compute_composite_risk.
+        "s_loc": s_loc,
         "evidenced_criteria": sorted(evidenced),
         "unevidenced_criteria": sorted(set(SEVEN_CRITERIA) - set(evidenced)),
         "coverage": f"{len(evidenced)}/{len(SEVEN_CRITERIA)}",
@@ -300,7 +302,8 @@ def spec_age_years(claims: list[dict[str, Any]]) -> dict[str, Any]:
     if not ages:
         return {"a_spec_years": None, "source": "currency_claims_missing"}
     return {
-        "a_spec_years": round(min(ages) / DAYS_PER_YEAR, 2),
+        # Exact value; rounded only for presentation in compute_composite_risk.
+        "a_spec_years": min(ages) / DAYS_PER_YEAR,
         "source": "source.currency",
         "currency_claims_seen": len(ages),
     }
@@ -367,6 +370,12 @@ def compute_composite_risk(
         else 0.0
     )
     score = round(min(100.0, 100.0 * (nara_term + sustainability_term + temporal_term)), 2)
+
+    # Round audit copies only now, after every term used the exact values.
+    if sustainability["s_loc"] is not None:
+        sustainability["s_loc"] = round(sustainability["s_loc"], 4)
+    if age["a_spec_years"] is not None:
+        age["a_spec_years"] = round(age["a_spec_years"], 2)
 
     evidenced_count = len(sustainability["evidenced_criteria"])
     suppression: list[str] = []
