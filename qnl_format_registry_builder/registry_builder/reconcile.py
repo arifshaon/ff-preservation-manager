@@ -24,6 +24,7 @@ _COPIED_IDENTIFIER_HEURISTIC_REASON = (
     "Copied identifier bridged to a single verified authority group, but only one side carries "
     "an explicit version discriminator."
 )
+_BROAD_FORMAT_MARKERS = ("family", "generic", "unspecified", "all versions", "multiple versions")
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -94,6 +95,11 @@ def _groups_have_asymmetric_version_signal(left: list[RawFormatRecord], right: l
             if _names_have_asymmetric_version_signal(left_record.name, right_record.name):
                 return True
     return False
+
+
+def _is_broad_format_name(name: str | None) -> bool:
+    text = str(name or "").strip().lower()
+    return any(marker in text for marker in _BROAD_FORMAT_MARKERS)
 
 
 def _institution_policy(record: RawFormatRecord) -> dict:
@@ -352,18 +358,22 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
 def _safe_claimed_strong_identifier_aliases(
     groups: dict[tuple[str, str], list[RawFormatRecord]],
     *,
-    strong_kinds: set[str],
+    strong_order: list[str],
 ) -> tuple[dict[tuple[str, str], tuple[str, str]], dict[tuple[str, str], dict[str, str]]]:
-    """Alias copied strong identifiers to a single verified group when names do not conflict.
+    """Alias copied authority identifiers using configured authority priority.
 
-    Institutional evidence and source authorities such as NARA/LOC may carry
-    copied PUID/LOC/NARA identifiers so they can point at another authority
-    format. The copied identifier is not verified by that source, so it may
-    bridge only to one verified authority group, and only when explicit version
-    tokens in the names do not conflict. If only one side has a version
-    discriminator, the bridge is allowed but the copied identifier claim is
-    marked as heuristic for collision review.
+    A source can cite more than one other authority for the same format (for
+    example NARA NF00362 cites both PRONOM fmt/14 and LOC fdd000316). Those
+    cross-references are not competing identities. The highest-priority strong
+    namespace with exactly one verified target wins; a lower-priority copied ID
+    must not prevent the bridge.
+
+    Broad/family records are never collapsed into one specific PUID merely
+    because they contain a single copied PUID somewhere in their source record.
+    Multi-PUID records likewise remain independent and are attached later as
+    related evidence sources to each explicit PUID target.
     """
+    strong_kinds = set(strong_order)
     verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
     for group_key, items in groups.items():
         for record in items:
@@ -374,22 +384,43 @@ def _safe_claimed_strong_identifier_aliases(
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
     alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
     for group_key, items in groups.items():
-        candidates: set[tuple[str, str]] = set()
-        for record in items:
-            for identifier in _all_identifiers(record):
-                if identifier.kind not in strong_kinds or identifier.verified:
-                    continue
-                targets = verified_targets.get((identifier.kind, identifier.value), set())
-                if len(targets) == 1:
-                    candidates.update(targets)
-        candidates.discard(group_key)
-        if len(candidates) != 1:
+        selected_target: tuple[str, str] | None = None
+        selected_kind: str | None = None
+        for kind in strong_order:
+            targets: set[tuple[str, str]] = set()
+            copied_values = {
+                identifier.value
+                for record in items
+                for identifier in _all_identifiers(record, kind)
+                if not identifier.verified
+            }
+            for value in copied_values:
+                matching = verified_targets.get((kind, value), set())
+                if len(matching) == 1:
+                    targets.update(matching)
+                elif len(matching) > 1:
+                    # The strongest available namespace is itself ambiguous;
+                    # do not fall through to a weaker namespace and guess.
+                    targets.update(matching)
+            targets.discard(group_key)
+            if not targets:
+                continue
+            if len(targets) != 1:
+                selected_target = None
+                selected_kind = kind
+                break
+            selected_target = next(iter(targets))
+            selected_kind = kind
+            break
+
+        if selected_target is None:
             continue
-        target = next(iter(candidates))
-        if _groups_name_conflict(items, groups[target]):
+        if selected_kind == "puid" and any(_is_broad_format_name(record.name) for record in items):
             continue
-        aliases[group_key] = target
-        if _groups_have_asymmetric_version_signal(items, groups[target]):
+        if _groups_name_conflict(items, groups[selected_target]):
+            continue
+        aliases[group_key] = selected_target
+        if _groups_have_asymmetric_version_signal(items, groups[selected_target]):
             alias_confidence[group_key] = {
                 "confidence": "heuristic",
                 "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
@@ -397,16 +428,100 @@ def _safe_claimed_strong_identifier_aliases(
     return aliases, alias_confidence
 
 
+def _preferred_record_for_key(items: list[RawFormatRecord], key: tuple[str, str]) -> RawFormatRecord:
+    """Prefer metadata from the authority that owns the canonical key."""
+    kind, value = key
+    for record in items:
+        if any(identifier.kind == kind and identifier.value == value and identifier.verified for identifier in record.identifiers):
+            return record
+    return items[0]
+
+
+def _source_ref(record: RawFormatRecord) -> dict[str, Any]:
+    cross_references = [
+        {"kind": identifier.kind, "value": identifier.value}
+        for identifier in record.identifiers
+        if not identifier.verified
+    ]
+    ref: dict[str, Any] = {
+        "source_id": record.source_id,
+        "source_type": record.source_type,
+        "source_record_id": record.source_record_id,
+        "urls": record.urls,
+    }
+    if cross_references:
+        ref["identifier_cross_references"] = cross_references
+    return ref
+
+
+def _append_source_ref(cf: CanonicalFormat, ref: dict[str, Any]) -> None:
+    source_key = (str(ref.get("source_id") or ""), str(ref.get("source_record_id") or ""))
+    for existing in cf.source_records:
+        existing_key = (str(existing.get("source_id") or ""), str(existing.get("source_record_id") or ""))
+        if existing_key != source_key:
+            continue
+        for key in ("relationship", "evidence_scope", "related_puids", "identifier_cross_references"):
+            if ref.get(key) is not None:
+                existing[key] = ref[key]
+        return
+    cf.source_records.append(ref)
+
+
+def _attach_explicit_puid_source_relationships(
+    canonical: list[CanonicalFormat],
+    records: list[RawFormatRecord],
+) -> None:
+    """Attach source records to the PUIDs they explicitly cross-reference.
+
+    This is evidence linkage, not identity collapse. A LOC range record that
+    explicitly cites fmt/14..fmt/17 can therefore contribute approved LOC
+    criterion claims to those PUID assessments while retaining its own LOC
+    canonical record and identifier.
+    """
+    owners: dict[str, CanonicalFormat] = {}
+    for cf in canonical:
+        for claim in cf.identifier_claims:
+            if claim.get("kind") == "puid" and claim.get("verified"):
+                owners[str(claim.get("value"))] = cf
+
+    for record in records:
+        puids = sorted({
+            identifier.value
+            for identifier in record.identifiers
+            if identifier.kind == "puid" and not identifier.verified and identifier.value in owners
+        })
+        if not puids:
+            continue
+        multi = len(puids) > 1
+        for puid in puids:
+            target = owners[puid]
+            # For a single copied PUID, preserve the existing version-conflict
+            # guard. Multi-PUID authority records deliberately describe a range
+            # or family and are linked with explicit scope metadata instead.
+            if not multi and _names_conflict(record.name, target.preferred_name):
+                continue
+            if not multi and _is_broad_format_name(record.name):
+                continue
+            ref = _source_ref(record)
+            ref.update({
+                "relationship": "explicit_puid_cross_reference",
+                "evidence_scope": "multi_puid_source_record" if multi else "exact_puid_cross_reference",
+                "related_puids": puids,
+            })
+            _append_source_ref(target, ref)
+
+
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
     rules = identifier_rules or load_identifier_rules()
     strong_order = strong_identifier_order(rules)
     strong_kinds = strong_identifier_kinds(rules)
+    record_list = list(records)
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
     alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
     record_keys: dict[int, tuple[str, str]] = {}
 
-    for record in records:
+    for record in record_list:
         key = strongest_key(record, strong_kinds=strong_order)
         record_keys[id(record)] = key
         groups[key].append(record)
@@ -417,7 +532,10 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
     for weak_key, target_key in _safe_weak_aliases(groups, strong_kinds=strong_kinds).items():
         alias_keys.setdefault(weak_key, target_key)
 
-    claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds)
+    claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(
+        groups,
+        strong_order=strong_order,
+    )
     for claimed_key, target_key in claimed_aliases.items():
         existing_target = alias_keys.get(claimed_key)
         if existing_target is None or existing_target == claimed_key:
@@ -432,18 +550,26 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
 
     canonical: list[CanonicalFormat] = []
     for key, items in collapsed.items():
-        name = next((r.name for r in items if r.name), None) or key[1]
+        preferred = _preferred_record_for_key(items, key)
+        name = preferred.name or next((r.name for r in items if r.name), None) or key[1]
         cf = CanonicalFormat(
             canonical_id=canonical_id_for(key, name),
             preferred_name=name,
-            category=next((r.category for r in items if r.category), None),
-            description=next((r.description for r in items if r.description), None),
+            category=preferred.category or next((r.category for r in items if r.category), None),
+            description=preferred.description or next((r.description for r in items if r.description), None),
+            version=preferred.version or next((r.version for r in items if r.version), None),
             provenance={"created_at": utc_now_iso(), "reconciliation_key": {"kind": key[0], "value": key[1]}},
         )
         for r in items:
             original_key = record_keys.get(id(r), key)
             confidence = alias_confidence.get(original_key)
             for identifier in _all_identifiers(r):
+                # Unverified strong identifiers are cross-authority references,
+                # not exact identifiers of the canonical format. Keeping them in
+                # identifiers caused the same PUID to appear on many canonical
+                # records and split evidence across competing identities.
+                if identifier.kind in strong_kinds and not identifier.verified:
+                    continue
                 claim_confidence = None
                 confidence_reason = None
                 if confidence and identifier.kind in strong_kinds and not identifier.verified:
@@ -458,12 +584,7 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
                     confidence=claim_confidence,
                     confidence_reason=confidence_reason,
                 )
-            cf.source_records.append({
-                "source_id": r.source_id,
-                "source_type": r.source_type,
-                "source_record_id": r.source_record_id,
-                "urls": r.urls,
-            })
+            _append_source_ref(cf, _source_ref(r))
             policy = _institution_policy(r)
             if policy:
                 cf.institution_policy_overlays.append(policy)
@@ -478,4 +599,6 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
                 cf.trend.append(r.trend | {"source_id": r.source_id})
         cf.hazard_assessment = _hazard_assessment(cf)
         canonical.append(cf)
+
+    _attach_explicit_puid_source_relationships(canonical, record_list)
     return sorted(canonical, key=lambda x: x.preferred_name.lower())
