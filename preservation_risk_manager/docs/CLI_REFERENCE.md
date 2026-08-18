@@ -289,6 +289,27 @@ written so the failure can be inspected.
 
 See [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md).
 
+## `composite-risk`
+
+Deterministic composite obsolescence risk index for one format.
+
+```powershell
+python -m preservation_risk_manager composite-risk `
+  --registry-json ..\qnl_format_registry_builder\output\registry.json `
+  --format "fmt/354"
+```
+
+Optional:
+
+```text
+--institution <id>
+--risk-config <path>   override coefficients, tier bounds, weights, coverage floor
+--e-tool <0..1>        open-source tool availability; neutral 0.5 until an FPR source exists
+```
+
+Returns the score, tier (or suppression reasons), term-by-term breakdown, and a
+full input audit. See [`COMPOSITE_RISK_INDEX.md`](COMPOSITE_RISK_INDEX.md).
+
 ## `init-literature-inbox`
 
 Create the drop folder for Corpus B, with a README explaining what to drop.
@@ -479,3 +500,4 @@ Suppression reasons are documented in [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSI
 - [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
 - [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md)
 - [`LITERATURE_CORPUS.md`](LITERATURE_CORPUS.md)
+- [`COMPOSITE_RISK_INDEX.md`](COMPOSITE_RISK_INDEX.md)

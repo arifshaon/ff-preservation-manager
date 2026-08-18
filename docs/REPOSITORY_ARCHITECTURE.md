@@ -19,6 +19,18 @@ collect evidence
 
 The important architectural choice is separation of concerns. The registry builder produces and updates evidence. The preservation risk manager consumes that evidence and applies assessment frameworks. A storage backend such as MongoDB connects them, but MongoDB is not the application architecture itself.
 
+## Blueprint alignment
+
+The target end-state follows a neuro-symbolic blueprint: an LLM as a bounded
+reasoning/translation interface over authoritative preservation data ecosystems
+(PRONOM, NARA, LoC, Archivematica FPR, Wikidata), with deterministic scores and
+standardized preservation actions owned by code. PRONOM, NARA, and LoC are
+ingested; FPR and Wikidata are roadmap items. The layer-by-layer mapping, the
+composite obsolescence risk index, and the recorded deviations live in
+[`../preservation_risk_manager/docs/ARCHITECTURE.md`](../preservation_risk_manager/docs/ARCHITECTURE.md)
+and
+[`../preservation_risk_manager/docs/COMPOSITE_RISK_INDEX.md`](../preservation_risk_manager/docs/COMPOSITE_RISK_INDEX.md).
+
 ## Top-level modules
 
 ### `qnl_format_registry_builder`

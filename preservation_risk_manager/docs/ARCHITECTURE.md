@@ -13,6 +13,74 @@
 7. **Frameworks are versioned configuration.** Questions, evidence fields, answers, weights, and banding status are explicit.
 8. **AI is bounded and auditable.** Routing, fill-gap interpretation, and independent review are separate from deterministic truth.
 
+
+## Blueprint alignment (2026-08 architecture revision)
+
+The target architecture follows the neuro-symbolic blueprint *"LLM-Driven File
+Format Obsolescence Assessment and Migration Framework"*: an LLM operating as a
+bounded reasoning and translation interface over authoritative preservation data
+ecosystems, with deterministic scores and standardized actions owned by code.
+This section maps the blueprint's layers to this repository and records where —
+and why — the implementation deliberately deviates.
+
+### The five data ecosystems
+
+| Blueprint ecosystem | Role | Status here |
+| --- | --- | --- |
+| TNA PRONOM (PUIDs, signatures) | Identification anchor | **Ingested** (`pronom_registry` source; PUID-anchored canonical records; `source.currency` claims) |
+| NARA Digital Preservation Framework | Quantified baseline risk + action plans | **Ingested** (`nara_digital_preservation_framework` source; hazard assessments on the NARA scale; rubric-derived criterion claims) |
+| LoC Sustainability / FDDs | Seven sustainability criteria + narrative | **Ingested** (`loc_fdd_xml` source; the registry's `sustainability.*` criteria are exactly the LoC seven; narrative documents belong in the literature corpus) |
+| Archivematica FPR | Executable normalization/migration policy | **Planned** — the E_tool input and the migration-action layer depend on it |
+| Wikidata linked-data graph | Cross-registry identifier resolution | **Planned** — as an `IdentificationResolver` plugin behind the existing `FormatIdentificationPlugin` protocol |
+
+### Blueprint layers → modules
+
+| Blueprint layer | This repository |
+| --- | --- |
+| Entity Resolution Layer | `format_resolver.py` + `format_identification.py` (deterministic resolution, conservative normalization, bounded AI candidate fallback). Wikidata SPARQL fallback: planned plugin. |
+| Hybrid Retrieval & Data Fusion | Structured lookup through `RegistryReader`; unstructured retrieval through `literature_corpus.py` (Corpus B, BM25, citable page-attributed chunks) |
+| Mathematical risk module | `composite_risk.py` — the blueprint's composite obsolescence index, computed deterministically; see [`COMPOSITE_RISK_INDEX.md`](COMPOSITE_RISK_INDEX.md) |
+| Neuro-Symbolic Reasoning Engine | `ai/risk_analysis.py` (fill-gaps) and `ai/review.py` (independent review) — evidence-only, controlled answers, validated citations |
+| Structured Output Generator | JSON-schema-constrained provider responses (`_response_schema`) plus canonical result JSON from `request_api.py` |
+| Migration/action recommendation | `actions.py` + `policy_proposals.py` today (bounded proposals); FPR-backed target-format/tool/command layer: planned |
+| REST microservice facade | Planned thin HTTP wrapper over the `query-json` request executor (optional extra; the core stays dependency-free) |
+| Zero-shot unmapped formats | Existing pipeline composition: drop vendor/spec documentation into the literature-corpus inbox, link it as source-native evidence, and let bounded fill-gaps interpretation assess the LoC criteria — never free-form generation |
+
+### Deliberate deviations from the blueprint
+
+1. **The LLM never sees the composite score.** Blueprint Phase 3 injects the
+   calculated score into the LLM prompt. Here the score is computed and attached
+   entirely outside the AI boundary (`RISK_INTERPRETER_SYSTEM_PROMPT` forbids
+   use of scores). A score in the prompt anchors evidence interpretation and
+   turns independent review into rationalization of the number; the blueprint's
+   own stated goal — deterministic, mathematically grounded assessment without
+   black-box behavior — is better served by the stricter boundary.
+2. **Composite index and framework scoring coexist.** The blueprint's single
+   formula does not replace configurable framework scoring, completeness, and
+   band suppression; it is an additional advisory lens with its own explicit
+   suppression rules ("Unknown is not Low" applies to both).
+3. **Executable migration commands are curated policy, not model output.** When
+   the FPR-backed action layer lands, command strings come from reviewed policy
+   tables keyed by PUID; the LLM may select and explain among supplied options
+   but never composes shell commands.
+4. **Granularity mismatches are handled by identity aliasing plus version-aware
+   evidence, not only by family-worst-case inheritance.** Strong-identity
+   aliases already join PUID-, LoC- and NARA-anchored records, and evidence
+   interpretation distinguishes version-specific from family-wide facts. The
+   blueprint's conservative inherit-the-worst-variant rule is compatible and
+   can be layered onto family assessment where a version is unresolved.
+
+### Revision roadmap
+
+| # | Step | Status |
+| --- | --- | --- |
+| 1 | Harvesting + entity resolution (PRONOM/NARA/LoC) | Done (registry builder) |
+| 2 | Knowledge base + retrieval (Corpus A/B) | Done (`training_corpus.py`, `literature_corpus.py`) |
+| 3 | Mathematical risk module | Done (`composite_risk.py`) |
+| 4 | FPR ingestion → `E_tool` input + migration-action layer | Planned |
+| 5 | Wikidata cross-walk resolver plugin | Planned (fixes identifier fragmentation, e.g. PDF/A's unlinked NARA record) |
+| 6 | REST facade + scheduled source synchronization | Planned |
+
 ## End-to-end assessment flow
 
 ```text
@@ -45,6 +113,7 @@ scoring
        +--> evidence-gap diagnosis
        +--> remediation planning
        +--> local posture / policy context
+       +--> composite obsolescence risk index (advisory, deterministic)
        |
        v
 canonical result JSON

@@ -51,6 +51,7 @@ The risk engine does not need to know whether the upstream observation came from
 | `frameworks.py` | Parses/validates framework JSON: questions, answers, domains, guidance, applicability, evidence maps, weights, scales and calibration/banding state. |
 | `answer_derivation.py` | Maps framework-declared evidence fields to controlled answers. Handles missing evidence, unknown values and conservative conflict resolution. |
 | `scoring.py` | Calculates weighted scores, completeness, analysis status, suppression reasons and overall band when permitted. |
+| `composite_risk.py` | Deterministic composite obsolescence risk index (NARA baseline + weighted LoC sustainability + temporal term). Advisory, additive, outside the AI boundary. See [`COMPOSITE_RISK_INDEX.md`](COMPOSITE_RISK_INDEX.md). |
 | `question_assessment.py` | Lists/filter question catalog and performs targeted question/domain/content-type assessment. |
 | `posture.py` | Computes local institutional risk posture from analysed band plus separately supplied readiness/exposure context. |
 | `actions.py` | Deterministic preservation-action context/logic used by local decision workflows. |
