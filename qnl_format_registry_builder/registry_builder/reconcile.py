@@ -347,12 +347,13 @@ def _safe_claimed_strong_identifier_aliases(
             continue
         if _groups_name_conflict(items, groups[selected_target]):
             continue
-        aliases[group_key] = selected_target
+        # A copied strong identifier is not sufficient to collapse an
+        # unversioned/family-like record into a version-specific authority
+        # record. Keep asymmetric-version cases separate and let the explicit
+        # relationship pass record them as reviewable provenance instead.
         if _groups_have_asymmetric_version_signal(items, groups[selected_target]):
-            alias_confidence[group_key] = {
-                "confidence": "heuristic",
-                "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
-            }
+            continue
+        aliases[group_key] = selected_target
     return aliases, alias_confidence
 
 
@@ -436,10 +437,13 @@ def _attach_explicit_puid_source_relationships(canonical: list[CanonicalFormat],
                 continue
             if not multi and _is_broad_format_name(record.name):
                 continue
+            evidence_scope = "multi_puid_source_record" if multi else "exact_puid_cross_reference"
+            if not multi and _names_have_asymmetric_version_signal(record.name, target.preferred_name):
+                evidence_scope = "version_ambiguous_puid_cross_reference"
             ref = _source_ref(record)
             ref.update({
                 "relationship": "explicit_puid_cross_reference",
-                "evidence_scope": "multi_puid_source_record" if multi else "exact_puid_cross_reference",
+                "evidence_scope": evidence_scope,
                 "related_puids": puids,
             })
             _append_source_ref(target, ref)
