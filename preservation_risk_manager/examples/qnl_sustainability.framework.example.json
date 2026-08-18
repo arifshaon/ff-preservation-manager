@@ -1,11 +1,11 @@
 {
   "framework_id": "qnl_sustainability_example",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "label": "QNL Sustainability Risk Example",
   "unknown_answer_id": "unknown",
   "scale": {
     "direction": "higher_is_risk",
-    "min_completeness_for_band": 0.67,
+    "min_completeness_for_band": 0.6666666666666666,
     "bands": [
       {
         "band": "Low",
@@ -82,7 +82,9 @@
       "weight": 2,
       "evidence_fields": [
         "sustainability.external_dependencies",
-        "technical.container_complexity"
+        "technical.container_complexity",
+        "technical.hardware_dependency",
+        "technical.plugin_script_dependency"
       ],
       "answers": [
         {
