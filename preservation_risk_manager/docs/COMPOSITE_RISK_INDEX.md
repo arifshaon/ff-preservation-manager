@@ -96,6 +96,12 @@ python -m preservation_risk_manager composite-risk \
 `low_max`, `high_min`, `min_evidenced_criteria`, and per-criterion `weights`
 (unlisted criteria keep the equal-share default).
 
+## Planned revision
+
+The component-design revision (removing `R_NARA` from the sum and retaining it as an
+independent comparator) is specified in
+[`COMPOSITE_RISK_IMPLEMENTATION_PLAN.md`](COMPOSITE_RISK_IMPLEMENTATION_PLAN.md).
+
 ## Known gaps, in priority order
 
 1. **`E_tool` has no evidence source.** Archivematica FPR ingestion (roadmap)

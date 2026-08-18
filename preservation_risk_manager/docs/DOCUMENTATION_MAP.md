@@ -32,6 +32,7 @@ For repository-wide architecture/storage, also read:
 | Build a fine-tuning corpus from registry evidence | [`TRAINING_CORPUS.md`](TRAINING_CORPUS.md) |
 | Index dropped PDFs/OCR text for criteria no registry covers | [`LITERATURE_CORPUS.md`](LITERATURE_CORPUS.md) |
 | Compute the composite obsolescence risk index | [`COMPOSITE_RISK_INDEX.md`](COMPOSITE_RISK_INDEX.md) |
+| Implement the component-design scorer end to end | [`COMPOSITE_RISK_IMPLEMENTATION_PLAN.md`](COMPOSITE_RISK_IMPLEMENTATION_PLAN.md) |
 | Understand each Python module | [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md) |
 | Add/map a new evidence source | [`../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
 
@@ -104,6 +105,7 @@ ARCHITECTURE.md
 | `PRESERVATION_RISK_QUESTIONS.md` | 8 domains / 22 stable question IDs and applicability. |
 | `RISK_MONITORING_AND_REPORTING.md` | Periodic source refresh, watchlists, Top 10/high-risk/evidence-gap reports and external reporting service patterns. |
 | `COMPOSITE_RISK_INDEX.md` | Deterministic composite obsolescence risk index: formula, data grounding, governance, calibration gaps. |
+| `COMPOSITE_RISK_IMPLEMENTATION_PLAN.md` | End-to-end build plan for the component-design scorer: stage map, data mapping, pseudocode, calibration, tests. |
 | `TRAINING_CORPUS.md` | Corpus A: leakage-tiered fine-tuning corpus built from registry evidence. |
 | `LITERATURE_CORPUS.md` | Corpus B: drop-folder ingestion of PDFs/OCR text into a citable retrieval index. |
 
