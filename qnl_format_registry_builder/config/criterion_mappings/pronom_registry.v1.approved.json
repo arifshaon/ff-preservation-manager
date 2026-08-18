@@ -1,14 +1,14 @@
 {
   "source_type": "pronom_registry",
-  "mapping_version": "2026-08-16-approved",
+  "mapping_version": "2026-08-18-approved-disclosure-semantics",
   "criteria_version": "v1",
   "native_vocabulary": "pronom_github_json",
   "mapping_mode": "manual_approved",
   "review_status": "approved",
   "claim_review_status": "approved",
   "decided_by": "QNL DCPA",
-  "decided_at": "2026-08-16",
-  "notes": "Approved PRONOM mapping for production-style criterion-claim testing. The rule set intentionally matches the PRONOM draft mapping; the difference is approval metadata and accepted rule status. PUID and PRONOM URL presence are identity/registry-location evidence only; they must not be used to infer disclosure or specification quality.",
+  "decided_at": "2026-08-18",
+  "notes": "Approved PRONOM mapping for production-style criterion-claim testing. PUID and PRONOM URL presence are identity/registry-location evidence only; they must not be used to infer disclosure or specification quality. PRONOM formatDisclosure=None is treated as unknown rather than undocumented because it is absence of a positive PRONOM disclosure assertion and must not override explicit documentation evidence from other authorities.",
   "excluded_from_criteria": [
     {
       "field": "formatRisk",
@@ -50,12 +50,12 @@
         "full": "public_specification",
         "Partial": "partial_specification",
         "partial": "partial_specification",
-        "None": "undocumented",
-        "none": "undocumented",
+        "None": "unknown",
+        "none": "unknown",
         "Unknown": "unknown",
         "unknown": "unknown"
       },
-      "rationale": "PRONOM formatDisclosure is the only current PRONOM field mapped to disclosure evidence. It remains source evidence, not a final risk score."
+      "rationale": "PRONOM formatDisclosure is source evidence about PRONOM's recorded disclosure level. Full and Partial provide usable positive assertions. None is treated conservatively as unknown rather than as proof that no specification or documentation exists, so explicit documentation evidence from another authority is not turned into a false conflict."
     },
     {
       "id": "pronom.currency.from_last_updated_date.v1",
