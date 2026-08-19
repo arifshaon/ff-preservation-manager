@@ -43,7 +43,7 @@ SELECT DISTINCT ?format WHERE {
   ?format wdt:P31/wdt:P279* wd:Q235557 .
   __AFTER_FILTER__
 }
-ORDER BY STR(?format)
+ORDER BY ?format
 LIMIT __LIMIT__
 """.strip()
     ),
@@ -54,7 +54,7 @@ SELECT DISTINCT ?format WHERE {
   ?format wdt:P2748 ?puid .
   __AFTER_FILTER__
 }
-ORDER BY STR(?format)
+ORDER BY ?format
 LIMIT __LIMIT__
 """.strip()
     ),
@@ -474,7 +474,8 @@ class WikidataSparqlAdapter(SourceAdapter):
                 row.get("qid", "")
                 for row in rows
                 if _QID_RE.fullmatch(row.get("qid", ""))
-            }
+            },
+            key=lambda value: int(value[1:]),
         )
         if not qids:
             return None
