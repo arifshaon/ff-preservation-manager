@@ -1,0 +1,39 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "file",
+    "path": "output/registry_store"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings/nara_digital_preservation_framework.v1.approved.json",
+    "include_drafts": false,
+    "scope": "all",
+    "notes": "NARA-only local run: file storage, no MongoDB. Applies the approved NARA rubric mappings."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": []}
+  },
+  "sources": [
+    {
+      "id": "nara_digital_preservation_framework",
+      "type": "nara_digital_preservation_framework",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "published_csv",
+      "release_mode": "pinned",
+      "release_date": "20260320",
+      "github_ref": "master",
+      "notes": "Drop the two release CSVs in input/nara_digital_preservation_framework/ to run without the network; otherwise the pinned release is fetched from raw.githubusercontent.com."
+    }
+  ]
+}
