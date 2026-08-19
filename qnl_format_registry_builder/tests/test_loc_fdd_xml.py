@@ -45,7 +45,9 @@ def test_loc_fdd_xml_extracts_records_from_zip_snapshot(tmp_path):
     assert record.name == "PDF, Portable Document Format"
     assert record.category == "Text"
     assert record.loc_ids == ["fdd000030"]
-    assert record.puids == ["fmt/18"]
+    # fmt/18 appears only in a prose note, so it is evidence, not an equivalence.
+    assert record.puids == []
+    assert [(c.value, c.endorsed) for c in record.identifiers if c.kind == "puid"] == [("fmt/18", False)]
     assert record.wikidata_ids == ["Q42332"]
     assert record.extensions == ["pdf"]
     assert record.urls["loc"] == "https://www.loc.gov/preservation/digital/formats/fddXML/fdd000030.xml"
@@ -267,3 +269,101 @@ def test_loc_fdd_xml_temporary_uri_snapshot_is_deleted_after_extract(tmp_path):
     assert "xml_text" in records[0].raw
     assert xml_path.exists()
     assert not Path(snapshots[0].local_path).exists()
+
+
+SIGNATURE_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<fdd>
+  <fddID>fdd000001</fddID>
+  <title>WAVE Audio File Format</title>
+  <category>file-format</category>
+  <externalSignature>
+    <signatureType>PUID</signatureType>
+    <sigValue>fmt/6</sigValue>
+  </externalSignature>
+  <note>See https://www.nationalarchives.gov.uk/PRONOM/fmt/6 for WAVE.</note>
+</fdd>
+"""
+
+# LOC names a PUID here precisely in order to deny the equivalence.
+DISCLAIMER_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<fdd>
+  <fddID>fdd000002</fddID>
+  <title>WAVE Audio File Format with LPCM audio</title>
+  <category>file-format</category>
+  <note>Pronom's fmt/141 covers PCMWAVFORMAT but this is not precisely the same as LPCM WAV.</note>
+</fdd>
+"""
+
+
+def _extract_one(tmp_path, name, xml):
+    archive = tmp_path / "fddXML.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(f"fddXML/{name}", xml)
+    adapter = LocFddXmlAdapter(
+        {"id": "loc_fdd_xml", "retrieval_mode": "fdd_xml_zip", "progress": False}, tmp_path
+    )
+    return normalize_record(adapter.extract([_zip_snapshot(archive)])[0])
+
+
+def test_structured_signature_puid_is_endorsed(tmp_path):
+    record = _extract_one(tmp_path, "fdd000001.xml", SIGNATURE_XML)
+
+    assert record.puids == ["fmt/6"]
+    claims = [c for c in record.identifiers if c.kind == "puid"]
+    assert [(c.value, c.endorsed) for c in claims] == [("fmt/6", True)]
+
+
+def test_puid_named_only_to_deny_the_equivalence_is_not_endorsed(tmp_path):
+    record = _extract_one(tmp_path, "fdd000002.xml", DISCLAIMER_XML)
+
+    assert record.puids == []
+    claims = [c for c in record.identifiers if c.kind == "puid"]
+    assert [(c.value, c.endorsed) for c in claims] == [("fmt/141", False)]
+    # The mention is still visible to a reviewer.
+    assert record.evidence[0]["puids_mentioned_not_endorsed"] == ["fmt/141"]
+
+
+def test_unendorsed_puid_does_not_bridge_but_stays_as_evidence(tmp_path):
+    from registry_builder.models import RawFormatRecord
+    from registry_builder.reconcile import reconcile
+
+    loc = _extract_one(tmp_path, "fdd000002.xml", DISCLAIMER_XML)
+    pronom = normalize_record(RawFormatRecord(
+        source_id="pronom_registry",
+        source_type="pronom_registry",
+        source_record_id="fmt/141",
+        name="Waveform Audio (PCMWAVEFORMAT)",
+        puids=["fmt/141"],
+    ))
+
+    registry = reconcile([loc, pronom])
+    by_id = {fmt.canonical_id: fmt for fmt in registry}
+
+    assert len(registry) == 2, "a disclaimed PUID must not merge the two records"
+    assert "puid-fmt-141" in by_id
+    loc_canonical = by_id["loc-fdd000002"]
+    # Not presented as one of this format's identifiers...
+    assert "fmt/141" not in (loc_canonical.identifiers.get("puid") or [])
+    # ...but retained as a claim, flagged, so the mention is auditable.
+    claim = next(c for c in loc_canonical.identifier_claims if c["value"] == "fmt/141")
+    assert claim["endorsed"] is False
+
+
+def test_endorsed_puid_still_bridges_to_pronom(tmp_path):
+    from registry_builder.models import RawFormatRecord
+    from registry_builder.reconcile import reconcile
+
+    loc = _extract_one(tmp_path, "fdd000001.xml", SIGNATURE_XML)
+    pronom = normalize_record(RawFormatRecord(
+        source_id="pronom_registry",
+        source_type="pronom_registry",
+        source_record_id="fmt/6",
+        name="Waveform Audio",
+        puids=["fmt/6"],
+    ))
+
+    registry = reconcile([loc, pronom])
+
+    assert len(registry) == 1
+    assert registry[0].canonical_id == "puid-fmt-6"
+    assert sorted({r["source_id"] for r in registry[0].source_records}) == ["loc_fdd_xml", "pronom_registry"]

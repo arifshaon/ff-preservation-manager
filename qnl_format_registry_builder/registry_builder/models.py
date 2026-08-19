@@ -25,6 +25,15 @@ class Identifier:
     source: str
     verified: bool = False
     source_record_id: str | None = None
+    # Whether the source asserts this identifier firmly enough to reconcile on.
+    # An unendorsed claim is still recorded as evidence but never bridges two
+    # records together. LOC, for example, states its PRONOM equivalences in a
+    # structured <sigValue> element while its prose notes may *mention* a PUID
+    # precisely in order to say it is NOT the same format
+    # ("Pronom's fmt/141 covers PCMWAVFORMAT but this is not precisely the same
+    # as LPCM WAV"). Scraping such a mention and treating it as an equivalence
+    # asserts a link the authority explicitly refused to make.
+    endorsed: bool = True
 
 
 @dataclass
@@ -157,6 +166,7 @@ class CanonicalFormat:
         source_record_id: str | None = None,
         confidence: str | None = None,
         confidence_reason: str | None = None,
+        endorsed: bool = True,
     ) -> None:
         if not value:
             return
@@ -164,9 +174,13 @@ class CanonicalFormat:
         value = str(value).strip()
         if not kind or not value:
             return
-        values = self.identifiers.setdefault(kind, [])
-        if value not in values:
-            values.append(value)
+        if endorsed:
+            # Unendorsed claims stay out of the aggregated identifier map:
+            # listing them there would read as "this format has that PUID".
+            # They remain in identifier_claims as evidence.
+            values = self.identifiers.setdefault(kind, [])
+            if value not in values:
+                values.append(value)
         claim = {
             "kind": kind,
             "value": value,
@@ -174,6 +188,8 @@ class CanonicalFormat:
             "verified": bool(verified),
             "source_record_id": source_record_id,
         }
+        if not endorsed:
+            claim["endorsed"] = False
         if confidence:
             claim["confidence"] = confidence
         if confidence_reason:

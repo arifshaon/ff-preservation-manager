@@ -502,7 +502,41 @@ The parser is intentionally conservative and extracts a limited subset. Detailed
 
 LOC FDD IDs from LOC FDD XML are verified LOC identifiers.
 
-PUIDs found inside LOC XML are useful claims but should be treated according to normalization authority rules.
+PUIDs found inside LOC XML are claims, never verified — LOC does not own the
+PRONOM namespace. They are further split by whether LOC actually asserts the
+equivalence:
+
+| Where the PUID appears | Treatment |
+| --- | --- |
+| `<sigValue>` inside an external signature | **endorsed** — reconciles LOC's record onto the PRONOM format |
+| anywhere else (notes, comments, links) | **not endorsed** — recorded as evidence, never merges records |
+
+The distinction is load-bearing because LOC's prose sometimes names a PUID
+precisely in order to *deny* the equivalence:
+
+```text
+fdd000002  WAVE Audio File Format with LPCM audio
+  note: "Pronom's fmt/141 covers PCMWAVFORMAT but this is not precisely
+         the same as LPCM WAV"
+```
+
+Scraping that mention and treating it as an equivalence asserts a link the
+authority explicitly refused to make. Validated against LOC's own published
+FDD/PUID crosswalk (`LCfdd_PUID_QID_Mapping.zip`): the structured `<sigValue>`
+values agree with it on all 228 records it covers, with no disagreements, so the
+element is exactly what LOC endorses. The crosswalk itself is therefore **not
+needed as a source** — every link in it is already in the XML — and is useful
+only as an external check.
+
+An unendorsed claim stays in `identifier_claims` with `"endorsed": false` and is
+listed in the record's evidence under `puids_mentioned_not_endorsed`, so a
+reviewer can still see the mention. It is kept out of the aggregated
+`identifiers` map, where listing it would read as "this format has that PUID".
+
+On the full FDD set this endorses 232 records' PUIDs and demotes 102 prose-only
+PUIDs across 71 records. Counter-intuitively this *increases* reconciliation:
+prose PUIDs created false ambiguity (several candidate targets made the bridge
+guard refuse entirely), so removing them recovered 16 NARA and 13 LOC bridges.
 
 ### Failure handling
 

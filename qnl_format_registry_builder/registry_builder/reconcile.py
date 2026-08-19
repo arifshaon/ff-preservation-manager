@@ -410,6 +410,10 @@ def _safe_claimed_strong_identifier_aliases(
                 for identifier in _all_identifiers(record):
                     if identifier.kind not in strong_kinds or identifier.verified:
                         continue
+                    if not identifier.endorsed:
+                        # Recorded as evidence, but the source did not assert it
+                        # as an equivalence, so it must not merge two records.
+                        continue
                     targets = verified_targets.get((identifier.kind, identifier.value), set())
                     if len(targets) == 1:
                         candidates.update(targets)
@@ -491,6 +495,7 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
                     source_record_id=identifier.source_record_id,
                     confidence=claim_confidence,
                     confidence_reason=confidence_reason,
+                    endorsed=identifier.endorsed,
                 )
             cf.source_records.append({
                 "source_id": r.source_id,

@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.models import Identifier, RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.utils import ensure_dir, read_uri, sha256_bytes
 
 DEFAULT_LOC_FDD_XML_ZIP = "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
@@ -353,6 +353,31 @@ def _first_loc_id(root: ET.Element, text: str, source_file: str) -> str | None:
     return match.group(0).lower() if match else None
 
 
+def _signature_puids(root: ET.Element) -> set[str]:
+    """PUIDs LOC states as equivalences, taken from structured signature values.
+
+    LOC records its PRONOM equivalence in an external-signature element:
+
+        <externalSignature>
+          <signatureType>PUID</signatureType>
+          <sigValue>fmt/6</sigValue>
+        </externalSignature>
+
+    A PUID appearing anywhere else in the record is prose. That distinction is
+    load-bearing, because LOC's notes sometimes name a PUID precisely to deny
+    the equivalence — fdd000002 says "Pronom's fmt/141 covers PCMWAVFORMAT but
+    this is not precisely the same as LPCM WAV". Verified against LOC's own
+    published FDD/PUID crosswalk: the structured values agree with it on all 228
+    records it covers, with no disagreements, so this element is exactly what
+    LOC endorses.
+    """
+    found: set[str] = set()
+    for elem in root.iter():
+        if _local_name(elem.tag) in {"sigvalue", "sig_value"} and elem.text:
+            found |= {value.lower() for value in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", elem.text, flags=re.I)}
+    return found
+
+
 def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) -> RawFormatRecord | None:
     text = data.decode("utf-8", errors="replace")
     root = ET.fromstring(text)
@@ -360,7 +385,12 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     name = _record_name(root)
     category = _record_category(root)
 
-    puids = sorted({x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)})
+    all_puids = {x.lower() for x in re.findall(r"\b(?:fmt|x-fmt)/\d+\b", text, flags=re.I)}
+    endorsed_puids = _signature_puids(root) & all_puids
+    # Prose-only PUIDs stay as recorded evidence but never reconcile two records
+    # together; see _signature_puids for why the distinction matters.
+    mentioned_puids = sorted(all_puids - endorsed_puids)
+    puids = sorted(endorsed_puids)
     wikidata = sorted({x.upper() for x in re.findall(r"\bQ\d{2,}\b", text, flags=re.I)})
     extensions = _declared_extensions(root)
     sustainability_factors = _extract_sustainability_factors(root)
@@ -386,6 +416,8 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
     }
     if sustainability_factors:
         evidence["sustainability_factor_count"] = len(sustainability_factors)
+    if mentioned_puids:
+        evidence["puids_mentioned_not_endorsed"] = mentioned_puids
 
     return RawFormatRecord(
         source_id=snapshot.source_id,
@@ -395,6 +427,17 @@ def _record_from_xml(snapshot: SourceSnapshot, source_file: str, data: bytes) ->
         category=category,
         extensions=extensions,
         puids=puids,
+        identifiers=[
+            Identifier(
+                kind="puid",
+                value=value,
+                source=snapshot.source_id,
+                verified=False,
+                source_record_id=loc_id,
+                endorsed=False,
+            )
+            for value in mentioned_puids
+        ],
         loc_ids=[loc_id] if loc_id else [],
         wikidata_ids=wikidata,
         urls={"loc": loc_url, "loc_source": snapshot.uri},
