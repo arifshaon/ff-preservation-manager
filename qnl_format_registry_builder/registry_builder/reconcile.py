@@ -373,28 +373,62 @@ def _safe_claimed_strong_identifier_aliases(
 
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
     alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
-    for group_key, items in groups.items():
-        candidates: set[tuple[str, str]] = set()
-        for record in items:
-            for identifier in _all_identifiers(record):
-                if identifier.kind not in strong_kinds or identifier.verified:
-                    continue
-                targets = verified_targets.get((identifier.kind, identifier.value), set())
-                if len(targets) == 1:
-                    candidates.update(targets)
-        candidates.discard(group_key)
-        if len(candidates) != 1:
-            continue
-        target = next(iter(candidates))
-        if _groups_name_conflict(items, groups[target]):
-            continue
-        aliases[group_key] = target
-        if _groups_have_asymmetric_version_signal(items, groups[target]):
-            alias_confidence[group_key] = {
-                "confidence": "heuristic",
-                "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
-            }
-    return aliases, alias_confidence
+
+    def _resolve(key: tuple[str, str]) -> tuple[str, str]:
+        """Follow the alias chain to the group a key ultimately belongs to."""
+        seen: set[tuple[str, str]] = set()
+        while key in aliases and key not in seen:
+            seen.add(key)
+            key = aliases[key]
+        return key
+
+    # Bridging is resolved to a fixed point rather than in one pass.
+    #
+    # A record may carry several copied strong identifiers — NARA cites both a
+    # PUID and a LOC FDD ID for the same format. Counting the raw targets makes
+    # such a record look ambiguous the moment a second authority is ingested,
+    # because its two claims name two verified groups. But when those groups
+    # themselves merge, the claims agree: they describe one format. Resolving
+    # candidates through the aliases established so far, and repeating until
+    # nothing new bridges, lets that agreement be seen.
+    #
+    # Without this, adding a source can *undo* a correct merge from an earlier
+    # run: ingesting LOC detached ~260 NARA records that PRONOM had already
+    # bridged. Ingestion must be monotonic — a new authority may add evidence,
+    # never silently fragment what is already reconciled.
+    #
+    # The safety property is unchanged: every step still bridges only to a
+    # single verified group whose names do not conflict, and transitivity is
+    # sound because each alias in the chain was established under that rule.
+    while True:
+        progressed = False
+        for group_key, items in groups.items():
+            if group_key in aliases:
+                continue
+            candidates: set[tuple[str, str]] = set()
+            for record in items:
+                for identifier in _all_identifiers(record):
+                    if identifier.kind not in strong_kinds or identifier.verified:
+                        continue
+                    targets = verified_targets.get((identifier.kind, identifier.value), set())
+                    if len(targets) == 1:
+                        candidates.update(targets)
+            candidates = {_resolve(candidate) for candidate in candidates}
+            candidates.discard(_resolve(group_key))
+            if len(candidates) != 1:
+                continue
+            target = next(iter(candidates))
+            if _groups_name_conflict(items, groups[target]):
+                continue
+            aliases[group_key] = target
+            progressed = True
+            if _groups_have_asymmetric_version_signal(items, groups[target]):
+                alias_confidence[group_key] = {
+                    "confidence": "heuristic",
+                    "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
+                }
+        if not progressed:
+            return aliases, alias_confidence
 
 
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:

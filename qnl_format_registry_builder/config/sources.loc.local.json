@@ -1,0 +1,37 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "file",
+    "path": "output/registry_store"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v1.approved.json",
+    "include_drafts": false,
+    "scope": "all",
+    "notes": "LoC-only local run against the same file store as the NARA and PRONOM runs, so reconciliation attaches LOC FDD identity and sustainability evidence to the existing canonicals."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": []}
+  },
+  "sources": [
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "fdd_xml_zip",
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+      "notes": "Drop fddXML.zip in input/loc_fdd_xml/ to run without the network; otherwise the official ZIP is fetched from loc.gov."
+    }
+  ]
+}
