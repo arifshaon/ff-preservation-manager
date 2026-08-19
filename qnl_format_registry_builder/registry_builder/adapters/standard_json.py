@@ -30,7 +30,12 @@ class StandardJsonAdapter(SourceAdapter):
 
     type_name = "standard_json"
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop standard-JSON package file(s) here ({\"records\": [...]}). Use "
+        "manifest.json or per-file sidecars to record publication dates."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
         snapshots: list[SourceSnapshot] = []
         for uri in self.config.get("uris", []):
             suffix = Path(uri.split("?")[0]).suffix or ".json"

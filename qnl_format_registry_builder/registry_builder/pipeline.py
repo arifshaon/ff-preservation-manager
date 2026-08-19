@@ -670,11 +670,13 @@ def run_pipeline(
             if offline:
                 source_config["offline"] = True
             # One drop-folder convention for every source: <input_root>/<source_id>/.
-            # Relative input_root resolves against the config file, like other
+            # The default "input/" is CWD-relative like the workdir/out defaults;
+            # an explicit input_root resolves against the config file, like other
             # config-referenced paths.
+            explicit_input_root = config.get("input_root")
             source_config.setdefault(
                 "input_root",
-                str(resolve_config_path(config_path, config.get("input_root") or "input")),
+                str(resolve_config_path(config_path, explicit_input_root)) if explicit_input_root else "input",
             )
             adapter = adapter_cls(source_config, workdir)
             _emit_progress(progress, "source_acquire_started", source_id=source_id, source_type=source_type)

@@ -180,7 +180,13 @@ class QnlInstitutionFormatEvidenceAdapter(SourceAdapter):
 
     type_name = "qnl_institution_format_evidence"
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop institution format-evidence CSV or JSON package file(s) here. "
+        "Record when the evidence was compiled in manifest.json as "
+        "{\"published_at\": \"YYYY-MM-DD\"}."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
         uris: list[str] = []
         for item in self.config.get("local_files", []):
             uris.append(str(item.get("path") if isinstance(item, dict) else item))

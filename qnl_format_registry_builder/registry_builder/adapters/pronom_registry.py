@@ -306,7 +306,14 @@ class PronomRegistryAdapter(SourceAdapter):
                 self._progress(f"Acquired {index}/{total} PRONOM JSON records")
         return snapshots
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop the PRONOM GitHub archive ZIP here (e.g. develop.zip from "
+        "github.com/digital-preservation/pronom), or individual PRONOM JSON "
+        "records. A manifest.json with {\"published_at\": ..., \"edition\": ...} "
+        "records which PRONOM release the archive represents."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
         mode = self._retrieval_mode()
         if mode in {"github_archive", "archive", "zip"} or self.config.get("archive_url"):
             return self._acquire_archive()

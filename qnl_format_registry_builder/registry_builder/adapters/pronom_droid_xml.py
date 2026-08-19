@@ -20,7 +20,14 @@ class PronomDroidXmlAdapter(SourceAdapter):
 
     type_name = "pronom_droid_xml"
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop DROID signature file XML(s) here (e.g. "
+        "DROID_SignatureFile_V120.xml). The signature version in the filename "
+        "is the edition; record its release date in manifest.json if you want "
+        "data age reported."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
         return [self.acquire_uri_snapshot(uri, suffix=".xml") for uri in self.config.get("uris", [])]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:

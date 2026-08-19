@@ -20,9 +20,9 @@ The distinction matters for audit and reproducibility. A cached snapshot proves 
 
 ## The acquisition policy (one convention for every source)
 
-Migrated adapters (`wikidata_sparql`, `nara_digital_preservation_framework`, and
-any new adapter that implements `network_acquire()`) follow one decision order,
-implemented once in the adapter base class:
+Every shipped adapter follows one decision order, implemented once in the
+adapter base class (new adapters get it by implementing `network_acquire()`
+instead of `acquire()`):
 
 ```text
 1. Files exist in input/<source_id>/  ->  use them; do NOT contact the network.
@@ -51,9 +51,10 @@ python -m registry_builder init-source-inbox --config config/sources.example.jso
 
 Folders are only created for sources whose adapter actually reads dropped
 files, so a file can never be silently ignored in a folder this command made.
-`input_root` in the pipeline config moves the root (default `input/`, resolved
-relative to the config file); `input_dir` on a single source overrides its
-folder.
+The default root is `input/` in the directory you run from — the same
+convention as the `work`/`out` defaults. An explicit `input_root` in the
+pipeline config resolves relative to the config file, like every other
+config-referenced path; `input_dir` on a single source overrides its folder.
 
 ### Provenance for dropped files
 
@@ -67,6 +68,36 @@ is. Every snapshot therefore also carries `source_published_at`, `edition`, and
   (`{"published_at": ..., "edition": ..., "files": {"<name>": {...}}}`) or a
   per-file `<name>.meta.json` sidecar. Sidecar beats per-file manifest entry
   beats folder-level manifest.
+
+### Testing every source locally, offline
+
+The full walkthrough for a machine with the source files already downloaded:
+
+```bash
+# 1. create the drop folders (each gets a README saying what to drop)
+python -m registry_builder init-source-inbox --config config/sources.criterion-mapping.quickstart.json
+
+# 2. drop the files
+input/pronom_registry/                    develop.zip  (github.com/digital-preservation/pronom archive)
+input/nara_digital_preservation_framework/ the two release CSVs, published filenames kept
+input/loc_fdd_xml/                        fddXML.zip
+input/wikidata_sparql/                    a saved SPARQL JSON result
+input/pronom_droid_xml/                   DROID_SignatureFile_V###.xml
+
+# 3. run — every source uses its dropped file; the network is not contacted
+python -m registry_builder run --config config/sources.criterion-mapping.quickstart.json
+```
+
+The acquire lines confirm it per source:
+
+```text
+[registry-builder] source nara_digital_preservation_framework acquired 2 snapshot(s);
+  ... via=local; published 2026-03-20 (152 day(s) old)
+```
+
+`via=local` with no `network_error` means the dropped file was used by choice,
+not as a fallback. To refresh one source from the network later, either empty
+its folder or set `force_check_url: true` on that source.
 
 ### Data age is reported on every check
 

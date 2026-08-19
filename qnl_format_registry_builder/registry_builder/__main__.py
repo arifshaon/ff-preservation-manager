@@ -326,7 +326,10 @@ def cmd_init_source_inbox(args) -> dict[str, Any]:
     from registry_builder.adapters import resolve_adapter
 
     config = _load_json(args.config)
-    input_root = Path(_resolve_relative(args.config, config.get("input_root") or "input"))
+    explicit_input_root = config.get("input_root")
+    input_root = (
+        Path(_resolve_relative(args.config, explicit_input_root)) if explicit_input_root else Path("input")
+    )
     results: list[dict[str, Any]] = []
     for source in config.get("sources", []):
         source_id = source.get("id")

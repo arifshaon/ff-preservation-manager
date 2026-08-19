@@ -505,7 +505,14 @@ class LocFddXmlAdapter(SourceAdapter):
                 self._progress(f"Acquired {index}/{total} LOC FDD URI(s)")
         return snapshots
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop the official LOC fddXML.zip here, or individual fdd######.xml "
+        "records. LOC does not date the ZIP filename, so add a manifest.json "
+        "with {\"published_at\": \"YYYY-MM-DD\"} (the site's last-update date) "
+        "if you want data age reported."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
         retrieval_mode = self.config.get("retrieval_mode")
         if retrieval_mode in {"fdd_xml_zip", "zip"} or self.config.get("zip_uri"):
             return self._acquire_zip_snapshot()

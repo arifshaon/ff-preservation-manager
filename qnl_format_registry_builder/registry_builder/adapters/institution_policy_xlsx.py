@@ -161,7 +161,15 @@ class InstitutionPolicyXlsxAdapter(SourceAdapter):
 
     type_name = "institution_policy_xlsx"
 
-    def acquire(self) -> list[SourceSnapshot]:
+    inbox_hint = (
+        "Drop the institution's policy spreadsheet (.xlsx) here. Record the "
+        "policy's approval/publication date in manifest.json as "
+        "{\"published_at\": \"YYYY-MM-DD\"} so data age is reported."
+    )
+
+    def network_acquire(self) -> list[SourceSnapshot]:
+        # "Network" here means configured acquisition: the URIs may be local
+        # paths, which read_uri also accepts. Dropped inbox files still win.
         return [self.acquire_uri_snapshot(uri, suffix=".xlsx") for uri in self.config.get("uris", [])]
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:

@@ -328,9 +328,33 @@ def test_wikidata_dropped_sparql_result_is_used_without_network(tmp_path):
     assert records[0].wikidata_ids == ["Q42332"]
 
 
-def test_init_source_inbox_creates_folders_only_for_supporting_adapters(tmp_path, capsys):
+def test_every_shipped_adapter_reads_the_input_inbox():
+    from registry_builder.adapters import ADAPTERS
+
+    unsupported = sorted(name for name, cls in ADAPTERS.items() if not cls.reads_input_dir())
+
+    assert unsupported == []
+
+
+def test_reads_input_dir_is_false_for_adapters_that_override_acquire():
+    # An adapter that overrides acquire() without wiring the inbox through must
+    # not get an inbox folder — dropped files there would be silently ignored.
+    class LegacyAdapter(SourceAdapter):
+        type_name = "legacy_test"
+
+        def acquire(self):
+            return []
+
+        def extract(self, snapshots):
+            return []
+
+    assert LegacyAdapter.reads_input_dir() is False
+
+
+def test_init_source_inbox_creates_folders_for_enabled_sources(tmp_path, monkeypatch):
     from registry_builder.__main__ import cmd_init_source_inbox
 
+    monkeypatch.chdir(tmp_path)  # the default input/ root is CWD-relative
     config = {
         "sources": [
             {"id": "wikidata_sparql", "type": "wikidata_sparql", "enabled": True},
@@ -352,7 +376,129 @@ def test_init_source_inbox_creates_folders_only_for_supporting_adapters(tmp_path
     by_id = {row["source_id"]: row for row in result["sources"]}
     assert by_id["wikidata_sparql"]["status"] == "ready"
     assert by_id["nara"]["status"] == "ready"
-    assert by_id["pronom_registry"]["status"] == "not_supported"
+    assert by_id["pronom_registry"]["status"] == "ready"
     assert by_id["off"]["status"] == "skipped_disabled"
-    assert (tmp_path / "input" / "wikidata_sparql" / "README.md").exists()
-    assert not (tmp_path / "input" / "pronom_registry").exists()
+    for source_id in ("wikidata_sparql", "nara", "pronom_registry"):
+        readme = tmp_path / "input" / source_id / "README.md"
+        assert readme.exists()
+        assert source_id in readme.read_text()
+    assert not (tmp_path / "input" / "off").exists()
+
+
+# ---------------------------------------------------------------------------
+# Dropped files flow through each adapter's extract() unchanged
+# ---------------------------------------------------------------------------
+
+def _inbox(tmp_path, source_id):
+    directory = tmp_path / "input" / source_id
+    directory.mkdir(parents=True)
+    return directory
+
+
+def test_loc_dropped_zip_is_extracted_without_network(tmp_path):
+    import zipfile
+    from registry_builder.adapters.loc_fdd_xml import LocFddXmlAdapter
+
+    inbox = _inbox(tmp_path, "loc_fdd_xml")
+    with zipfile.ZipFile(inbox / "fddXML.zip", "w") as zf:
+        zf.writestr(
+            "fddXML/fdd000030.xml",
+            "<fdd><fddID>fdd000030</fddID><title>PDF</title><category>Text</category></fdd>",
+        )
+
+    adapter = LocFddXmlAdapter(
+        {"id": "loc_fdd_xml", "input_root": str(tmp_path / "input"), "progress": False},
+        tmp_path / "work",
+    )
+    snapshots = adapter.acquire()
+
+    assert [s.acquisition_mode for s in snapshots] == ["local"]
+    records = adapter.extract(snapshots)
+    assert [r.loc_ids for r in records] == [["fdd000030"]]
+
+
+def test_pronom_dropped_archive_is_extracted_without_network(tmp_path):
+    import zipfile
+    from registry_builder.adapters.pronom_registry import PronomRegistryAdapter
+
+    inbox = _inbox(tmp_path, "pronom_registry")
+    record = {"puid": {"type": "fmt", "id": 18}, "name": "PDF", "identifiers": []}
+    with zipfile.ZipFile(inbox / "pronom-develop.zip", "w") as zf:
+        zf.writestr("pronom-develop/signatures/fmt/18.json", json.dumps(record))
+    (inbox / "manifest.json").write_text(json.dumps({"published_at": "2026-07-01", "edition": "v120"}))
+
+    adapter = PronomRegistryAdapter(
+        {"id": "pronom_registry", "input_root": str(tmp_path / "input"), "progress": False},
+        tmp_path / "work",
+    )
+    snapshots = adapter.acquire()
+
+    assert snapshots[0].acquisition_mode == "local"
+    assert snapshots[0].source_published_at == "2026-07-01"
+    assert snapshots[0].edition == "v120"
+    records = adapter.extract(snapshots)
+    assert [r.puids for r in records] == [["fmt/18"]]
+
+
+def test_droid_dropped_signature_xml_is_extracted_without_network(tmp_path):
+    from registry_builder.adapters.pronom_droid_xml import PronomDroidXmlAdapter
+
+    inbox = _inbox(tmp_path, "pronom_droid_xml")
+    (inbox / "DROID_SignatureFile_V120.xml").write_text(
+        '<FFSignatureFile><FileFormatCollection>'
+        '<FileFormat Name="PDF" PUID="fmt/18" MIMEType="application/pdf">'
+        "<Extension>pdf</Extension></FileFormat>"
+        "</FileFormatCollection></FFSignatureFile>"
+    )
+
+    adapter = PronomDroidXmlAdapter(
+        {"id": "pronom_droid_xml", "input_root": str(tmp_path / "input")},
+        tmp_path / "work",
+    )
+    snapshots = adapter.acquire()
+
+    assert snapshots[0].acquisition_mode == "local"
+    records = adapter.extract(snapshots)
+    assert [r.puids for r in records] == [["fmt/18"]]
+
+
+def test_standard_json_dropped_package_is_extracted_without_network(tmp_path):
+    from registry_builder.adapters.standard_json import StandardJsonAdapter
+
+    inbox = _inbox(tmp_path, "standard_json")
+    (inbox / "formats.json").write_text(json.dumps({
+        "records": [{"id": "r1", "name": "Test Format", "identifiers": {"puid": "fmt/1"}}],
+    }))
+
+    adapter = StandardJsonAdapter(
+        {"id": "standard_json", "input_root": str(tmp_path / "input")},
+        tmp_path / "work",
+    )
+    snapshots = adapter.acquire()
+
+    assert snapshots[0].acquisition_mode == "local"
+    records = adapter.extract(snapshots)
+    assert len(records) == 1
+    assert records[0].name == "Test Format"
+
+
+def test_qnl_evidence_dropped_csv_is_extracted_without_network(tmp_path):
+    from registry_builder.adapters.qnl_institution_format_evidence import (
+        QnlInstitutionFormatEvidenceAdapter,
+    )
+
+    inbox = _inbox(tmp_path, "qnl_institution_format_evidence")
+    (inbox / "evidence.csv").write_text(
+        "format_name,puid,criterion_id,value\n"
+        "PDF,fmt/18,sustainability.adoption,high\n"
+    )
+
+    adapter = QnlInstitutionFormatEvidenceAdapter(
+        {"id": "qnl_institution_format_evidence", "input_root": str(tmp_path / "input")},
+        tmp_path / "work",
+    )
+    snapshots = adapter.acquire()
+
+    assert snapshots[0].acquisition_mode == "local"
+    records = adapter.extract(snapshots)
+    assert records, "expected at least one evidence record from the dropped CSV"
