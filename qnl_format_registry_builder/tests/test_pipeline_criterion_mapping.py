@@ -175,3 +175,111 @@ def test_sequential_source_runs_export_claims_from_every_source(tmp_path):
     assert report["criterion_claims_exported"] == len(exported) == 2
     # the second run itself only generated source_b claims
     assert report["criterion_mapping"]["claims_generated"] == 1
+
+
+def test_claims_follow_their_record_when_a_later_source_reshapes_canonicals(tmp_path):
+    """A claim must point at the canonical its source record is in *now*.
+
+    Ingesting one source at a time means an early source's records can be
+    merged onto another authority's canonical later. The claim written during
+    the earlier run would otherwise keep pointing at a canonical_id that no
+    longer exists.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    store_path = tmp_path / "store"
+
+    def _mapping(source_id, source_type):
+        path = tmp_path / f"mapping.{source_id}.json"
+        path.write_text(json.dumps({
+            "source_id": source_id,
+            "source_type": source_type,
+            "criteria_version": "v1",
+            "mapping_version": "test",
+            "review_status": "approved",
+            "claim_review_status": "approved",
+            "decided_by": "test-suite",
+            "native_vocabulary": f"{source_id}_native",
+            "maps": [{
+                "id": f"{source_id}.disclosure.v1",
+                "criterion": "sustainability.disclosure",
+                "from_collection": "evidence",
+                "from_field": "disclosure",
+                "values": {"open": "public_specification"},
+                "directness": "explicit",
+                "mapping_status": "accepted",
+            }],
+        }), encoding="utf-8")
+        return path
+
+    # Run 2 maps only the incoming source, so the institution's stored claim is
+    # not regenerated — the remap is the only thing that can correct it.
+    mapping = _mapping("institution", "standard_json")
+    pronom_mapping = _mapping("pronom_droid_xml", "pronom_droid_xml")
+
+    # An institutional row citing a PUID nobody has published yet.
+    institution = tmp_path / "institution.json"
+    institution.write_text(json.dumps({"records": [{
+        "id": "row-1", "name": "Portable Document Format",
+        "identifiers": {"puid": ["fmt/18"]},
+        "evidence": [{"disclosure": "open"}],
+    }]}), encoding="utf-8")
+
+    # PRONOM, arriving later, verifies that PUID and takes ownership of it.
+    # A real PRONOM adapter type is needed here: verification is decided by
+    # source_type, so a second standard_json source would never own the PUID.
+    pronom = tmp_path / "DROID_SignatureFile_V120.xml"
+    pronom.write_text(
+        '<FFSignatureFile><FileFormatCollection>'
+        '<FileFormat Name="Acrobat PDF 1.4 - Portable Document Format" PUID="fmt/18">'
+        "<Extension>pdf</Extension></FileFormat>"
+        "</FileFormatCollection></FFSignatureFile>",
+        encoding="utf-8",
+    )
+
+    def _config(source_id, source_type, source_file, mappings):
+        return {
+            "pipeline_version": "0.1.0",
+            "incremental_source_updates": True,
+            "storage": {"type": "file", "path": str(store_path)},
+            "exports": {"enabled": True},
+            "method_profiles": {"enabled": False},
+            "criterion_mapping": {
+                "enabled": True, "mode": "apply",
+                "criteria": str(repo_root / "config" / "criteria" / "v1.json"),
+                "mappings": str(mappings), "include_drafts": False, "scope": "all",
+            },
+            "identifier_kinds": {
+                "puid": {"strength": "strong", "verified_from": ["pronom_droid_xml"]},
+                "loc": {"strength": "strong", "verified_from": []},
+                "nara": {"strength": "strong", "verified_from": []},
+                "wikidata": {"strength": "weak", "verified_from": []},
+            },
+            "sources": [{
+                "id": source_id, "type": source_type,
+                "enabled": True, "required": True, "uris": [str(source_file)],
+            }],
+        }
+
+    first = tmp_path / "first.json"
+    first.write_text(json.dumps(_config("institution", "standard_json", institution, mapping)), encoding="utf-8")
+    run_pipeline(first, tmp_path / "work_a", tmp_path / "out_a")
+
+    claims_a = [json.loads(l) for l in (tmp_path / "out_a" / "criterion_claims.jsonl").read_text().splitlines()]
+    assert len(claims_a) == 1
+    standalone_id = claims_a[0]["canonical_id"]
+    assert not standalone_id.startswith("puid-"), "PUID is unverified while only the institution has it"
+
+    second = tmp_path / "second.json"
+    second.write_text(json.dumps(_config("pronom_droid_xml", "pronom_droid_xml", pronom, pronom_mapping)), encoding="utf-8")
+    report = run_pipeline(second, tmp_path / "work_b", tmp_path / "out_b")
+
+    registry_ids = {r["canonical_id"] for r in json.loads((tmp_path / "out_b" / "registry.json").read_text())}
+    exported = [json.loads(l) for l in (tmp_path / "out_b" / "criterion_claims.jsonl").read_text().splitlines()]
+
+    assert standalone_id not in registry_ids, "the institution row should now be merged onto PRONOM's canonical"
+    assert exported, "the institution claim must survive the merge"
+    for claim in exported:
+        assert claim["canonical_id"] in registry_ids, "no claim may point at a canonical that no longer exists"
+    moved = [c for c in exported if c.get("remapped_from_canonical_id")]
+    assert [c["remapped_from_canonical_id"] for c in moved] == [standalone_id]
+    assert report["criterion_claims_remapped"] == 1

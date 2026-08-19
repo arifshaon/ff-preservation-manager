@@ -181,6 +181,12 @@ def _format_progress(event: dict[str, Any]) -> str:
             f"criterion_claims={event.get('criterion_claims', 0)}..."
         )
     if name == "persistence_completed":
+        remapped = event.get("claims_remapped") or 0
+        if remapped:
+            return (
+                "[registry-builder] persistence complete; "
+                f"{remapped} criterion claim(s) re-pointed to the canonical their source record now belongs to"
+            )
         return "[registry-builder] persistence complete"
     if name == "exports_started":
         return f"[registry-builder] writing file exports to {event.get('outdir')}..."

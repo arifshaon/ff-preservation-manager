@@ -99,6 +99,31 @@ The acquire lines confirm it per source:
 not as a fallback. To refresh one source from the network later, either empty
 its folder or set `force_check_url: true` on that source.
 
+### Claims follow their record across runs
+
+A criterion claim stores the `canonical_id` of the format it describes, recorded
+when its source ran. Ingesting a later source reshapes canonicals — 592 NARA
+records stop being `nara-nf*` and become `puid-fmt-*` once PRONOM merges them —
+so every claim written earlier would otherwise point at an id that no longer
+exists. Because sources are meant to be ingestible one run at a time, each run
+re-points stored claims at the canonical their source record now belongs to, and
+reports how many moved:
+
+```text
+[registry-builder] persistence complete; 222 criterion claim(s) re-pointed to
+  the canonical their source record now belongs to
+```
+
+The stale claim is retired with `superseded_reason: canonical_id_remapped`, and
+the corrected one records `remapped_from_canonical_id`, so the move is auditable.
+Claims whose source record is not in the current registry are left untouched:
+that means the source was not part of this run, not that the claim is wrong.
+
+Reconciliation is also order-independent, so ingesting the same sources in any
+order produces the same canonical set, ids and output ordering. The authority
+owning a grouping key names its canonical — `puid-fmt-18` is named by PRONOM,
+not by whichever source happened to be loaded first.
+
 ### Data age is reported on every check
 
 Each acquisition logs and reports how old the data is, in two distinct ages:

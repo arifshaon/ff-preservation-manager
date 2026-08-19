@@ -320,14 +320,15 @@ def _safe_weak_aliases(groups: dict[tuple[str, str], list[RawFormatRecord]], *, 
     a workbook row carries a copied-but-unverified PUID/LOC/NARA identifier.
     """
     weak_index: dict[tuple[str, str], list[tuple[tuple[str, str], RawFormatRecord]]] = defaultdict(list)
-    for group_key, items in groups.items():
-        for record in items:
+    for group_key in sorted(groups):
+        for record in groups[group_key]:
             weak = _weak_match_key(record)
             if weak:
                 weak_index[weak].append((group_key, record))
 
     aliases: dict[tuple[str, str], tuple[str, str]] = {}
-    for refs in weak_index.values():
+    for weak_key in sorted(weak_index):
+        refs = weak_index[weak_key]
         group_keys: list[tuple[str, str]] = []
         sources: set[str] = set()
         for group_key, record in refs:
@@ -402,7 +403,10 @@ def _safe_claimed_strong_identifier_aliases(
     # sound because each alias in the chain was established under that rule.
     while True:
         progressed = False
-        for group_key, items in groups.items():
+        # Sorted, because each bridge changes what later groups resolve to: an
+        # unsorted pass makes the outcome depend on ingestion order.
+        for group_key in sorted(groups):
+            items = groups[group_key]
             if group_key in aliases:
                 continue
             candidates: set[tuple[str, str]] = set()
@@ -435,6 +439,23 @@ def _safe_claimed_strong_identifier_aliases(
             return aliases, alias_confidence
 
 
+def _record_sort_key(record: RawFormatRecord, group_key: tuple[str, str]) -> tuple[int, str, str]:
+    """Order records inside a group deterministically, owning authority first.
+
+    Reconciliation used to depend on the order records happened to arrive in,
+    which for this pipeline is the order sources were ingested. That made the
+    canonical set differ between runs over identical data, and made
+    `preferred_name` whichever source ran first. Sorting the owner of the
+    grouping key to the front means `puid-fmt-354` is named by PRONOM rather
+    than by whichever source was loaded first.
+    """
+    owns_key = any(
+        identifier.kind == group_key[0] and identifier.value == group_key[1]
+        for identifier in _verified_identifiers(record)
+    )
+    return (0 if owns_key else 1, record.source_id or "", record.source_record_id or "")
+
+
 def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str, dict[str, Any]] | None = None) -> list[CanonicalFormat]:
     rules = identifier_rules or load_identifier_rules()
     strong_order = strong_identifier_order(rules)
@@ -452,11 +473,16 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
             if identifier.kind in strong_kinds:
                 alias_keys[(identifier.kind, identifier.value)] = key
 
-    for weak_key, target_key in _safe_weak_aliases(groups, strong_kinds=strong_kinds).items():
+    # Everything downstream — alias resolution, preferred name, canonical id —
+    # must not depend on the order sources were ingested.
+    for key in groups:
+        groups[key].sort(key=lambda record, key=key: _record_sort_key(record, key))
+
+    for weak_key, target_key in sorted(_safe_weak_aliases(groups, strong_kinds=strong_kinds).items()):
         alias_keys.setdefault(weak_key, target_key)
 
     claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds)
-    for claimed_key, target_key in claimed_aliases.items():
+    for claimed_key, target_key in sorted(claimed_aliases.items()):
         existing_target = alias_keys.get(claimed_key)
         if existing_target is None or existing_target == claimed_key:
             alias_keys[claimed_key] = target_key
@@ -464,12 +490,15 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
                 alias_confidence[claimed_key] = claimed_alias_confidence[claimed_key]
 
     collapsed: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
-    for key, items in groups.items():
+    for key in sorted(groups):
         target = alias_keys.get(key, key)
-        collapsed[target].extend(items)
+        collapsed[target].extend(groups[key])
+    for target in collapsed:
+        collapsed[target].sort(key=lambda record, target=target: _record_sort_key(record, target))
 
     canonical: list[CanonicalFormat] = []
-    for key, items in collapsed.items():
+    for key in sorted(collapsed):
+        items = collapsed[key]
         name = next((r.name for r in items if r.name), None) or key[1]
         cf = CanonicalFormat(
             canonical_id=canonical_id_for(key, name),

@@ -42,6 +42,22 @@ class StandardJsonAdapter(SourceAdapter):
             snapshots.append(self.acquire_uri_snapshot(uri, suffix=suffix))
         return snapshots
 
+    @staticmethod
+    def _as_list(value: Any) -> list[str]:
+        """Accept a scalar or a list for an identifier field.
+
+        A hand-written package naturally says {"puid": "fmt/18"}. Passing that
+        straight to list() silently yields ['f','m','t','/','1','8'] — six junk
+        identifiers rather than one real one, with no error to notice.
+        """
+        if value is None or value == "":
+            return []
+        if isinstance(value, (str, bytes)):
+            return [value.decode() if isinstance(value, bytes) else value]
+        if isinstance(value, (list, tuple, set)):
+            return [str(item) for item in value if item not in (None, "")]
+        return [str(value)]
+
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         rows: list[RawFormatRecord] = []
         for snap in snapshots:
@@ -61,12 +77,12 @@ class StandardJsonAdapter(SourceAdapter):
                     name=record.get("name"),
                     category=record.get("category"),
                     description=record.get("description"),
-                    extensions=list(identifiers.get("extension", []) or record.get("extensions", []) or []),
-                    mime_types=list(identifiers.get("mime", []) or record.get("mime_types", []) or []),
-                    puids=list(identifiers.get("puid", []) or record.get("puids", []) or []),
-                    loc_ids=list(identifiers.get("loc", []) or record.get("loc_ids", []) or []),
-                    nara_ids=list(identifiers.get("nara", []) or record.get("nara_ids", []) or []),
-                    wikidata_ids=list(identifiers.get("wikidata", []) or record.get("wikidata_ids", []) or []),
+                    extensions=self._as_list(identifiers.get("extension")) or self._as_list(record.get("extensions")),
+                    mime_types=self._as_list(identifiers.get("mime")) or self._as_list(record.get("mime_types")),
+                    puids=self._as_list(identifiers.get("puid")) or self._as_list(record.get("puids")),
+                    loc_ids=self._as_list(identifiers.get("loc")) or self._as_list(record.get("loc_ids")),
+                    nara_ids=self._as_list(identifiers.get("nara")) or self._as_list(record.get("nara_ids")),
+                    wikidata_ids=self._as_list(identifiers.get("wikidata")) or self._as_list(record.get("wikidata_ids")),
                     urls=record.get("urls", {}) or {},
                     institution_policy=institution_policy,
                     institution_evidence=record.get("institution_evidence", []) or record.get("institution_evidence_claims", []) or [],

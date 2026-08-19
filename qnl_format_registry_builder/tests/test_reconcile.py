@@ -54,7 +54,10 @@ def test_unverified_spreadsheet_puid_bridges_to_pronom_when_names_do_not_version
     assert len(registry) == 1
     fmt = registry[0]
     assert fmt.canonical_id == "puid-fmt-18"
-    assert fmt.preferred_name == "PDF"
+    # The authority owning the grouping key names the canonical, so the PRONOM
+    # name wins over the institutional spreadsheet's shorthand regardless of
+    # which source was ingested first.
+    assert fmt.preferred_name == "Portable Document Format"
     assert any(c["kind"] == "puid" and c["value"] == "fmt/18" and c["verified"] for c in fmt.identifier_claims)
     assert any(c["kind"] == "puid" and c["value"] == "fmt/18" and not c["verified"] for c in fmt.identifier_claims)
 

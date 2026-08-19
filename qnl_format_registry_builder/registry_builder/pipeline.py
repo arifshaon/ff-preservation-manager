@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import json
 from collections import Counter
 from pathlib import Path
@@ -442,6 +444,67 @@ def _current_stored_criterion_claims(store: RegistryStore) -> list[dict[str, Any
     return claims
 
 
+def _remap_criterion_claim_canonical_ids(
+    store: RegistryStore,
+    *,
+    run_id: str,
+    registry: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Re-point stored claims at the canonical their source record now belongs to.
+
+    A criterion claim records the canonical_id that existed when its source ran.
+    Ingesting a later source reshapes canonicals — 592 NARA records stop being
+    nara-nf* and become puid-fmt-* once PRONOM merges them — leaving every
+    earlier claim pointing at an id that no longer exists. Sources are meant to
+    be ingestible one run at a time, so the claim has to follow its record.
+
+    The mapping is taken from the registry just reconciled, keyed by the source
+    record the claim came from. Claims whose source record is not in this
+    registry are left untouched: that means the source was not part of this run,
+    not that the claim is wrong.
+    """
+    target_by_source_record: dict[tuple[str, str], str] = {}
+    for canonical in registry:
+        # The registry arrives as CanonicalFormat objects here and as dicts on
+        # the export path; accept either.
+        as_dict = canonical if isinstance(canonical, dict) else asdict(canonical)
+        canonical_id = as_dict.get("canonical_id") or as_dict.get("format_id")
+        if not canonical_id:
+            continue
+        for source_record in as_dict.get("source_records") or []:
+            key = (str(source_record.get("source_id") or ""), str(source_record.get("source_record_id") or ""))
+            target_by_source_record[key] = canonical_id
+
+    remapped = 0
+    for existing in list(store.query("criterion_claims")):
+        if existing.get("current", True) is False:
+            continue
+        current_id = existing.get("canonical_id") or existing.get("format_id")
+        key = (str(existing.get("source_id") or ""), str(existing.get("source_record_id") or ""))
+        target = target_by_source_record.get(key)
+        if not target or target == current_id:
+            continue
+        # The storage key contains canonical_id, so the corrected claim is a new
+        # document; the stale one is retired rather than left as a duplicate.
+        superseded = dict(existing)
+        superseded["current"] = False
+        superseded["superseded_by_run_id"] = run_id
+        superseded["superseded_reason"] = "canonical_id_remapped"
+        store.save_criterion_claim(superseded)
+
+        moved = dict(existing)
+        moved["canonical_id"] = target
+        moved.pop("format_id", None)
+        moved["current"] = True
+        moved["last_seen_run_id"] = run_id
+        moved["remapped_from_canonical_id"] = current_id
+        moved["remapped_by_run_id"] = run_id
+        store.save_criterion_claim(moved)
+        remapped += 1
+
+    return {"claims_remapped": remapped}
+
+
 def _persist_criterion_claims(store: RegistryStore, *, run_id: str, criterion_claims: list[dict[str, Any]]) -> None:
     if not criterion_claims:
         return
@@ -474,7 +537,7 @@ def _persist_registry_to_store(
     criterion_claims: list[dict[str, Any]] | None = None,
     previous_registry: list[dict[str, Any]] | None = None,
     changes: list[dict[str, Any]] | None = None,
-) -> None:
+) -> dict[str, Any]:
     previous_registry = previous_registry or []
     changes = changes or []
     current_ids: set[str] = set()
@@ -543,10 +606,13 @@ def _persist_registry_to_store(
             }
             store.upsert_canonical_format(removed)
 
+    remap = _remap_criterion_claim_canonical_ids(store, run_id=run_id, registry=registry)
     _persist_criterion_claims(store, run_id=run_id, criterion_claims=criterion_claims or [])
 
     for change in changes:
         store.save_assessment_change(change)
+
+    return remap
 
 
 def _write_file_exports(
@@ -849,7 +915,7 @@ def run_pipeline(
         canonical_formats=len(registry),
         criterion_claims=len(criterion_claims),
     )
-    _persist_registry_to_store(
+    remap = _persist_registry_to_store(
         store,
         run_id=run_id,
         snapshots=all_snapshots,
@@ -859,7 +925,7 @@ def run_pipeline(
         previous_registry=previous_registry_view,
         changes=change_detection.get("changes", []),
     )
-    _emit_progress(progress, "persistence_completed")
+    _emit_progress(progress, "persistence_completed", **remap)
 
     enabled_sources = [s for s in source_summaries if s.get("enabled", True)]
     completed_sources = [s for s in enabled_sources if s.get("status") == "completed"]
@@ -908,6 +974,7 @@ def run_pipeline(
         exported_claims = _current_stored_criterion_claims(store)
         if exported_claims or criterion_mapping_inputs is not None:
             report["criterion_claims_exported"] = len(exported_claims)
+            report["criterion_claims_remapped"] = remap.get("claims_remapped", 0)
         report["outputs"] = _write_file_exports(
             outdir,
             registry,
