@@ -426,6 +426,22 @@ def _criterion_claim_key(claim: dict[str, Any]) -> tuple[str, str, str, str, str
     )
 
 
+def _current_stored_criterion_claims(store: RegistryStore) -> list[dict[str, Any]]:
+    """All current claims in the store, across every source ever ingested.
+
+    Exports must reflect the store after this run, exactly like the registry
+    export does. Exporting only the claims this run generated silently drops
+    every other source's claims from criterion_claims.jsonl — the file the
+    risk manager reads — whenever sources are ingested one run at a time.
+    """
+    claims = [
+        claim for claim in store.query("criterion_claims")
+        if claim.get("current", True) is not False
+    ]
+    claims.sort(key=_criterion_claim_key)
+    return claims
+
+
 def _persist_criterion_claims(store: RegistryStore, *, run_id: str, criterion_claims: list[dict[str, Any]]) -> None:
     if not criterion_claims:
         return
@@ -889,8 +905,18 @@ def run_pipeline(
 
     if _exports_enabled(config):
         _emit_progress(progress, "exports_started", outdir=str(outdir))
-        report["outputs"] = _write_file_exports(outdir, registry, active_source_records, all_snapshots, report, criterion_claims if criterion_mapping_inputs is not None else None)
-        _emit_progress(progress, "exports_completed", outputs=len(report["outputs"]))
+        exported_claims = _current_stored_criterion_claims(store)
+        if exported_claims or criterion_mapping_inputs is not None:
+            report["criterion_claims_exported"] = len(exported_claims)
+        report["outputs"] = _write_file_exports(
+            outdir,
+            registry,
+            active_source_records,
+            all_snapshots,
+            report,
+            exported_claims if (exported_claims or criterion_mapping_inputs is not None) else None,
+        )
+        _emit_progress(progress, "exports_completed", outputs=len(report["outputs"]), criterion_claims_exported=len(exported_claims))
 
     store.create_run(report)
     _emit_progress(progress, "run_completed", canonical_formats=len(registry), active_source_records=len(active_source_records), criterion_claims=len(criterion_claims))

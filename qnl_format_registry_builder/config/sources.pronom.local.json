@@ -1,0 +1,38 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "file",
+    "path": "output/registry_store"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings/pronom_registry.v1.approved.json",
+    "include_drafts": false,
+    "scope": "all",
+    "notes": "PRONOM-only local run against the same file store as the NARA run. Incremental updates keep the stored NARA records active, so reconciliation merges the two sources instead of replacing one with the other."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": []}
+  },
+  "sources": [
+    {
+      "id": "pronom_registry",
+      "type": "pronom_registry",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
+      "notes": "Drop develop.zip in input/pronom_registry/ to run without the network; otherwise the archive is fetched from GitHub."
+    }
+  ]
+}
