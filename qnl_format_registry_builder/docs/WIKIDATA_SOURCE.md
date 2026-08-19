@@ -7,7 +7,7 @@ It does **not** currently normalize Wikidata rows into `RawFormatRecord`, reconc
 
 ## Default data retrieved
 
-The built-in SPARQL query is anchored on PRONOM ID (`P2749`) and retrieves:
+The default acquisition is anchored on PRONOM ID (`P2749`) and retrieves:
 
 - Wikidata entity URI and QID
 - PRONOM PUID (`P2749`)
@@ -19,7 +19,25 @@ The built-in SPARQL query is anchored on PRONOM ID (`P2749`) and retrieves:
 - publication date (`P577`)
 - inception date (`P571`), retained separately because Wikidata uses both date concepts
 
-Multi-valued properties are pipe-delimited in the CSV so the default export is one row per QID/PUID rather than a Cartesian product of extensions, MIME types and developers.
+Multi-valued properties are pipe-delimited in the CSV, producing one row per QID/PUID.
+
+## Why the default acquisition is partitioned
+
+The public Wikidata Query Service has a hard query execution limit and variable public-cluster load. A single SPARQL query that joins all of the multi-valued properties above can create a large intermediate result before aggregation.
+
+For that reason the adapter deliberately runs several small queries:
+
+1. core QID/PUID/English label
+2. LOC FDD IDs
+3. extensions
+4. MIME types
+5. developers
+6. publication dates
+7. inception dates
+
+The adapter then merges those results locally into the single review CSV. This is an acquisition implementation detail only: no Wikidata rows are ingested into the registry.
+
+HTTP 429 and transient 5xx responses (500/502/503/504) are retried with bounded backoff. If a query still fails, the error identifies the individual query part that failed.
 
 ## Download
 
@@ -31,7 +49,7 @@ python -m registry_builder.wikidata_download `
   --workdir work
 ```
 
-The command prints a JSON acquisition summary containing the CSV path, content-addressed snapshot path, SHA-256, query SHA-256 and row count.
+The command prints a JSON acquisition summary containing the CSV path, content-addressed snapshot path, SHA-256, query-set SHA-256 and row count.
 
 The default endpoint is:
 
@@ -49,7 +67,7 @@ python -m registry_builder.wikidata_download `
 
 ## Custom query
 
-A reviewed SPARQL query can be supplied without changing adapter code:
+A reviewed SPARQL query can still be supplied without changing adapter code:
 
 ```powershell
 python -m registry_builder.wikidata_download `
@@ -57,11 +75,11 @@ python -m registry_builder.wikidata_download `
   --out wikidata-file-formats.csv
 ```
 
-The exact query is recorded in snapshot metadata and its SHA-256 is used in the cache key.
+A custom query is executed as one request and must return at least `format`, `qid`, and `puid` columns. The exact query is recorded in snapshot metadata and its SHA-256 is used in the cache key.
 
 ## Offline replay
 
-After a query has been downloaded once, the same query can be replayed from the content-addressed snapshot cache:
+After a query set has been downloaded once, the same acquisition can be replayed from the content-addressed snapshot cache:
 
 ```powershell
 python -m registry_builder.wikidata_download `
