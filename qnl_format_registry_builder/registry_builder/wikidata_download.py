@@ -17,14 +17,7 @@ from registry_builder.adapters.wikidata_sparql import (
 
 
 class _TransportRetryingWikidataSparqlAdapter(WikidataSparqlAdapter):
-    """Retry a single SPARQL part when the HTTP body is interrupted mid-transfer.
-
-    The underlying adapter already retries retryable HTTP status responses. This
-    wrapper adds transport-level retries for cases such as IncompleteRead,
-    RemoteDisconnected, connection resets, socket timeouts, and URLError. Because
-    the retry happens around ``_request_csv``, only the failing query part is
-    repeated; already-merged earlier parts remain in memory for the current run.
-    """
+    """Retry one SPARQL request when the HTTP body is interrupted mid-transfer."""
 
     def _request_csv(
         self,
@@ -34,7 +27,10 @@ class _TransportRetryingWikidataSparqlAdapter(WikidataSparqlAdapter):
         required_columns: set[str],
     ) -> tuple[bytes, dict[str, str]]:
         retries = max(0, int(self.config.get("transport_retries", 5)))
-        base_delay = max(0.0, float(self.config.get("transport_backoff_seconds", 2.0)))
+        base_delay = max(
+            0.0,
+            float(self.config.get("transport_backoff_seconds", 2.0)),
+        )
 
         for attempt in range(retries + 1):
             try:
@@ -43,7 +39,14 @@ class _TransportRetryingWikidataSparqlAdapter(WikidataSparqlAdapter):
                     query_name=query_name,
                     required_columns=required_columns,
                 )
-            except (HTTPException, URLError, ConnectionError, TimeoutError, socket.timeout, OSError) as exc:
+            except (
+                HTTPException,
+                URLError,
+                ConnectionError,
+                TimeoutError,
+                socket.timeout,
+                OSError,
+            ) as exc:
                 if attempt >= retries:
                     raise RuntimeError(
                         f"Wikidata SPARQL query '{query_name}' failed after "
@@ -73,16 +76,69 @@ def main() -> None:
             "into the registry."
         ),
     )
-    parser.add_argument("--out", default="wikidata-file-formats.csv", help="CSV file to write")
-    parser.add_argument("--workdir", default="work", help="Snapshot/cache work directory")
+    parser.add_argument(
+        "--out",
+        default="wikidata-file-formats.csv",
+        help="CSV file to write",
+    )
+    parser.add_argument(
+        "--workdir",
+        default="work",
+        help="Snapshot/cache work directory",
+    )
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
-    parser.add_argument("--query-file", help="Optional SPARQL query file; otherwise use the built-in partitioned file-format acquisition")
+    parser.add_argument(
+        "--query-file",
+        help=(
+            "Optional custom SPARQL query; otherwise use staged population "
+            "discovery plus VALUES batching"
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=90)
-    parser.add_argument("--retries", type=int, default=3, help="Retries for retryable HTTP status responses such as 429/5xx")
-    parser.add_argument("--transport-retries", type=int, default=5, help="Retries for interrupted/partial HTTP transfers")
-    parser.add_argument("--transport-backoff-seconds", type=float, default=2.0, help="Initial exponential backoff for interrupted transfers")
-    parser.add_argument("--offline", action="store_true", help="Reuse the cached snapshot for the same query set; do not contact Wikidata")
+    parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="Retries for retryable HTTP status responses such as 429/5xx",
+    )
+    parser.add_argument(
+        "--transport-retries",
+        type=int,
+        default=5,
+        help="Retries for interrupted/partial HTTP transfers",
+    )
+    parser.add_argument(
+        "--transport-backoff-seconds",
+        type=float,
+        default=2.0,
+        help="Initial exponential backoff for interrupted transfers",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=200,
+        help="Number of frozen Wikidata QIDs per VALUES property batch",
+    )
+    parser.add_argument(
+        "--population-page-size",
+        type=int,
+        default=500,
+        help="Keyset-pagination page size for population discovery",
+    )
+    parser.add_argument(
+        "--restart",
+        action="store_true",
+        help=(
+            "Ignore an incomplete acquisition session and discover a fresh "
+            "population instead of resuming it"
+        ),
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Reuse the cached final snapshot; do not contact Wikidata",
+    )
     args = parser.parse_args()
 
     source_config = {
@@ -94,13 +150,20 @@ def main() -> None:
         "retries": args.retries,
         "transport_retries": args.transport_retries,
         "transport_backoff_seconds": args.transport_backoff_seconds,
+        "batch_size": args.batch_size,
+        "population_page_size": args.population_page_size,
+        "restart": args.restart,
         "offline": args.offline,
     }
     if args.query_file:
         source_config["query_file"] = args.query_file
 
-    adapter = _TransportRetryingWikidataSparqlAdapter(source_config, Path(args.workdir))
+    adapter = _TransportRetryingWikidataSparqlAdapter(
+        source_config,
+        Path(args.workdir),
+    )
     snapshot = adapter.download_to(args.out)
+    staged = snapshot.metadata.get("staged_acquisition") or {}
     result = {
         "status": "ok",
         "source_id": snapshot.source_id,
@@ -112,7 +175,14 @@ def main() -> None:
         "row_count": snapshot.metadata.get("row_count"),
         "query_sha256": snapshot.metadata.get("query_sha256"),
         "query_mode": snapshot.metadata.get("query_mode"),
-        "query_parts": snapshot.metadata.get("query_parts"),
+        "session_id": staged.get("session_id"),
+        "resumed": staged.get("resumed"),
+        "population_count": staged.get("population_count"),
+        "population_sha256": staged.get("population_sha256"),
+        "batch_size": staged.get("batch_size"),
+        "population_page_size": staged.get("population_page_size"),
+        "total_batches": staged.get("total_batches"),
+        "query_parts": staged.get("parts"),
         "from_cache": snapshot.from_cache,
         "changed": snapshot.changed,
         "acquisition_only": True,
