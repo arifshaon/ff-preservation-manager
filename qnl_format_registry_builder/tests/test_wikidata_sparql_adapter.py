@@ -25,57 +25,72 @@ class _FakeResponse:
 
 
 def _response_for_query(query: str) -> bytes:
-    if "?format ?qid ?puid ?formatLabel" in query:
+    q123 = "http://www.wikidata.org/entity/Q123"
+    q124 = "http://www.wikidata.org/entity/Q124"
+    if "?format ?qid ?formatLabel ?formatDescription" in query:
         return (
-            "format,qid,puid,formatLabel\n"
-            "http://www.wikidata.org/entity/Q123,Q123,fmt/40,Example format\n"
+            "format,qid,formatLabel,formatDescription\n"
+            f"{q123},Q123,Example format,Example description\n"
+            f"{q124},Q124,Format without PUID,Still a file-format item\n"
         ).encode("utf-8")
-    if "wdt:P3267" in query:
+    if "skos:altLabel" in query:
         return (
-            "format,puid,locFdd\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,fdd000123\n"
+            "format,alias\n"
+            f"{q123},EXFMT\n"
+            f"{q123},Example File Format\n"
         ).encode("utf-8")
-    if "wdt:P1195" in query:
+    if "VALUES ?predicate { wdt:P31 wdt:P279 }" in query:
         return (
-            "format,puid,extension\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,ex\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,example\n"
+            "format,predicate,value,valueLabel\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P31,"
+            "http://www.wikidata.org/entity/Q235557,file format\n"
         ).encode("utf-8")
-    if "wdt:P1163" in query:
+    if "wdt:P2748 wdt:P3266 wdt:P11167" in query:
         return (
-            "format,puid,mimeType\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,application/example\n"
+            "format,predicate,value\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P2748,fmt/40\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P3266,fdd000123\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P11167,NF00303\n"
+            f"{q124},http://www.wikidata.org/prop/direct/P3266,fdd000999\n"
         ).encode("utf-8")
-    if "wdt:P178" in query:
+    if "wdt:P4152" in query:
         return (
-            "format,puid,developerQid,developerLabel\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,Q456,Example Developer\n"
+            "format,predicate,value\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P1195,ex\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P1195,example\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P1163,application/example\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P348,1.0\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P4152,45 58\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P577,1997-01-01T00:00:00Z\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P571,1996-01-01T00:00:00Z\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P856,https://example.org/\n"
         ).encode("utf-8")
-    if "wdt:P577" in query:
+    if "wdt:P1343" in query:
         return (
-            "format,puid,publicationDate\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,1997-01-01T00:00:00Z\n"
-        ).encode("utf-8")
-    if "wdt:P571" in query:
-        return (
-            "format,puid,inceptionDate\n"
-            "http://www.wikidata.org/entity/Q123,fmt/40,1996-01-01T00:00:00Z\n"
+            "format,predicate,value,valueLabel\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P178,"
+            "http://www.wikidata.org/entity/Q456,Example Developer\n"
+            f"{q123},http://www.wikidata.org/prop/direct/P361,"
+            "http://www.wikidata.org/entity/Q789,Example family\n"
         ).encode("utf-8")
     raise AssertionError(f"Unexpected query: {query}")
 
 
-def test_default_queries_cover_requested_cross_registry_properties():
+def test_default_queries_use_file_format_properties_not_software_properties():
     query_text = "\n".join(DEFAULT_QUERY_PARTS.values())
-    assert "wdt:P2749" in query_text
-    assert "wdt:P3267" in query_text
+    assert "wd:Q235557" in query_text
+    assert "wdt:P2748" in query_text
+    assert "wdt:P3266" in query_text
+    assert "wdt:P11167" in query_text
     assert "wdt:P1195" in query_text
     assert "wdt:P1163" in query_text
+    assert "wdt:P4152" in query_text
     assert "wdt:P178" in query_text
-    assert "wdt:P577" in query_text
-    assert "wdt:P571" in query_text
+    assert "wdt:P2749" not in query_text
+    assert "wdt:P3267" not in query_text
 
 
-def test_wikidata_adapter_partitions_queries_and_merges_one_csv_without_ingestion(
+def test_wikidata_adapter_merges_file_format_metadata_without_ingestion(
     tmp_path, monkeypatch
 ):
     captured_queries = []
@@ -103,18 +118,23 @@ def test_wikidata_adapter_partitions_queries_and_merges_one_csv_without_ingestio
 
     text = output.read_text(encoding="utf-8")
     assert "Q123" in text
+    assert "Q124" in text
     assert "fmt/40" in text
+    assert "x-sfw/" not in text
     assert "fdd000123" in text
+    assert "NF00303" in text
     assert "ex|example" in text
     assert "application/example" in text
+    assert "45 58" in text
     assert "Q456" in text
     assert "Example Developer" in text
-    assert "1997-01-01T00:00:00Z" in text
-    assert "1996-01-01T00:00:00Z" in text
+    assert "Q789" in text
+    assert "Example family" in text
+    assert "EXFMT|Example File Format" in text
 
     assert len(captured_queries) == len(DEFAULT_QUERY_PARTS)
-    assert snapshot.metadata["row_count"] == 1
-    assert snapshot.metadata["query_mode"] == "partitioned_default"
+    assert snapshot.metadata["row_count"] == 2
+    assert snapshot.metadata["query_mode"] == "partitioned_default_v2"
     assert set(snapshot.metadata["query_parts"]) == set(DEFAULT_QUERY_PARTS)
     assert snapshot.metadata["acquisition_only"] is True
     assert snapshot.metadata["normalization_enabled"] is False
@@ -122,9 +142,7 @@ def test_wikidata_adapter_partitions_queries_and_merges_one_csv_without_ingestio
     assert adapter.extract([snapshot]) == []
 
 
-def test_wikidata_adapter_reuses_cached_partitioned_snapshot_offline(
-    tmp_path, monkeypatch
-):
+def test_wikidata_adapter_reuses_cached_snapshot_offline(tmp_path, monkeypatch):
     def fake_urlopen(request, timeout):
         params = parse_qs(request.data.decode("utf-8"))
         return _FakeResponse(_response_for_query(params["query"][0]))
@@ -161,10 +179,10 @@ def test_wikidata_adapter_reuses_cached_partitioned_snapshot_offline(
     ).read_bytes()
 
 
-def test_custom_query_still_uses_single_request(tmp_path, monkeypatch):
+def test_custom_query_only_requires_format_and_qid(tmp_path, monkeypatch):
     custom_query = """
-SELECT ?format ?qid ?puid WHERE {
-  ?format wdt:P2749 ?puid .
+SELECT ?format ?qid WHERE {
+  ?format wdt:P31 wd:Q235557 .
   BIND("Q123" AS ?qid)
 }
 """.strip()
@@ -174,8 +192,8 @@ SELECT ?format ?qid ?puid WHERE {
         calls.append(request)
         return _FakeResponse(
             (
-                "format,qid,puid\n"
-                "http://www.wikidata.org/entity/Q123,Q123,fmt/40\n"
+                "format,qid\n"
+                "http://www.wikidata.org/entity/Q123,Q123\n"
             ).encode("utf-8")
         )
 
