@@ -23,10 +23,10 @@ def main() -> None:
     parser.add_argument("--workdir", default="work", help="Snapshot/cache work directory")
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
-    parser.add_argument("--query-file", help="Optional SPARQL query file; otherwise use the built-in file-format query")
+    parser.add_argument("--query-file", help="Optional SPARQL query file; otherwise use the built-in partitioned file-format acquisition")
     parser.add_argument("--timeout-seconds", type=int, default=90)
     parser.add_argument("--retries", type=int, default=3)
-    parser.add_argument("--offline", action="store_true", help="Reuse the cached snapshot for the same query; do not contact Wikidata")
+    parser.add_argument("--offline", action="store_true", help="Reuse the cached snapshot for the same query set; do not contact Wikidata")
     args = parser.parse_args()
 
     source_config = {
@@ -53,6 +53,8 @@ def main() -> None:
         "sha256": snapshot.sha256,
         "row_count": snapshot.metadata.get("row_count"),
         "query_sha256": snapshot.metadata.get("query_sha256"),
+        "query_mode": snapshot.metadata.get("query_mode"),
+        "query_parts": snapshot.metadata.get("query_parts"),
         "from_cache": snapshot.from_cache,
         "changed": snapshot.changed,
         "acquisition_only": True,
