@@ -347,6 +347,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         for column in _OUTPUT_COLUMNS:
             if column not in row:
                 row[column] = set()
+        row["_paired_labels"] = {}
         return row
 
     @staticmethod
@@ -432,13 +433,14 @@ class WikidataSparqlAdapter(SourceAdapter):
                 value = source_row.get("value", "")
                 if value_field.endswith("Qid"):
                     value = self._qid_from_uri(value)
-                self._add_value(target, value_field, value)
                 if label_field:
-                    self._add_value(
-                        target,
-                        label_field,
-                        source_row.get("valueLabel", ""),
-                    )
+                    if value:
+                        pairs = target["_paired_labels"].setdefault(value_field, {})
+                        pairs[value] = pairs.get(value, "") or source_row.get(
+                            "valueLabel", ""
+                        )
+                else:
+                    self._add_value(target, value_field, value)
 
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=_OUTPUT_COLUMNS, lineterminator="\n")
@@ -448,7 +450,28 @@ class WikidataSparqlAdapter(SourceAdapter):
             key=lambda row: (str(row["qid"]), str(row["format"])),
         ):
             rendered: dict[str, str] = {}
+            paired_labels = target.get("_paired_labels", {})
+            paired_label_fields = {
+                label_field
+                for value_field, label_field in _PROPERTY_TO_FIELD.values()
+                if label_field
+            }
             for column in _OUTPUT_COLUMNS:
+                if column in paired_labels:
+                    pairs = sorted(paired_labels[column].items())
+                    rendered[column] = "|".join(value for value, _ in pairs)
+                    label_field = _PROPERTY_TO_FIELD[
+                        next(
+                            predicate
+                            for predicate, fields in _PROPERTY_TO_FIELD.items()
+                            if fields[0] == column
+                        )
+                    ][1]
+                    if label_field:
+                        rendered[label_field] = "|".join(label for _, label in pairs)
+                    continue
+                if column in paired_label_fields and column in rendered:
+                    continue
                 value = target[column]
                 if isinstance(value, set):
                     rendered[column] = "|".join(sorted(value))
