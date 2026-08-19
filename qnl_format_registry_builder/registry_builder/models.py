@@ -40,6 +40,49 @@ class SourceSnapshot:
     changed: bool | None = None
     from_cache: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
+    # How this snapshot was obtained: "local" (administrator-dropped input
+    # file), "network" (fetched from the source), or "cache" (replay of a
+    # previously stored snapshot). None on snapshots stored before this field
+    # existed.
+    acquisition_mode: str | None = None
+    # When the SOURCE says this material was published/updated — a NARA release
+    # date, an HTTP Last-Modified, a Bit List edition year. Distinct from
+    # acquired_at, which only says when WE fetched it. Obsolescence trend needs
+    # the former; conflating the two makes stale data look fresh.
+    source_published_at: str | None = None
+    # Source-declared edition/release label (e.g. "20260320", "2025").
+    edition: str | None = None
+
+
+def snapshot_currency(snapshot: "SourceSnapshot", *, now: datetime | None = None) -> dict[str, Any]:
+    """Describe how old a snapshot's data is.
+
+    Two ages are reported because they answer different questions:
+    - published_age_days: how stale the source material itself is
+    - acquired_age_days: how long since we last checked the source
+    """
+    now = now or datetime.now(timezone.utc)
+
+    def _age_days(value: str | None) -> int | None:
+        if not value:
+            return None
+        text = str(value).strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return max(0, int((now - parsed).total_seconds() // 86400))
+
+    return {
+        "acquisition_mode": snapshot.acquisition_mode,
+        "acquired_at": snapshot.acquired_at,
+        "acquired_age_days": _age_days(snapshot.acquired_at),
+        "source_published_at": snapshot.source_published_at,
+        "published_age_days": _age_days(snapshot.source_published_at),
+        "edition": snapshot.edition,
+    }
 
 
 @dataclass

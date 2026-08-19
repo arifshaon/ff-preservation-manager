@@ -13,7 +13,7 @@ from registry_builder.criterion_mapping import build_criterion_claims, load_mapp
 from registry_builder.db import write_sqlite
 from registry_builder.identifier_rules import load_identifier_rules
 from registry_builder.method_profiles import assign_method_profiles, load_method_profile_config
-from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, SourceSnapshot, utc_now_iso
+from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, SourceSnapshot, snapshot_currency, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
 from registry_builder.storage import create_store
@@ -378,6 +378,28 @@ def _source_snapshot_status(snapshots: list[SourceSnapshot], *, offline: bool) -
         "snapshots_unchanged": unchanged,
         "snapshots_from_cache": from_cache,
         "snapshots_unknown": unknown,
+        "data_currency": _source_data_currency(snapshots),
+    }
+
+
+def _source_data_currency(snapshots: list[SourceSnapshot]) -> dict[str, Any]:
+    """Answer "how old is this source's data?" every time the source is checked."""
+    entries = [snapshot_currency(snapshot) for snapshot in snapshots]
+    published_ages = [e["published_age_days"] for e in entries if e.get("published_age_days") is not None]
+    acquired_ages = [e["acquired_age_days"] for e in entries if e.get("acquired_age_days") is not None]
+    network_errors = sorted({
+        str(snapshot.metadata.get("network_error"))
+        for snapshot in snapshots
+        if snapshot.metadata.get("network_error")
+    })
+    return {
+        "acquisition_modes": sorted({s.acquisition_mode for s in snapshots if s.acquisition_mode}),
+        "editions": sorted({s.edition for s in snapshots if s.edition}),
+        "source_published_at": max((s.source_published_at for s in snapshots if s.source_published_at), default=None),
+        "published_age_days_max": max(published_ages, default=None),
+        "acquired_age_days_max": max(acquired_ages, default=None),
+        "publication_date_known": any(s.source_published_at for s in snapshots),
+        "network_errors": network_errors,
     }
 
 
@@ -389,6 +411,7 @@ def _empty_source_status(*, offline: bool) -> dict[str, Any]:
         "snapshots_unchanged": 0,
         "snapshots_from_cache": 0,
         "snapshots_unknown": 0,
+        "data_currency": _source_data_currency([]),
     }
 
 
@@ -646,6 +669,13 @@ def run_pipeline(
             source_config = dict(source)
             if offline:
                 source_config["offline"] = True
+            # One drop-folder convention for every source: <input_root>/<source_id>/.
+            # Relative input_root resolves against the config file, like other
+            # config-referenced paths.
+            source_config.setdefault(
+                "input_root",
+                str(resolve_config_path(config_path, config.get("input_root") or "input")),
+            )
             adapter = adapter_cls(source_config, workdir)
             _emit_progress(progress, "source_acquire_started", source_id=source_id, source_type=source_type)
             snapshots = adapter.acquire()
@@ -658,6 +688,7 @@ def run_pipeline(
                 snapshots_changed=sum(1 for snapshot in snapshots if snapshot.changed is True),
                 snapshots_unchanged=sum(1 for snapshot in snapshots if snapshot.changed is False and not snapshot.from_cache),
                 snapshots_from_cache=sum(1 for snapshot in snapshots if snapshot.from_cache),
+                data_currency=_source_data_currency(snapshots),
             )
             _emit_progress(progress, "source_extract_started", source_id=source_id, source_type=source_type, snapshots=len(snapshots))
             extracted = adapter.extract(snapshots)

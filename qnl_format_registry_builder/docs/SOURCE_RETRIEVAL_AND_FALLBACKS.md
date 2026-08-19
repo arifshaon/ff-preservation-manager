@@ -18,6 +18,71 @@ local/admin files
 
 The distinction matters for audit and reproducibility. A cached snapshot proves what was used in a previous run. A local/admin file proves an operator supplied a source file for this run. Both avoid the network, but they are different provenance paths.
 
+## The acquisition policy (one convention for every source)
+
+Migrated adapters (`wikidata_sparql`, `nara_digital_preservation_framework`, and
+any new adapter that implements `network_acquire()`) follow one decision order,
+implemented once in the adapter base class:
+
+```text
+1. Files exist in input/<source_id>/  ->  use them; do NOT contact the network.
+   A dropped file is explicit admin intent.
+2. force_check_url: true              ->  fetch fresh anyway; if the fetch fails
+   (404, 503, DNS, timeout) fall back to the dropped files and record why in
+   snapshot metadata (network_error, network_fallback).
+3. No dropped files                   ->  fetch from the network; on failure,
+   replay the cached snapshots from the previous run and record why.
+```
+
+`acquisition_policy` can pin a mode explicitly:
+
+```text
+auto          the order above (default)
+local_only    dropped files or fail loudly
+network_only  fetch or fail; no silent fallback
+cache_only    replay cache only (what --offline maps to)
+```
+
+Create the drop folders, each with a per-source README, with:
+
+```bash
+python -m registry_builder init-source-inbox --config config/sources.example.json
+```
+
+Folders are only created for sources whose adapter actually reads dropped
+files, so a file can never be silently ignored in a folder this command made.
+`input_root` in the pipeline config moves the root (default `input/`, resolved
+relative to the config file); `input_dir` on a single source overrides its
+folder.
+
+### Provenance for dropped files
+
+`acquired_at` says when we fetched data; it says nothing about how old the data
+is. Every snapshot therefore also carries `source_published_at`, `edition`, and
+`acquisition_mode` (`local` / `network` / `cache`):
+
+- NARA infers release date and file kind from its published filenames.
+- Network fetches use the HTTP `Last-Modified` header when the source sends one.
+- Anything else can be declared in `input/<source_id>/manifest.json`
+  (`{"published_at": ..., "edition": ..., "files": {"<name>": {...}}}`) or a
+  per-file `<name>.meta.json` sidecar. Sidecar beats per-file manifest entry
+  beats folder-level manifest.
+
+### Data age is reported on every check
+
+Each acquisition logs and reports how old the data is, in two distinct ages:
+
+```text
+[registry-builder] source nara acquired 2 snapshot(s); ... via=local;
+  published 2026-03-20 (152 day(s) old); last fetched 3 day(s) ago
+```
+
+The run report carries the same per source under `data_currency`
+(`acquisition_modes`, `editions`, `source_published_at`,
+`published_age_days_max`, `acquired_age_days_max`, `publication_date_known`,
+`network_errors`). A source whose publication date is unknown says so rather
+than pretending freshness.
+
 ## Snapshot cache
 
 Every acquired source file is copied into:

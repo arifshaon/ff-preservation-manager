@@ -555,6 +555,16 @@ one entirely; the result set must still expose the same binding names
 (`item`, `itemLabel`, `puids`, `fdds`, `exts`, `mimes`, `developers`,
 `replacedBy`, `published`).
 
+### Local input files
+
+The adapter follows the shared acquisition policy: a saved SPARQL JSON result
+dropped in `input/wikidata_sparql/` is used instead of contacting the endpoint
+(set `force_check_url: true` to fetch fresh, with automatic fallback to the
+dropped file on 404/503). Wikidata publishes no edition, so record when the
+query was run in `manifest.json` as `{"published_at": "YYYY-MM-DD"}` for the
+data-age report. See
+[`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md).
+
 ### Run it after PRONOM, not on its own
 
 Every harvested record anchors on an asserted PUID, so a standalone run has

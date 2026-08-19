@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 
-from registry_builder.adapters.base import SourceAdapter
+from registry_builder.adapters.base import NETWORK_ERRORS, SourceAdapter, describe_network_error
 from registry_builder.hazard import BAND_TO_SCORE
 from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.utils import read_uri, split_multi
@@ -253,6 +253,14 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     """
 
     type_name = "nara_digital_preservation_framework"
+    supports_input_dir = True
+    inbox_hint = (
+        "Drop the NARA release CSVs here, keeping their published filenames "
+        "(e.g. NARA_PreservationActionPlan_FileFormats_20260320.csv and "
+        "NARA_File_Format_Risk_Matrix_20260320_Numbered.csv). Kind and release "
+        "date are inferred from the filename; a manifest.json is only needed "
+        "for renamed files."
+    )
     default_uris = DEFAULT_NARA_URIS
 
     def _github_ref(self) -> str:
@@ -505,9 +513,83 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             return self._local_file_sources()
         raise ValueError("NARA release_mode must be one of: explicit_uris, pinned, latest, local_files")
 
+    def describe_local_file(self, path: Path) -> dict[str, Any]:
+        """NARA filenames are self-describing: kind and release date are inferred.
+
+        e.g. NARA_File_Format_Risk_Matrix_20260320_Numbered.csv
+        """
+        described = super().describe_local_file(path)
+        release_date = described.get("release_date") or described.get("edition") or _release_date_from_text(path.name)
+        if release_date:
+            release_date = _normalize_release_date(release_date)
+            described.setdefault("release_date", release_date)
+            described.setdefault("edition", release_date)
+            described.setdefault(
+                "source_published_at",
+                f"{release_date[0:4]}-{release_date[4:6]}-{release_date[6:8]}",
+            )
+        kind = described.get("kind") or _kind_from_file_name(path.name)
+        if kind:
+            described.setdefault("kind", kind)
+        return described
+
     def acquire(self) -> list[SourceSnapshot]:
+        """Policy-aware acquisition over NARA's release modes.
+
+        Files dropped in input/<source_id>/ win outright: the configured release
+        mode is not consulted and the network is not contacted, unless
+        force_check_url is set — in which case a failed network fetch (404, 503,
+        timeout) falls back to the dropped files with the failure recorded.
+        """
+        inbox = self.local_input_files()
+        policy = self.acquisition_policy
+        if policy == "local_only":
+            snapshots = self._acquire_inbox(inbox)
+        elif inbox and policy == "auto" and not self.force_check_url:
+            logger.info(
+                "NARA: using %d dropped file(s) from %s; network not contacted (set force_check_url to override)",
+                len(inbox), self.input_dir(),
+            )
+            snapshots = self._acquire_inbox(inbox)
+        else:
+            try:
+                snapshots = self._acquire_configured_sources()
+            except NETWORK_ERRORS as exc:
+                if not inbox:
+                    raise
+                reason = describe_network_error(exc)
+                logger.warning("NARA: network fetch failed (%s); falling back to dropped input files", reason)
+                snapshots = self._acquire_inbox(inbox, network_error=reason)
+        self._log_currency(snapshots)
+        return snapshots
+
+    def _acquire_inbox(self, inbox: list[Path], *, network_error: str | None = None) -> list[SourceSnapshot]:
+        if not inbox:
+            raise FileNotFoundError(
+                f"No NARA input files found under {self.input_dir()}; "
+                "drop the release CSVs there or configure a network release_mode"
+            )
+        sources = self._local_file_sources(
+            [self._inbox_entry(path) for path in inbox],
+            release_mode="input_dir",
+            resolution_error=network_error,
+        )
+        return self._acquire_sources(sources)
+
+    def _inbox_entry(self, path: Path) -> dict[str, Any]:
+        entry = {"path": str(path)}
+        described = self.describe_local_file(path)
+        for key in ("kind", "release_date"):
+            if described.get(key):
+                entry[key] = described[key]
+        return entry
+
+    def _acquire_configured_sources(self) -> list[SourceSnapshot]:
+        return self._acquire_sources(self._resolved_sources())
+
+    def _acquire_sources(self, sources: list[dict[str, Any]]) -> list[SourceSnapshot]:
         snapshots: list[SourceSnapshot] = []
-        for source in self._resolved_sources():
+        for source in sources:
             uri = source["uri"]
             note = "; ".join(
                 x for x in [
@@ -520,6 +602,13 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 ] if x
             )
             metadata = {k: v for k, v in source.items() if k != "uri"}
+            release_date = source.get("release_date")
+            if release_date:
+                metadata.setdefault("edition", str(release_date))
+                metadata.setdefault(
+                    "source_published_at",
+                    f"{str(release_date)[0:4]}-{str(release_date)[4:6]}-{str(release_date)[6:8]}",
+                )
             if source.get("source_location") == "local_file":
                 snapshots.append(
                     self.acquire_file_snapshot(

@@ -96,6 +96,12 @@ class WikidataSparqlAdapter(SourceAdapter):
     """Harvest cross-registry identity links from the Wikidata Query Service."""
 
     type_name = "wikidata_sparql"
+    inbox_hint = (
+        "Drop a saved SPARQL JSON result here (query the endpoint with "
+        "format=json). Wikidata publishes no edition, so record when the query "
+        "was run in manifest.json as {\"published_at\": \"YYYY-MM-DD\"} if you "
+        "want data age reported."
+    )
 
     def _endpoint(self) -> str:
         return str(self.config.get("endpoint") or DEFAULT_WIKIDATA_ENDPOINT)
@@ -123,7 +129,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         """
         return f"{self._endpoint()}?{urlencode({'query': self._query(), 'format': 'json'})}"
 
-    def acquire(self) -> list[SourceSnapshot]:
+    def network_acquire(self) -> list[SourceSnapshot]:
         return [
             self.acquire_uri_snapshot(
                 self.request_uri(),
@@ -136,6 +142,19 @@ class WikidataSparqlAdapter(SourceAdapter):
                 },
             )
         ]
+
+    def describe_local_file(self, path):  # type: ignore[override]
+        """A dropped file is a saved SPARQL JSON result.
+
+        Wikidata is continuously edited and publishes no edition, so a dropped
+        result has no inherent publication date — the closest honest statement
+        is when the query was run, which the manifest/sidecar can record as
+        source_published_at. Nothing is inferred from the filename.
+        """
+        described = super().describe_local_file(path)
+        described.setdefault("retrieval_mode", "sparql_local_result")
+        described.setdefault("anchor_property", P_PRONOM_FILE_FORMAT)
+        return described
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
         payloads = [

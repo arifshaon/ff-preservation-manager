@@ -107,10 +107,22 @@ def _format_progress(event: dict[str, Any]) -> str:
     if name == "source_acquire_started":
         return f"[registry-builder] source {event.get('source_id')} acquiring snapshots..."
     if name == "source_acquire_completed":
+        currency = event.get("data_currency") or {}
+        modes = ",".join(currency.get("acquisition_modes") or []) or "unknown"
+        if currency.get("publication_date_known"):
+            age = (
+                f"published {currency.get('source_published_at')}"
+                + (f" ({currency.get('published_age_days_max')} day(s) old)" if currency.get("published_age_days_max") is not None else "")
+            )
+        else:
+            age = "publication date unknown"
+        if currency.get("acquired_age_days_max"):
+            age += f"; last fetched {currency.get('acquired_age_days_max')} day(s) ago"
+        errors = f"; network_error={'|'.join(currency['network_errors'])}" if currency.get("network_errors") else ""
         return (
             f"[registry-builder] source {event.get('source_id')} acquired {event.get('snapshots', 0)} snapshot(s); "
             f"changed={event.get('snapshots_changed', 0)}, unchanged={event.get('snapshots_unchanged', 0)}, "
-            f"cached={event.get('snapshots_from_cache', 0)}"
+            f"cached={event.get('snapshots_from_cache', 0)}; via={modes}; {age}{errors}"
         )
     if name == "source_extract_started":
         return f"[registry-builder] source {event.get('source_id')} extracting from {event.get('snapshots', 0)} snapshot(s)..."
@@ -290,6 +302,59 @@ def _backfill_inputs(args) -> tuple[Any, Any, list[dict[str, Any]], str | None, 
     )
 
 
+_INBOX_README_TEMPLATE = """# {source_id} input files
+
+{hint}
+
+How acquisition works:
+
+- If any file is present in this folder, the pipeline uses it and does NOT
+  contact the network. A dropped file is treated as explicit admin intent.
+- Set `force_check_url: true` on the source config to fetch fresh data anyway;
+  if the fetch fails (404/503/timeout) the run falls back to these files and
+  records why.
+- Optional `manifest.json` here can declare provenance the filename does not
+  carry: {{"published_at": "YYYY-MM-DD", "edition": "...", "files": {{"<name>": {{...}}}}}}.
+  A `<name>.meta.json` sidecar next to a file does the same for one file.
+- Every run reports how old the data is (publication date and last-fetched age).
+
+Files named README/manifest.json/*.meta.json are never treated as source data.
+"""
+
+
+def cmd_init_source_inbox(args) -> dict[str, Any]:
+    from registry_builder.adapters import resolve_adapter
+
+    config = _load_json(args.config)
+    input_root = Path(_resolve_relative(args.config, config.get("input_root") or "input"))
+    results: list[dict[str, Any]] = []
+    for source in config.get("sources", []):
+        source_id = source.get("id")
+        if not source.get("enabled", True):
+            results.append({"source_id": source_id, "status": "skipped_disabled"})
+            continue
+        adapter_cls = resolve_adapter(source["type"])
+        if not adapter_cls.reads_input_dir():
+            # Creating a folder whose contents would be silently ignored is
+            # worse than not creating it.
+            results.append({
+                "source_id": source_id,
+                "status": "not_supported",
+                "note": f"adapter type {source['type']} does not read dropped input files yet",
+            })
+            continue
+        directory = Path(source.get("input_dir") or input_root / source_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        readme = directory / "README.md"
+        if not readme.exists():
+            readme.write_text(
+                _INBOX_README_TEMPLATE.format(source_id=source_id, hint=adapter_cls.inbox_hint),
+                encoding="utf-8",
+            )
+        results.append({"source_id": source_id, "status": "ready", "path": str(directory)})
+    return {"input_root": str(input_root), "sources": results}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="registry-builder")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -301,6 +366,12 @@ def main() -> None:
     run.add_argument("--offline", action="store_true", help="Use cached source snapshots only; do not fetch remote sources")
     run.add_argument("--heartbeat-every", type=int, default=30, help="Report that the pipeline is still running after this many seconds of quiet work")
     run.add_argument("--no-progress", action="store_true", help="Suppress registry run progress and heartbeat messages on stderr")
+
+    inbox = sub.add_parser(
+        "init-source-inbox",
+        help="Create input/<source_id>/ drop folders (with README) for every enabled source that reads local input files",
+    )
+    inbox.add_argument("--config", required=True)
 
     val = sub.add_parser("validate", help="Validate a generated registry.json")
     val.add_argument("--registry", required=True)
@@ -377,6 +448,8 @@ def main() -> None:
                 flush=True,
             )
         print(json.dumps(report, indent=2, ensure_ascii=False))
+    elif args.command == "init-source-inbox":
+        _write_or_print(cmd_init_source_inbox(args))
     elif args.command == "validate":
         registry = _load_registry(args.registry)
         errors, warnings = validate_registry(registry)
