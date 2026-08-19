@@ -21,119 +21,191 @@ DEFAULT_USER_AGENT = (
 )
 
 _PREFIXES = """\
+PREFIX wd: <http://www.wikidata.org/entity/>
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX schema: <http://schema.org/>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+"""
+
+# Primary population: items modelled as file formats (including instances of
+# subclasses of Q235557). The P2748 UNION keeps PRONOM-linked file-format/family
+# items even where Wikidata classification is incomplete.
+_POPULATION = """\
+{
+  ?format wdt:P31/wdt:P279* wd:Q235557 .
+}
+UNION
+{
+  ?format wdt:P2748 ?_populationPuid .
+}
 """
 
 DEFAULT_QUERY_PARTS: dict[str, str] = {
     "core": (
         _PREFIXES
-        + r"""
-SELECT ?format ?qid ?puid ?formatLabel WHERE {
-  ?format wdt:P2749 ?puid .
+        + f"""
+SELECT DISTINCT ?format ?qid ?formatLabel ?formatDescription WHERE {{
+  {_POPULATION}
   BIND(REPLACE(STR(?format), "^.*/", "") AS ?qid)
-  OPTIONAL {
+  OPTIONAL {{
     ?format rdfs:label ?formatLabel .
     FILTER(LANG(?formatLabel) = "en")
-  }
-}
-ORDER BY ?puid ?format
+  }}
+  OPTIONAL {{
+    ?format schema:description ?formatDescription .
+    FILTER(LANG(?formatDescription) = "en")
+  }}
+}}
+ORDER BY ?qid
 """.strip()
     ),
-    "loc_fdd": (
+    "aliases": (
         _PREFIXES
-        + r"""
-SELECT ?format ?puid ?locFdd WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P3267 ?locFdd .
-}
-ORDER BY ?puid ?format ?locFdd
+        + f"""
+SELECT DISTINCT ?format ?alias WHERE {{
+  {_POPULATION}
+  ?format skos:altLabel ?alias .
+  FILTER(LANG(?alias) = "en")
+}}
+ORDER BY ?format ?alias
 """.strip()
     ),
-    "extension": (
+    "classification": (
         _PREFIXES
-        + r"""
-SELECT ?format ?puid ?extension WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P1195 ?extension .
-}
-ORDER BY ?puid ?format ?extension
+        + f"""
+SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {{
+  {_POPULATION}
+  VALUES ?predicate {{ wdt:P31 wdt:P279 }}
+  ?format ?predicate ?value .
+  OPTIONAL {{
+    ?value rdfs:label ?valueLabel .
+    FILTER(LANG(?valueLabel) = "en")
+  }}
+}}
+ORDER BY ?format ?predicate ?value
 """.strip()
     ),
-    "mime_type": (
+    "identifiers": (
         _PREFIXES
-        + r"""
-SELECT ?format ?puid ?mimeType WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P1163 ?mimeType .
-}
-ORDER BY ?puid ?format ?mimeType
+        + f"""
+SELECT DISTINCT ?format ?predicate ?value WHERE {{
+  {_POPULATION}
+  VALUES ?predicate {{ wdt:P2748 wdt:P3266 wdt:P11167 }}
+  ?format ?predicate ?value .
+}}
+ORDER BY ?format ?predicate ?value
 """.strip()
     ),
-    "developer": (
+    "technical_literals": (
         _PREFIXES
-        + r"""
-SELECT ?format ?puid ?developerQid ?developerLabel WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P178 ?developer .
-  BIND(REPLACE(STR(?developer), "^.*/", "") AS ?developerQid)
-  OPTIONAL {
-    ?developer rdfs:label ?developerLabel .
-    FILTER(LANG(?developerLabel) = "en")
-  }
-}
-ORDER BY ?puid ?format ?developerQid
+        + f"""
+SELECT DISTINCT ?format ?predicate ?value WHERE {{
+  {_POPULATION}
+  VALUES ?predicate {{
+    wdt:P1195
+    wdt:P1163
+    wdt:P348
+    wdt:P4152
+    wdt:P577
+    wdt:P571
+    wdt:P856
+  }}
+  ?format ?predicate ?value .
+}}
+ORDER BY ?format ?predicate ?value
 """.strip()
     ),
-    "publication_date": (
+    "item_relations": (
         _PREFIXES
-        + r"""
-SELECT ?format ?puid ?publicationDate WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P577 ?publicationDate .
-}
-ORDER BY ?puid ?format ?publicationDate
-""".strip()
-    ),
-    "inception_date": (
-        _PREFIXES
-        + r"""
-SELECT ?format ?puid ?inceptionDate WHERE {
-  ?format wdt:P2749 ?puid ;
-          wdt:P571 ?inceptionDate .
-}
-ORDER BY ?puid ?format ?inceptionDate
+        + f"""
+SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {{
+  {_POPULATION}
+  VALUES ?predicate {{
+    wdt:P178
+    wdt:P361
+    wdt:P144
+    wdt:P1365
+    wdt:P1366
+    wdt:P1343
+  }}
+  ?format ?predicate ?value .
+  OPTIONAL {{
+    ?value rdfs:label ?valueLabel .
+    FILTER(LANG(?valueLabel) = "en")
+  }}
+}}
+ORDER BY ?format ?predicate ?value
 """.strip()
     ),
 }
 
-# Backwards-compatible name for callers that inspect the primary/default query.
-# Normal acquisition uses DEFAULT_QUERY_PARTS.
 DEFAULT_FILE_FORMAT_QUERY = DEFAULT_QUERY_PARTS["core"]
+
+_PROPERTY_TO_FIELD = {
+    "http://www.wikidata.org/prop/direct/P31": ("instanceOfQid", "instanceOfLabel"),
+    "http://www.wikidata.org/prop/direct/P279": ("subclassOfQid", "subclassOfLabel"),
+    "http://www.wikidata.org/prop/direct/P2748": ("puid", None),
+    "http://www.wikidata.org/prop/direct/P3266": ("locFdd", None),
+    "http://www.wikidata.org/prop/direct/P11167": ("naraFormatPlanId", None),
+    "http://www.wikidata.org/prop/direct/P1195": ("extension", None),
+    "http://www.wikidata.org/prop/direct/P1163": ("mimeType", None),
+    "http://www.wikidata.org/prop/direct/P348": ("version", None),
+    "http://www.wikidata.org/prop/direct/P4152": ("identificationPattern", None),
+    "http://www.wikidata.org/prop/direct/P577": ("publicationDate", None),
+    "http://www.wikidata.org/prop/direct/P571": ("inceptionDate", None),
+    "http://www.wikidata.org/prop/direct/P856": ("officialWebsite", None),
+    "http://www.wikidata.org/prop/direct/P178": ("developerQid", "developerLabel"),
+    "http://www.wikidata.org/prop/direct/P361": ("partOfQid", "partOfLabel"),
+    "http://www.wikidata.org/prop/direct/P144": ("basedOnQid", "basedOnLabel"),
+    "http://www.wikidata.org/prop/direct/P1365": ("replacesQid", "replacesLabel"),
+    "http://www.wikidata.org/prop/direct/P1366": ("replacedByQid", "replacedByLabel"),
+    "http://www.wikidata.org/prop/direct/P1343": ("describedByQid", "describedByLabel"),
+}
 
 _OUTPUT_COLUMNS = [
     "format",
     "qid",
-    "puid",
     "formatLabel",
+    "formatDescription",
+    "aliases",
+    "instanceOfQid",
+    "instanceOfLabel",
+    "subclassOfQid",
+    "subclassOfLabel",
+    "puid",
     "locFdd",
+    "naraFormatPlanId",
     "extension",
     "mimeType",
+    "version",
+    "identificationPattern",
     "developerQid",
     "developerLabel",
     "publicationDate",
     "inceptionDate",
+    "partOfQid",
+    "partOfLabel",
+    "basedOnQid",
+    "basedOnLabel",
+    "replacesQid",
+    "replacesLabel",
+    "replacedByQid",
+    "replacedByLabel",
+    "describedByQid",
+    "describedByLabel",
+    "officialWebsite",
 ]
 
 
 class WikidataSparqlAdapter(SourceAdapter):
-    """Download Wikidata file-format crosswalk metadata without ingesting it.
+    """Download Wikidata file-format metadata without ingesting it.
 
-    Default acquisition deliberately uses several small SPARQL queries and merges
-    them locally. This avoids one large OPTIONAL/GROUP_CONCAT query that can hit
-    the public Wikidata Query Service execution limit. The final CSV remains
-    acquisition-only: ``extract`` returns no RawFormatRecord objects, so Wikidata
-    cannot affect canonical identities, criterion claims, risk scores, or MongoDB.
+    The default acquisition uses several statement-oriented SPARQL queries and
+    merges them locally. The final CSV is one row per Wikidata item, with
+    multi-valued properties pipe-delimited. ``extract`` deliberately returns no
+    RawFormatRecord objects, so Wikidata cannot alter canonical identities,
+    criterion claims, risk scores, or MongoDB at this stage.
     """
 
     type_name = "wikidata_sparql"
@@ -169,7 +241,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         return hashlib.sha256(self._query_material().encode("utf-8")).hexdigest()
 
     def _cache_key(self) -> str:
-        mode = "custom" if self.custom_query else "partitioned-default"
+        mode = "custom" if self.custom_query else "partitioned-default-v2"
         return (
             f"{self.endpoint}#query-sha256={self._query_sha256()}"
             f"&format=csv&mode={mode}"
@@ -192,7 +264,6 @@ class WikidataSparqlAdapter(SourceAdapter):
         }
 
         last_error: Exception | None = None
-        last_body = ""
         for attempt in range(retries + 1):
             request = Request(self.endpoint, data=payload, headers=headers, method="POST")
             try:
@@ -206,12 +277,12 @@ class WikidataSparqlAdapter(SourceAdapter):
             except HTTPError as exc:
                 last_error = exc
                 try:
-                    last_body = exc.read().decode("utf-8", errors="replace").strip()
+                    body = exc.read().decode("utf-8", errors="replace").strip()
                 except Exception:
-                    last_body = ""
+                    body = ""
                 retryable = exc.code in {429, 500, 502, 503, 504}
                 if not retryable or attempt >= retries:
-                    detail = f": {last_body[:500]}" if last_body else ""
+                    detail = f": {body[:500]}" if body else ""
                     raise RuntimeError(
                         f"Wikidata SPARQL query '{query_name}' failed with "
                         f"HTTP {exc.code}{detail}"
@@ -266,43 +337,52 @@ class WikidataSparqlAdapter(SourceAdapter):
         return str(uri or "").rstrip("/").rsplit("/", 1)[-1]
 
     @staticmethod
-    def _new_merged_row(format_uri: str, puid: str) -> dict[str, Any]:
-        return {
+    def _new_merged_row(format_uri: str, qid: str = "") -> dict[str, Any]:
+        row: dict[str, Any] = {
             "format": format_uri,
-            "qid": WikidataSparqlAdapter._qid_from_uri(format_uri),
-            "puid": puid,
+            "qid": qid or WikidataSparqlAdapter._qid_from_uri(format_uri),
             "formatLabel": "",
-            "locFdd": set(),
-            "extension": set(),
-            "mimeType": set(),
-            "developers": {},
-            "publicationDate": set(),
-            "inceptionDate": set(),
+            "formatDescription": "",
         }
+        for column in _OUTPUT_COLUMNS:
+            if column not in row:
+                row[column] = set()
+        return row
 
     @staticmethod
     def _ensure_merged_row(
-        rows: dict[tuple[str, str], dict[str, Any]],
+        rows: dict[str, dict[str, Any]],
         format_uri: str,
-        puid: str,
-    ) -> dict[str, Any]:
-        key = (format_uri, puid)
-        if key not in rows:
-            rows[key] = WikidataSparqlAdapter._new_merged_row(format_uri, puid)
-        return rows[key]
+        *,
+        qid: str = "",
+    ) -> dict[str, Any] | None:
+        if not format_uri:
+            return None
+        if format_uri not in rows:
+            rows[format_uri] = WikidataSparqlAdapter._new_merged_row(format_uri, qid)
+        elif qid:
+            rows[format_uri]["qid"] = qid
+        return rows[format_uri]
+
+    @staticmethod
+    def _add_value(target: dict[str, Any], field: str, value: str) -> None:
+        if not value:
+            return
+        slot = target.get(field)
+        if isinstance(slot, set):
+            slot.add(value)
 
     def _fetch_partitioned_default(self) -> tuple[bytes, dict[str, Any]]:
-        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        merged: dict[str, dict[str, Any]] = {}
         part_stats: dict[str, Any] = {}
 
         specs = {
-            "core": {"format", "qid", "puid", "formatLabel"},
-            "loc_fdd": {"format", "puid", "locFdd"},
-            "extension": {"format", "puid", "extension"},
-            "mime_type": {"format", "puid", "mimeType"},
-            "developer": {"format", "puid", "developerQid", "developerLabel"},
-            "publication_date": {"format", "puid", "publicationDate"},
-            "inception_date": {"format", "puid", "inceptionDate"},
+            "core": {"format", "qid", "formatLabel", "formatDescription"},
+            "aliases": {"format", "alias"},
+            "classification": {"format", "predicate", "value", "valueLabel"},
+            "identifiers": {"format", "predicate", "value"},
+            "technical_literals": {"format", "predicate", "value"},
+            "item_relations": {"format", "predicate", "value", "valueLabel"},
         }
 
         for name, query in DEFAULT_QUERY_PARTS.items():
@@ -320,73 +400,73 @@ class WikidataSparqlAdapter(SourceAdapter):
 
             for source_row in rows:
                 format_uri = source_row.get("format", "")
-                puid = source_row.get("puid", "")
-                if not format_uri or not puid:
-                    continue
-                target = self._ensure_merged_row(merged, format_uri, puid)
-
                 if name == "core":
-                    target["qid"] = source_row.get("qid") or target["qid"]
+                    target = self._ensure_merged_row(
+                        merged,
+                        format_uri,
+                        qid=source_row.get("qid", ""),
+                    )
+                    if target is None:
+                        continue
                     if source_row.get("formatLabel"):
                         target["formatLabel"] = source_row["formatLabel"]
-                elif name == "loc_fdd":
-                    if source_row.get("locFdd"):
-                        target["locFdd"].add(source_row["locFdd"])
-                elif name == "extension":
-                    if source_row.get("extension"):
-                        target["extension"].add(source_row["extension"])
-                elif name == "mime_type":
-                    if source_row.get("mimeType"):
-                        target["mimeType"].add(source_row["mimeType"])
-                elif name == "developer":
-                    qid = source_row.get("developerQid", "")
-                    if qid:
-                        label = source_row.get("developerLabel", "")
-                        previous = target["developers"].get(qid, "")
-                        target["developers"][qid] = previous or label
-                elif name == "publication_date":
-                    if source_row.get("publicationDate"):
-                        target["publicationDate"].add(source_row["publicationDate"])
-                elif name == "inception_date":
-                    if source_row.get("inceptionDate"):
-                        target["inceptionDate"].add(source_row["inceptionDate"])
+                    if source_row.get("formatDescription"):
+                        target["formatDescription"] = source_row["formatDescription"]
+                    continue
+
+                # Non-core query results are only accepted for items established
+                # by the core population query.
+                target = merged.get(format_uri)
+                if target is None:
+                    continue
+
+                if name == "aliases":
+                    self._add_value(target, "aliases", source_row.get("alias", ""))
+                    continue
+
+                predicate = source_row.get("predicate", "")
+                mapping = _PROPERTY_TO_FIELD.get(predicate)
+                if mapping is None:
+                    continue
+                value_field, label_field = mapping
+                value = source_row.get("value", "")
+                if value_field.endswith("Qid"):
+                    value = self._qid_from_uri(value)
+                self._add_value(target, value_field, value)
+                if label_field:
+                    self._add_value(
+                        target,
+                        label_field,
+                        source_row.get("valueLabel", ""),
+                    )
 
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=_OUTPUT_COLUMNS, lineterminator="\n")
         writer.writeheader()
-
         for target in sorted(
             merged.values(),
-            key=lambda row: (str(row["puid"]), str(row["qid"]), str(row["format"])),
+            key=lambda row: (str(row["qid"]), str(row["format"])),
         ):
-            developer_items = sorted(target["developers"].items())
-            writer.writerow(
-                {
-                    "format": target["format"],
-                    "qid": target["qid"],
-                    "puid": target["puid"],
-                    "formatLabel": target["formatLabel"],
-                    "locFdd": "|".join(sorted(target["locFdd"])),
-                    "extension": "|".join(sorted(target["extension"])),
-                    "mimeType": "|".join(sorted(target["mimeType"])),
-                    "developerQid": "|".join(qid for qid, _ in developer_items),
-                    "developerLabel": "|".join(label for _, label in developer_items),
-                    "publicationDate": "|".join(sorted(target["publicationDate"])),
-                    "inceptionDate": "|".join(sorted(target["inceptionDate"])),
-                }
-            )
+            rendered: dict[str, str] = {}
+            for column in _OUTPUT_COLUMNS:
+                value = target[column]
+                if isinstance(value, set):
+                    rendered[column] = "|".join(sorted(value))
+                else:
+                    rendered[column] = str(value or "")
+            writer.writerow(rendered)
 
         csv_bytes = output.getvalue().encode("utf-8")
         self._validate_csv(
             csv_bytes,
-            required_columns={"format", "qid", "puid"},
+            required_columns={"format", "qid"},
         )
         return csv_bytes, part_stats
 
     def acquire(self) -> list[SourceSnapshot]:
         query_sha256 = self._query_sha256()
         cache_key = self._cache_key()
-        query_mode = "custom_single_query" if self.custom_query else "partitioned_default"
+        query_mode = "custom_single_query" if self.custom_query else "partitioned_default_v2"
         metadata: dict[str, Any] = {
             "endpoint": self.endpoint,
             "query_sha256": query_sha256,
@@ -421,7 +501,7 @@ class WikidataSparqlAdapter(SourceAdapter):
             data, response_headers = self._request_csv(
                 self.custom_query,
                 query_name="custom",
-                required_columns={"format", "qid", "puid"},
+                required_columns={"format", "qid"},
             )
             metadata["response_content_type"] = response_headers.get("content-type")
         else:
@@ -456,7 +536,4 @@ class WikidataSparqlAdapter(SourceAdapter):
         return snapshot
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
-        # Deliberately no ingestion yet. The Wikidata source must be studied and
-        # its identifier authority/scope rules agreed before it participates in
-        # normalization or reconciliation.
         return []
