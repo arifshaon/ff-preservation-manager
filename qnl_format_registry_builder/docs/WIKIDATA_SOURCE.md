@@ -1,43 +1,93 @@
 # Wikidata file-format acquisition
 
 The `wikidata_sparql` source adapter is currently **acquisition-only**.
-It downloads file-format crosswalk metadata from the Wikidata Query Service and stores the result as an immutable source snapshot plus a normal CSV file for review.
+It downloads file-format metadata from the Wikidata Query Service and stores the result as an immutable source snapshot plus a normal CSV file for review.
 
 It does **not** currently normalize Wikidata rows into `RawFormatRecord`, reconcile QIDs/PUIDs, create criterion claims, alter canonical formats, or write Wikidata-derived data to MongoDB.
 
+## Correct Wikidata properties
+
+The file-format identifiers used by this adapter are:
+
+- PRONOM file format ID: `P2748`
+- Library of Congress Format Description Document ID: `P3266`
+- NARA File Format Preservation Plan ID: `P11167`
+
+Do not use `P2749` for file formats: that is the PRONOM **software** identifier property. Do not use `P3267` for LOC FDD: that property is unrelated to LOC FDD.
+
+## Default population
+
+The default acquisition starts from Wikidata items modelled as file formats:
+
+```sparql
+?format wdt:P31/wdt:P279* wd:Q235557 .
+```
+
+It also includes items carrying a PRONOM file-format identifier (`P2748`) so that PRONOM-linked format/family items are not lost merely because Wikidata classification is incomplete.
+
+PRONOM, LOC and NARA identifiers are therefore **optional metadata**, not a requirement for an item to appear in the CSV.
+
 ## Default data retrieved
 
-The default acquisition is anchored on PRONOM ID (`P2749`) and retrieves:
+The merged CSV contains one row per Wikidata item. Multi-valued properties are pipe-delimited.
 
-- Wikidata entity URI and QID
-- PRONOM PUID (`P2749`)
+Identity and description:
+
+- Wikidata entity URI
+- QID
 - English label
-- Library of Congress FDD ID (`P3267`)
-- file extension (`P1195`)
-- MIME type (`P1163`)
-- developer/creator (`P178`), including QID and English label
-- publication date (`P577`)
-- inception date (`P571`), retained separately because Wikidata uses both date concepts
+- English description
+- English aliases
 
-Multi-valued properties are pipe-delimited in the CSV, producing one row per QID/PUID.
+Classification:
+
+- instance of (`P31`)
+- subclass of (`P279`)
+
+Cross-registry identifiers:
+
+- PRONOM file format ID (`P2748`)
+- LOC FDD ID (`P3266`)
+- NARA File Format Preservation Plan ID (`P11167`)
+
+Technical metadata:
+
+- file extension (`P1195`)
+- MIME/media type (`P1163`)
+- version (`P348`)
+- file format identification pattern / magic number (`P4152`)
+
+Origin and chronology:
+
+- developer (`P178`)
+- publication date (`P577`)
+- inception date (`P571`)
+
+Relationships and documentation context:
+
+- part of (`P361`)
+- based on (`P144`)
+- replaces (`P1365`)
+- replaced by (`P1366`)
+- described by source (`P1343`)
+- official website (`P856`)
+
+These fields are collected for source study only. Their semantics have not yet been mapped to canonical identity or preservation-risk criteria.
 
 ## Why the default acquisition is partitioned
 
-The public Wikidata Query Service has a hard query execution limit and variable public-cluster load. A single SPARQL query that joins all of the multi-valued properties above can create a large intermediate result before aggregation.
+The public Wikidata Query Service has a hard query execution limit and variable public-cluster load. One large query joining all multi-valued properties can create a very large intermediate result.
 
-For that reason the adapter deliberately runs several small queries:
+The adapter therefore runs several statement-oriented queries and merges them locally:
 
-1. core QID/PUID/English label
-2. LOC FDD IDs
-3. extensions
-4. MIME types
-5. developers
-6. publication dates
-7. inception dates
+1. core population, QID, English label and description
+2. English aliases
+3. classification (`P31`, `P279`)
+4. cross-registry identifiers (`P2748`, `P3266`, `P11167`)
+5. technical literals and dates
+6. item relationships and developer/source links
 
-The adapter then merges those results locally into the single review CSV. This is an acquisition implementation detail only: no Wikidata rows are ingested into the registry.
-
-HTTP 429 and transient 5xx responses (500/502/503/504) are retried with bounded backoff. If a query still fails, the error identifies the individual query part that failed.
+HTTP 429 and transient 5xx responses (500/502/503/504) are retried with bounded backoff. If a query still fails, the error identifies the individual query part.
 
 ## Download
 
@@ -57,14 +107,6 @@ The default endpoint is:
 https://query.wikidata.org/sparql
 ```
 
-The default User-Agent identifies this repository. It can be overridden:
-
-```powershell
-python -m registry_builder.wikidata_download `
-  --out wikidata-file-formats.csv `
-  --user-agent "QNL-Format-Registry-Research/1.0 (contact@example.org)"
-```
-
 ## Custom query
 
 A reviewed SPARQL query can still be supplied without changing adapter code:
@@ -75,7 +117,7 @@ python -m registry_builder.wikidata_download `
   --out wikidata-file-formats.csv
 ```
 
-A custom query is executed as one request and must return at least `format`, `qid`, and `puid` columns. The exact query is recorded in snapshot metadata and its SHA-256 is used in the cache key.
+A custom query is executed as one request and must return at least `format` and `qid` columns. The exact query is recorded in snapshot metadata and its SHA-256 is used in the cache key.
 
 ## Offline replay
 
