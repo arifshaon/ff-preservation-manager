@@ -115,6 +115,7 @@ Other useful examples:
 config/sources.nara.mongodb.example.json
 config/sources.pronom.mongodb.example.json
 config/sources.loc.mongodb.example.json
+config/sources.wikidata.mongodb.example.json
 config/qnl-institution-format-evidence.mongodb.example.json
 config/storage.mongodb.example.json
 config/storage.file.example.json

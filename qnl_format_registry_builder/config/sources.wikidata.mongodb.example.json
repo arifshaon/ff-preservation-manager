@@ -1,0 +1,33 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "format_registry"
+  },
+  "exports": {
+    "enabled": true
+  },
+  "criterion_mapping": {
+    "enabled": false,
+    "notes": "Wikidata is a graph-linking source. It contributes identity links and context, not preservation criterion claims, so no mapping is configured."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": []}
+  },
+  "sources": [
+    {
+      "id": "wikidata_sparql",
+      "type": "wikidata_sparql",
+      "enabled": true,
+      "required": false,
+      "retrieval_mode": "sparql",
+      "endpoint": "https://query.wikidata.org/sparql",
+      "notes": "Supplementary. Run only alongside or after PRONOM: every record anchors on an asserted PUID and has nothing to attach to on its own. Contributes QID identity, LoC FDD links, developer and supersession context. No entry in any verified_from list, so its PUID and LoC claims stay candidate links."
+    }
+  ]
+}

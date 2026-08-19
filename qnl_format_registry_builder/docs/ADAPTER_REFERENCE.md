@@ -514,6 +514,150 @@ Covered by `tests/test_loc_fdd_xml.py`.
 
 ---
 
+## `wikidata_sparql`
+
+### Purpose
+
+Harvests cross-registry identity links from the Wikidata Query Service: the QID
+for a format, plus the PUIDs, LoC FDD IDs, MIME types and extensions Wikidata
+asserts for it, plus community-maintained context (developer, publication date,
+"replaced by").
+
+### When to use
+
+Use this to join records that other sources describe under different
+identifiers, and to surface supersession relationships no single authority
+publishes.
+
+Wikidata sits in the **graph-linking tier**, not the evaluative tier. It
+contributes links between identifiers that authorities already own. It
+deliberately contributes **no** sustainability or risk claims, so no criterion
+mapping is configured for it — a crowd-maintained graph must not supply
+preservation evidence on the same footing as a national archive.
+
+### Config
+
+```json
+{
+  "id": "wikidata_sparql",
+  "type": "wikidata_sparql",
+  "enabled": true,
+  "required": false,
+  "retrieval_mode": "sparql",
+  "endpoint": "https://query.wikidata.org/sparql"
+}
+```
+
+A full example is `config/sources.wikidata.mongodb.example.json`.
+
+`endpoint` and `query` are both optional. Supplying `query` replaces the built-in
+one entirely; the result set must still expose the same binding names
+(`item`, `itemLabel`, `puids`, `fdds`, `exts`, `mimes`, `developers`,
+`replacedBy`, `published`).
+
+### Run it after PRONOM, not on its own
+
+Every harvested record anchors on an asserted PUID, so a standalone run has
+nothing to attach to: the PUIDs are unverified claims, reconciliation falls
+through to name keys, and colliding names abort the run. Run this source
+alongside or after `pronom_registry`.
+
+### Acquisition
+
+Issues one GET to the SPARQL endpoint requesting `format=json`. The query is
+encoded into the request URI, which is also the snapshot cache key, so editing
+the query produces a new snapshot instead of silently overwriting the previous
+one.
+
+### Extraction
+
+The query anchors on **P2748 (PRONOM file format ID)**. Wikidata holds tens of
+thousands of items that are instances or subclasses of "file format", the
+overwhelming majority of which carry no identifier a preservation authority
+recognises. Anchoring on P2748 keeps the harvest to the ~2.3k items that can
+actually join the registry and makes every emitted record resolvable by
+construction.
+
+Two disambiguation behaviours are worth knowing about, because both exist to
+stop records becoming orphan canonicals:
+
+**One record per asserted PUID.** A Wikidata item often describes a format
+concept more broadly than PRONOM versions it — "Blend file" asserts both
+`fmt/902` and `fmt/903`. A single record for such an item cannot be bridged onto
+either PRONOM canonical without guessing, so reconciliation correctly declines
+and the item becomes a canonical of its own. Splitting states what Wikidata
+actually means: this QID applies to each of those formats. The sibling PUIDs are
+retained in `native_fields.wikidata.asserted_puids`.
+
+**Names are qualified when they are not unique.** Wikidata labels are not unique
+— seven separate items are each called "PowerProject". Reconciliation groups
+unverified records by name, so same-label records land in one group carrying
+conflicting PUID claims and the bridge refuses them. Where a label is shared, or
+an item was split across several PUIDs, the record name becomes
+`Label (fmt/NNN)`. The unqualified label is preserved in
+`native_fields.wikidata.label`.
+
+Rows with no QID or no PUID are dropped: without a QID there is nothing to cite,
+and without a PUID the row cannot be reconciled against anything.
+
+Emits:
+
+```text
+name
+extensions
+mime_types
+puids
+loc_ids
+wikidata_ids
+urls
+native_fields.wikidata (developers, replaced_by, publication_date,
+                        asserted_puids, label)
+```
+
+### Identifier authority
+
+The adapter emits every identifier with `verified=False`. Wikidata is not the
+authority for any namespace it references, including — for registry purposes —
+its own QIDs, which are weak by strength anyway. Its assertions are candidate
+links for reconciliation to weigh, never strong reconciliation keys.
+
+That flag is a floor, not a guarantee: `normalize_record` computes
+`verified = adapter_flag or is_verified_identifier(kind, source_type, rules)`, so
+`identifier_kinds` can still promote them. Note that the shipped default rules
+list `"wikidata"` in `puid.verified_from`. Nothing is registered under that bare
+type name today, which is why this adapter is called `wikidata_sparql` rather
+than `wikidata` despite the usual preference for conceptual source names — an
+adapter registered as `wikidata` would turn crowd-asserted PUIDs into verified
+strong keys in every existing config.
+
+### Property identifiers
+
+The properties are pinned as named constants because getting them wrong fails
+silently — a wrong property returns a well-formed result set that is simply
+almost empty.
+
+| Constant | Property | Not to be confused with |
+| --- | --- | --- |
+| `P_PRONOM_FILE_FORMAT` | `P2748` PRONOM file format ID | `P2749` PRONOM **software** ID |
+| `P_LOC_FDD` | `P3266` LoC Format Description ID | `P3267` Flickr user ID |
+| `P_FILE_EXTENSION` | `P1195` | |
+| `P_MEDIA_TYPE` | `P1163` | |
+| `P_DEVELOPER` | `P178` | |
+| `P_PUBLICATION_DATE` | `P577` | |
+| `P_REPLACED_BY` | `P1366` | |
+
+The two confusable pairs are asserted directly in the tests.
+
+### Failure handling
+
+Use `required:false`. This is enrichment: the registry is complete without it.
+
+### Tests
+
+Covered by `tests/test_wikidata_sparql_adapter.py`.
+
+---
+
 ## `qnl_policy_xlsx`
 
 Deprecated compatibility alias for old QNL-specific configuration. Do not use in new configs. Use `institution_policy_xlsx` with `institution_id: "qnl"`.
