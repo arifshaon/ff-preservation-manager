@@ -3,7 +3,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
+import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
@@ -11,7 +14,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from registry_builder.adapters.base import SourceAdapter
-from registry_builder.models import RawFormatRecord, SourceSnapshot
+from registry_builder.models import RawFormatRecord, SourceSnapshot, utc_now_iso
 
 
 DEFAULT_ENDPOINT = "https://query.wikidata.org/sparql"
@@ -28,81 +31,97 @@ PREFIX schema: <http://schema.org/>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 """
 
-# Primary population: items modelled as file formats (including instances of
-# subclasses of Q235557). The P2748 UNION keeps PRONOM-linked file-format/family
-# items even where Wikidata classification is incomplete.
-_POPULATION = """\
-{
+# Population discovery is deliberately separated from property harvesting.
+# Each population query is keyset-paginated by entity URI, then the merged QID
+# set is frozen for the acquisition session. Property queries use VALUES batches
+# over that frozen set rather than repeating the broad taxonomy traversal.
+POPULATION_QUERY_TEMPLATES: dict[str, str] = {
+    "taxonomy": (
+        _PREFIXES
+        + """
+SELECT DISTINCT ?format WHERE {
   ?format wdt:P31/wdt:P279* wd:Q235557 .
+  __AFTER_FILTER__
 }
-UNION
-{
-  ?format wdt:P2748 ?_populationPuid .
+ORDER BY STR(?format)
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "pronom_linked": (
+        _PREFIXES
+        + """
+SELECT DISTINCT ?format WHERE {
+  ?format wdt:P2748 ?puid .
+  __AFTER_FILTER__
 }
-"""
+ORDER BY STR(?format)
+LIMIT __LIMIT__
+""".strip()
+    ),
+}
 
 DEFAULT_QUERY_PARTS: dict[str, str] = {
     "core": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?qid ?formatLabel ?formatDescription WHERE {{
-  {_POPULATION}
+        + """
+SELECT DISTINCT ?format ?qid ?formatLabel ?formatDescription WHERE {
+  VALUES ?format { __VALUES__ }
   BIND(REPLACE(STR(?format), "^.*/", "") AS ?qid)
-  OPTIONAL {{
+  OPTIONAL {
     ?format rdfs:label ?formatLabel .
     FILTER(LANG(?formatLabel) = "en")
-  }}
-  OPTIONAL {{
+  }
+  OPTIONAL {
     ?format schema:description ?formatDescription .
     FILTER(LANG(?formatDescription) = "en")
-  }}
-}}
+  }
+}
 ORDER BY ?qid
 """.strip()
     ),
     "aliases": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?alias WHERE {{
-  {_POPULATION}
+        + """
+SELECT DISTINCT ?format ?alias WHERE {
+  VALUES ?format { __VALUES__ }
   ?format skos:altLabel ?alias .
   FILTER(LANG(?alias) = "en")
-}}
+}
 ORDER BY ?format ?alias
 """.strip()
     ),
     "classification": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {{
-  {_POPULATION}
-  VALUES ?predicate {{ wdt:P31 wdt:P279 }}
+        + """
+SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {
+  VALUES ?format { __VALUES__ }
+  VALUES ?predicate { wdt:P31 wdt:P279 }
   ?format ?predicate ?value .
-  OPTIONAL {{
+  OPTIONAL {
     ?value rdfs:label ?valueLabel .
     FILTER(LANG(?valueLabel) = "en")
-  }}
-}}
+  }
+}
 ORDER BY ?format ?predicate ?value
 """.strip()
     ),
     "identifiers": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?predicate ?value WHERE {{
-  {_POPULATION}
-  VALUES ?predicate {{ wdt:P2748 wdt:P3266 wdt:P11167 }}
+        + """
+SELECT DISTINCT ?format ?predicate ?value WHERE {
+  VALUES ?format { __VALUES__ }
+  VALUES ?predicate { wdt:P2748 wdt:P3266 wdt:P11167 }
   ?format ?predicate ?value .
-}}
+}
 ORDER BY ?format ?predicate ?value
 """.strip()
     ),
     "technical_literals": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?predicate ?value WHERE {{
-  {_POPULATION}
-  VALUES ?predicate {{
+        + """
+SELECT DISTINCT ?format ?predicate ?value WHERE {
+  VALUES ?format { __VALUES__ }
+  VALUES ?predicate {
     wdt:P1195
     wdt:P1163
     wdt:P348
@@ -110,37 +129,37 @@ SELECT DISTINCT ?format ?predicate ?value WHERE {{
     wdt:P577
     wdt:P571
     wdt:P856
-  }}
+  }
   ?format ?predicate ?value .
-}}
+}
 ORDER BY ?format ?predicate ?value
 """.strip()
     ),
     "item_relations": (
         _PREFIXES
-        + f"""
-SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {{
-  {_POPULATION}
-  VALUES ?predicate {{
+        + """
+SELECT DISTINCT ?format ?predicate ?value ?valueLabel WHERE {
+  VALUES ?format { __VALUES__ }
+  VALUES ?predicate {
     wdt:P178
     wdt:P361
     wdt:P144
     wdt:P1365
     wdt:P1366
     wdt:P1343
-  }}
+  }
   ?format ?predicate ?value .
-  OPTIONAL {{
+  OPTIONAL {
     ?value rdfs:label ?valueLabel .
     FILTER(LANG(?valueLabel) = "en")
-  }}
-}}
+  }
+}
 ORDER BY ?format ?predicate ?value
 """.strip()
     ),
 }
 
-DEFAULT_FILE_FORMAT_QUERY = DEFAULT_QUERY_PARTS["core"]
+DEFAULT_FILE_FORMAT_QUERY = POPULATION_QUERY_TEMPLATES["taxonomy"]
 
 _PROPERTY_TO_FIELD = {
     "http://www.wikidata.org/prop/direct/P31": ("instanceOfQid", "instanceOfLabel"),
@@ -197,15 +216,21 @@ _OUTPUT_COLUMNS = [
     "officialWebsite",
 ]
 
+_QID_RE = re.compile(r"^Q\d+$")
+
 
 class WikidataSparqlAdapter(SourceAdapter):
     """Download Wikidata file-format metadata without ingesting it.
 
-    The default acquisition uses several statement-oriented SPARQL queries and
-    merges them locally. The final CSV is one row per Wikidata item, with
-    multi-valued properties pipe-delimited. ``extract`` deliberately returns no
-    RawFormatRecord objects, so Wikidata cannot alter canonical identities,
-    criterion claims, risk scores, or MongoDB at this stage.
+    Default acquisition is staged:
+      1. discover and freeze the file-format QID population;
+      2. harvest properties in bounded VALUES batches;
+      3. cache each completed batch so an interrupted acquisition can resume;
+      4. merge locally into one review CSV.
+
+    ``extract`` deliberately returns no RawFormatRecord objects, so Wikidata
+    cannot alter canonical identities, criterion claims, risk scores, or MongoDB
+    at this stage.
     """
 
     type_name = "wikidata_sparql"
@@ -230,18 +255,36 @@ class WikidataSparqlAdapter(SourceAdapter):
     def user_agent(self) -> str:
         return str(self.config.get("user_agent") or DEFAULT_USER_AGENT)
 
+    @property
+    def batch_size(self) -> int:
+        return max(1, min(int(self.config.get("batch_size", 200)), 1000))
+
+    @property
+    def population_page_size(self) -> int:
+        return max(1, min(int(self.config.get("population_page_size", 500)), 5000))
+
+    @property
+    def restart(self) -> bool:
+        return bool(self.config.get("restart", False))
+
     def _query_material(self) -> str:
         if self.custom_query:
             return self.custom_query
-        return "\n\n".join(
-            f"### {name}\n{query}" for name, query in DEFAULT_QUERY_PARTS.items()
+        pieces = [
+            f"### population:{name}\n{query}"
+            for name, query in POPULATION_QUERY_TEMPLATES.items()
+        ]
+        pieces.extend(
+            f"### batch:{name}\n{query}" for name, query in DEFAULT_QUERY_PARTS.items()
         )
+        pieces.append("### output-columns\n" + "\n".join(_OUTPUT_COLUMNS))
+        return "\n\n".join(pieces)
 
     def _query_sha256(self) -> str:
         return hashlib.sha256(self._query_material().encode("utf-8")).hexdigest()
 
     def _cache_key(self) -> str:
-        mode = "custom" if self.custom_query else "partitioned-default-v2"
+        mode = "custom" if self.custom_query else "staged-values-batching-v1"
         return (
             f"{self.endpoint}#query-sha256={self._query_sha256()}"
             f"&format=csv&mode={mode}"
@@ -337,6 +380,10 @@ class WikidataSparqlAdapter(SourceAdapter):
         return str(uri or "").rstrip("/").rsplit("/", 1)[-1]
 
     @staticmethod
+    def _format_uri(qid: str) -> str:
+        return f"http://www.wikidata.org/entity/{qid}"
+
+    @staticmethod
     def _new_merged_row(format_uri: str, qid: str = "") -> dict[str, Any]:
         row: dict[str, Any] = {
             "format": format_uri,
@@ -351,21 +398,6 @@ class WikidataSparqlAdapter(SourceAdapter):
         return row
 
     @staticmethod
-    def _ensure_merged_row(
-        rows: dict[str, dict[str, Any]],
-        format_uri: str,
-        *,
-        qid: str = "",
-    ) -> dict[str, Any] | None:
-        if not format_uri:
-            return None
-        if format_uri not in rows:
-            rows[format_uri] = WikidataSparqlAdapter._new_merged_row(format_uri, qid)
-        elif qid:
-            rows[format_uri]["qid"] = qid
-        return rows[format_uri]
-
-    @staticmethod
     def _add_value(target: dict[str, Any], field: str, value: str) -> None:
         if not value:
             return
@@ -373,102 +405,354 @@ class WikidataSparqlAdapter(SourceAdapter):
         if isinstance(slot, set):
             slot.add(value)
 
-    def _fetch_partitioned_default(self) -> tuple[bytes, dict[str, Any]]:
-        merged: dict[str, dict[str, Any]] = {}
-        part_stats: dict[str, Any] = {}
+    @staticmethod
+    def _render_population_query(
+        template: str,
+        *,
+        after_uri: str | None,
+        limit: int,
+    ) -> str:
+        after_filter = ""
+        if after_uri:
+            after_filter = f"FILTER(STR(?format) > {json.dumps(after_uri)})"
+        return (
+            template.replace("__AFTER_FILTER__", after_filter)
+            .replace("__LIMIT__", str(limit))
+        )
 
-        specs = {
-            "core": {"format", "qid", "formatLabel", "formatDescription"},
-            "aliases": {"format", "alias"},
-            "classification": {"format", "predicate", "value", "valueLabel"},
-            "identifiers": {"format", "predicate", "value"},
-            "technical_literals": {"format", "predicate", "value"},
-            "item_relations": {"format", "predicate", "value", "valueLabel"},
+    @staticmethod
+    def _render_batch_query(template: str, qids: list[str]) -> str:
+        if not qids:
+            raise ValueError("Cannot render a Wikidata batch query without QIDs")
+        invalid = [qid for qid in qids if not _QID_RE.fullmatch(qid)]
+        if invalid:
+            raise ValueError(f"Invalid Wikidata QID(s) in batch: {invalid[:5]}")
+        values = " ".join(f"wd:{qid}" for qid in qids)
+        return template.replace("__VALUES__", values)
+
+    def _session_manifest_path(self) -> Path:
+        return self.snapshot_dir() / ".wikidata_acquisition_session.json"
+
+    def _load_session_manifest(self) -> dict[str, Any] | None:
+        path = self._session_manifest_path()
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _write_session_manifest(self, manifest: dict[str, Any]) -> None:
+        path = self._session_manifest_path()
+        path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def _load_resume_population(
+        self,
+        manifest: dict[str, Any] | None,
+    ) -> tuple[list[str], dict[str, Any]] | None:
+        if self.restart or not manifest or manifest.get("complete") is not False:
+            return None
+        if manifest.get("query_sha256") != self._query_sha256():
+            return None
+        if int(manifest.get("batch_size", 0)) != self.batch_size:
+            return None
+        if int(manifest.get("population_page_size", 0)) != self.population_page_size:
+            return None
+        population_path = Path(str(manifest.get("population_path") or ""))
+        if not population_path.exists():
+            return None
+        data = population_path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != manifest.get("population_sha256"):
+            return None
+        rows = self._read_rows(data)
+        qids = sorted(
+            {
+                row.get("qid", "")
+                for row in rows
+                if _QID_RE.fullmatch(row.get("qid", ""))
+            }
+        )
+        if not qids:
+            return None
+        return qids, manifest
+
+    def _discover_population(self) -> tuple[list[str], dict[str, Any]]:
+        qids: set[str] = set()
+        discovery_stats: dict[str, Any] = {}
+
+        for population_name, template in POPULATION_QUERY_TEMPLATES.items():
+            after_uri: str | None = None
+            pages = 0
+            rows_seen = 0
+            while True:
+                query = self._render_population_query(
+                    template,
+                    after_uri=after_uri,
+                    limit=self.population_page_size,
+                )
+                data, headers = self._request_csv(
+                    query,
+                    query_name=f"population:{population_name}:page:{pages + 1}",
+                    required_columns={"format"},
+                )
+                rows = self._read_rows(data)
+                pages += 1
+                rows_seen += len(rows)
+                page_uris = sorted(
+                    {
+                        row.get("format", "")
+                        for row in rows
+                        if row.get("format", "")
+                    }
+                )
+                for uri in page_uris:
+                    qid = self._qid_from_uri(uri)
+                    if _QID_RE.fullmatch(qid):
+                        qids.add(qid)
+
+                if len(rows) < self.population_page_size or not page_uris:
+                    discovery_stats[population_name] = {
+                        "pages": pages,
+                        "rows_seen": rows_seen,
+                        "content_type": headers.get("content-type"),
+                    }
+                    break
+
+                next_after = page_uris[-1]
+                if next_after == after_uri:
+                    raise RuntimeError(
+                        f"Wikidata population pagination for '{population_name}' "
+                        "did not advance"
+                    )
+                after_uri = next_after
+
+        ordered_qids = sorted(qids, key=lambda value: int(value[1:]))
+        if not ordered_qids:
+            raise RuntimeError("Wikidata population discovery returned no file-format QIDs")
+
+        output = io.StringIO(newline="")
+        writer = csv.DictWriter(
+            output,
+            fieldnames=["format", "qid"],
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        for qid in ordered_qids:
+            writer.writerow({"format": self._format_uri(qid), "qid": qid})
+        population_bytes = output.getvalue().encode("utf-8")
+        population_sha256 = hashlib.sha256(population_bytes).hexdigest()
+
+        session_id = uuid.uuid4().hex
+        population_snapshot = self._store_snapshot_bytes(
+            index_key=(
+                f"{self.endpoint}#wikidata-population-session={session_id}"
+                f"&sha256={population_sha256}"
+            ),
+            uri=self.endpoint,
+            data=population_bytes,
+            suffix=".population.csv",
+            note="wikidata_sparql; population_snapshot=true",
+            content_type="text/csv",
+            metadata={
+                "session_id": session_id,
+                "population_sha256": population_sha256,
+                "row_count": len(ordered_qids),
+                "discovery": discovery_stats,
+            },
+        )
+        manifest = {
+            "version": 1,
+            "session_id": session_id,
+            "started_at": utc_now_iso(),
+            "complete": False,
+            "query_sha256": self._query_sha256(),
+            "batch_size": self.batch_size,
+            "population_page_size": self.population_page_size,
+            "population_path": population_snapshot.local_path,
+            "population_sha256": population_sha256,
+            "population_count": len(ordered_qids),
+            "population_discovery": discovery_stats,
         }
+        self._write_session_manifest(manifest)
+        return ordered_qids, manifest
 
-        for name, query in DEFAULT_QUERY_PARTS.items():
-            data, headers = self._request_csv(
-                query,
-                query_name=name,
-                required_columns=specs[name],
-            )
-            rows = self._read_rows(data)
-            part_stats[name] = {
-                "row_count": len(rows),
-                "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
-                "content_type": headers.get("content-type"),
+    def _get_or_start_population(self) -> tuple[list[str], dict[str, Any], bool]:
+        manifest = self._load_session_manifest()
+        resumed = self._load_resume_population(manifest)
+        if resumed is not None:
+            qids, resumed_manifest = resumed
+            return qids, resumed_manifest, True
+        qids, new_manifest = self._discover_population()
+        return qids, new_manifest, False
+
+    @staticmethod
+    def _batch_cache_key(
+        *,
+        endpoint: str,
+        session_id: str,
+        part_name: str,
+        batch_index: int,
+        qids: list[str],
+        query: str,
+    ) -> str:
+        batch_material = "\n".join(qids)
+        batch_sha = hashlib.sha256(batch_material.encode("utf-8")).hexdigest()
+        query_sha = hashlib.sha256(query.encode("utf-8")).hexdigest()
+        return (
+            f"{endpoint}#wikidata-session={session_id}"
+            f"&part={part_name}&batch={batch_index:05d}"
+            f"&batch-sha256={batch_sha}&query-sha256={query_sha}"
+        )
+
+    def _fetch_batch_part(
+        self,
+        *,
+        session_id: str,
+        part_name: str,
+        batch_index: int,
+        qids: list[str],
+        query: str,
+        required_columns: set[str],
+    ) -> tuple[bytes, dict[str, Any]]:
+        cache_key = self._batch_cache_key(
+            endpoint=self.endpoint,
+            session_id=session_id,
+            part_name=part_name,
+            batch_index=batch_index,
+            qids=qids,
+            query=query,
+        )
+        cached = self._cached_snapshot(
+            uri=cache_key,
+            suffix=".csv",
+            note=(
+                f"wikidata_sparql; batch_cache=true; part={part_name}; "
+                f"batch={batch_index}"
+            ),
+            content_type="text/csv",
+            metadata={
+                "session_id": session_id,
+                "part_name": part_name,
+                "batch_index": batch_index,
+                "batch_size": len(qids),
+            },
+        )
+        if cached is not None:
+            data = Path(cached.local_path).read_bytes()
+            self._validate_csv(data, required_columns=required_columns)
+            return data, {
+                "from_cache": True,
+                "row_count": self._row_count(data),
+                "snapshot_path": cached.local_path,
             }
 
-            for source_row in rows:
-                format_uri = source_row.get("format", "")
-                if name == "core":
-                    target = self._ensure_merged_row(
-                        merged,
-                        format_uri,
-                        qid=source_row.get("qid", ""),
-                    )
-                    if target is None:
-                        continue
-                    if source_row.get("formatLabel"):
-                        target["formatLabel"] = source_row["formatLabel"]
-                    if source_row.get("formatDescription"):
-                        target["formatDescription"] = source_row["formatDescription"]
-                    continue
+        data, headers = self._request_csv(
+            query,
+            query_name=f"{part_name}:batch:{batch_index}",
+            required_columns=required_columns,
+        )
+        snapshot = self._store_snapshot_bytes(
+            index_key=cache_key,
+            uri=self.endpoint,
+            data=data,
+            suffix=f".{part_name}.batch-{batch_index:05d}.csv",
+            note=(
+                f"wikidata_sparql; batch_cache=true; part={part_name}; "
+                f"batch={batch_index}"
+            ),
+            content_type=headers.get("content-type") or "text/csv",
+            metadata={
+                "session_id": session_id,
+                "part_name": part_name,
+                "batch_index": batch_index,
+                "batch_size": len(qids),
+                "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+            },
+        )
+        return data, {
+            "from_cache": False,
+            "row_count": self._row_count(data),
+            "snapshot_path": snapshot.local_path,
+            "content_type": headers.get("content-type"),
+        }
 
-                # Non-core query results are only accepted for items established
-                # by the core population query.
-                target = merged.get(format_uri)
-                if target is None:
-                    continue
+    @staticmethod
+    def _merge_source_row(
+        target: dict[str, Any],
+        *,
+        part_name: str,
+        source_row: dict[str, str],
+    ) -> None:
+        if part_name == "core":
+            if source_row.get("qid"):
+                target["qid"] = source_row["qid"]
+            if source_row.get("formatLabel"):
+                target["formatLabel"] = source_row["formatLabel"]
+            if source_row.get("formatDescription"):
+                target["formatDescription"] = source_row["formatDescription"]
+            return
 
-                if name == "aliases":
-                    self._add_value(target, "aliases", source_row.get("alias", ""))
-                    continue
+        if part_name == "aliases":
+            WikidataSparqlAdapter._add_value(
+                target, "aliases", source_row.get("alias", "")
+            )
+            return
 
-                predicate = source_row.get("predicate", "")
-                mapping = _PROPERTY_TO_FIELD.get(predicate)
-                if mapping is None:
-                    continue
-                value_field, label_field = mapping
-                value = source_row.get("value", "")
-                if value_field.endswith("Qid"):
-                    value = self._qid_from_uri(value)
-                if label_field:
-                    if value:
-                        pairs = target["_paired_labels"].setdefault(value_field, {})
-                        pairs[value] = pairs.get(value, "") or source_row.get(
-                            "valueLabel", ""
-                        )
-                else:
-                    self._add_value(target, value_field, value)
+        predicate = source_row.get("predicate", "")
+        mapping = _PROPERTY_TO_FIELD.get(predicate)
+        if mapping is None:
+            return
+        value_field, label_field = mapping
+        value = source_row.get("value", "")
+        if value_field.endswith("Qid"):
+            value = WikidataSparqlAdapter._qid_from_uri(value)
+        if label_field:
+            if value:
+                pairs = target["_paired_labels"].setdefault(value_field, {})
+                pairs[value] = pairs.get(value, "") or source_row.get(
+                    "valueLabel", ""
+                )
+        else:
+            WikidataSparqlAdapter._add_value(target, value_field, value)
 
+    @staticmethod
+    def _render_merged_csv(merged: dict[str, dict[str, Any]]) -> bytes:
         output = io.StringIO(newline="")
         writer = csv.DictWriter(output, fieldnames=_OUTPUT_COLUMNS, lineterminator="\n")
         writer.writeheader()
+
+        paired_label_fields = {
+            label_field
+            for _, label_field in _PROPERTY_TO_FIELD.values()
+            if label_field
+        }
+        value_to_label = {
+            value_field: label_field
+            for value_field, label_field in _PROPERTY_TO_FIELD.values()
+            if label_field
+        }
+
         for target in sorted(
             merged.values(),
-            key=lambda row: (str(row["qid"]), str(row["format"])),
+            key=lambda row: int(str(row["qid"])[1:])
+            if _QID_RE.fullmatch(str(row["qid"]))
+            else 10**18,
         ):
             rendered: dict[str, str] = {}
             paired_labels = target.get("_paired_labels", {})
-            paired_label_fields = {
-                label_field
-                for value_field, label_field in _PROPERTY_TO_FIELD.values()
-                if label_field
-            }
             for column in _OUTPUT_COLUMNS:
                 if column in paired_labels:
                     pairs = sorted(paired_labels[column].items())
                     rendered[column] = "|".join(value for value, _ in pairs)
-                    label_field = _PROPERTY_TO_FIELD[
-                        next(
-                            predicate
-                            for predicate, fields in _PROPERTY_TO_FIELD.items()
-                            if fields[0] == column
-                        )
-                    ][1]
+                    label_field = value_to_label.get(column)
                     if label_field:
-                        rendered[label_field] = "|".join(label for _, label in pairs)
+                        rendered[label_field] = "|".join(
+                            label for _, label in pairs
+                        )
                     continue
                 if column in paired_label_fields and column in rendered:
                     continue
@@ -479,17 +763,103 @@ class WikidataSparqlAdapter(SourceAdapter):
                     rendered[column] = str(value or "")
             writer.writerow(rendered)
 
-        csv_bytes = output.getvalue().encode("utf-8")
-        self._validate_csv(
-            csv_bytes,
-            required_columns={"format", "qid"},
-        )
-        return csv_bytes, part_stats
+        return output.getvalue().encode("utf-8")
+
+    def _fetch_staged_default(self) -> tuple[bytes, dict[str, Any]]:
+        qids, manifest, resumed = self._get_or_start_population()
+        session_id = str(manifest["session_id"])
+
+        merged: dict[str, dict[str, Any]] = {
+            self._format_uri(qid): self._new_merged_row(self._format_uri(qid), qid)
+            for qid in qids
+        }
+
+        specs = {
+            "core": {"format", "qid", "formatLabel", "formatDescription"},
+            "aliases": {"format", "alias"},
+            "classification": {"format", "predicate", "value", "valueLabel"},
+            "identifiers": {"format", "predicate", "value"},
+            "technical_literals": {"format", "predicate", "value"},
+            "item_relations": {"format", "predicate", "value", "valueLabel"},
+        }
+        part_stats: dict[str, Any] = {}
+        total_batches = (len(qids) + self.batch_size - 1) // self.batch_size
+
+        for part_name, template in DEFAULT_QUERY_PARTS.items():
+            part_rows = 0
+            cache_hits = 0
+            network_fetches = 0
+            completed_batches = 0
+
+            for batch_index, start in enumerate(
+                range(0, len(qids), self.batch_size),
+                start=1,
+            ):
+                batch_qids = qids[start : start + self.batch_size]
+                query = self._render_batch_query(template, batch_qids)
+                data, batch_meta = self._fetch_batch_part(
+                    session_id=session_id,
+                    part_name=part_name,
+                    batch_index=batch_index,
+                    qids=batch_qids,
+                    query=query,
+                    required_columns=specs[part_name],
+                )
+                rows = self._read_rows(data)
+                part_rows += len(rows)
+                cache_hits += int(bool(batch_meta.get("from_cache")))
+                network_fetches += int(not bool(batch_meta.get("from_cache")))
+                completed_batches += 1
+
+                for source_row in rows:
+                    format_uri = source_row.get("format", "")
+                    target = merged.get(format_uri)
+                    if target is None:
+                        continue
+                    self._merge_source_row(
+                        target,
+                        part_name=part_name,
+                        source_row=source_row,
+                    )
+
+            part_stats[part_name] = {
+                "batches": completed_batches,
+                "expected_batches": total_batches,
+                "row_count": part_rows,
+                "cache_hits": cache_hits,
+                "network_fetches": network_fetches,
+                "template_sha256": hashlib.sha256(
+                    template.encode("utf-8")
+                ).hexdigest(),
+            }
+
+        csv_bytes = self._render_merged_csv(merged)
+        self._validate_csv(csv_bytes, required_columns={"format", "qid"})
+
+        manifest["output_row_count"] = self._row_count(csv_bytes)
+        manifest["query_parts"] = part_stats
+        self._write_session_manifest(manifest)
+
+        return csv_bytes, {
+            "session_id": session_id,
+            "resumed": resumed,
+            "population_count": len(qids),
+            "population_sha256": manifest.get("population_sha256"),
+            "population_discovery": manifest.get("population_discovery"),
+            "batch_size": self.batch_size,
+            "population_page_size": self.population_page_size,
+            "total_batches": total_batches,
+            "parts": part_stats,
+        }
 
     def acquire(self) -> list[SourceSnapshot]:
         query_sha256 = self._query_sha256()
         cache_key = self._cache_key()
-        query_mode = "custom_single_query" if self.custom_query else "partitioned_default_v2"
+        query_mode = (
+            "custom_single_query"
+            if self.custom_query
+            else "staged_population_values_batches_v1"
+        )
         metadata: dict[str, Any] = {
             "endpoint": self.endpoint,
             "query_sha256": query_sha256,
@@ -502,7 +872,10 @@ class WikidataSparqlAdapter(SourceAdapter):
         if self.custom_query:
             metadata["query"] = self.custom_query
         else:
-            metadata["queries"] = dict(DEFAULT_QUERY_PARTS)
+            metadata["population_queries"] = dict(POPULATION_QUERY_TEMPLATES)
+            metadata["batch_query_templates"] = dict(DEFAULT_QUERY_PARTS)
+            metadata["batch_size"] = self.batch_size
+            metadata["population_page_size"] = self.population_page_size
 
         if self.offline:
             cached = self._cached_snapshot(
@@ -514,8 +887,8 @@ class WikidataSparqlAdapter(SourceAdapter):
             )
             if cached is None:
                 raise FileNotFoundError(
-                    "Offline mode requested but no cached Wikidata snapshot exists "
-                    f"for query set {query_sha256}"
+                    "Offline mode requested but no cached final Wikidata snapshot "
+                    f"exists for query set {query_sha256}"
                 )
             cached.uri = self.endpoint
             return [cached]
@@ -528,8 +901,8 @@ class WikidataSparqlAdapter(SourceAdapter):
             )
             metadata["response_content_type"] = response_headers.get("content-type")
         else:
-            data, part_stats = self._fetch_partitioned_default()
-            metadata["query_parts"] = part_stats
+            data, staged_stats = self._fetch_staged_default()
+            metadata["staged_acquisition"] = staged_stats
             metadata["response_content_type"] = "text/csv; locally-merged=true"
 
         metadata["row_count"] = self._row_count(data)
@@ -542,6 +915,19 @@ class WikidataSparqlAdapter(SourceAdapter):
             content_type="text/csv",
             metadata=metadata,
         )
+        if not self.custom_query:
+            manifest = self._load_session_manifest()
+            staged = metadata.get("staged_acquisition") or {}
+            if (
+                manifest
+                and manifest.get("complete") is False
+                and manifest.get("session_id") == staged.get("session_id")
+            ):
+                manifest["complete"] = True
+                manifest["completed_at"] = utc_now_iso()
+                manifest["final_snapshot_path"] = snapshot.local_path
+                manifest["final_snapshot_sha256"] = snapshot.sha256
+                self._write_session_manifest(manifest)
         return [snapshot]
 
     def download_to(self, output_path: str | Path) -> SourceSnapshot:
