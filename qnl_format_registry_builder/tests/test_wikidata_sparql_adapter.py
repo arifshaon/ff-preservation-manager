@@ -8,10 +8,14 @@ from urllib.parse import parse_qs
 import pytest
 
 from registry_builder.adapters.wikidata_sparql import (
+    CONDITIONAL_CONTEXT_CLASS_QIDS,
+    CONDITIONAL_OPEN_FORMAT_CLASS_QID,
+    CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS,
     CONDITIONAL_XML_FORMAT_CLASS_QID,
     DEFAULT_QUERY_PARTS,
     POPULATION_QUERY_TEMPLATES,
     REVIEWED_FORMAT_CLASS_QIDS,
+    REVIEWED_FORMAT_PARENT_QIDS,
     WIKIDATA_POPULATION_POLICY_VERSION,
     WikidataSparqlAdapter,
 )
@@ -40,6 +44,17 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
             state["failed"] = True
             raise RuntimeError("simulated interruption")
 
+        population_rows = {
+            "population:file_format_families:page:1": "Q250",
+            "population:reviewed_format_classes:page:1": "Q275",
+            "population:conditional_xml_formats:page:1": "Q290",
+            "population:conditional_format_parents:page:1": "Q291",
+            "population:conditional_context_classes:page:1": "Q292",
+            "population:conditional_open_formats:page:1": "Q293",
+            "population:pronom_linked:page:1": "Q300",
+            "population:loc_linked:page:1": "Q400",
+            "population:nara_linked:page:1": "Q500",
+        }
         if query_name == "population:direct_file_formats:page:1":
             return _csv_bytes(
                 ["format"],
@@ -50,35 +65,11 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
             ), {"content-type": "text/csv"}
         if query_name == "population:direct_file_formats:page:2":
             return _csv_bytes(["format"], []), {"content-type": "text/csv"}
-        if query_name == "population:file_format_families:page:1":
+        if query_name in population_rows:
+            qid = population_rows[query_name]
             return _csv_bytes(
                 ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q250"}],
-            ), {"content-type": "text/csv"}
-        if query_name == "population:reviewed_format_classes:page:1":
-            return _csv_bytes(
-                ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q275"}],
-            ), {"content-type": "text/csv"}
-        if query_name == "population:conditional_xml_formats:page:1":
-            return _csv_bytes(
-                ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q290"}],
-            ), {"content-type": "text/csv"}
-        if query_name == "population:pronom_linked:page:1":
-            return _csv_bytes(
-                ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q300"}],
-            ), {"content-type": "text/csv"}
-        if query_name == "population:loc_linked:page:1":
-            return _csv_bytes(
-                ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q400"}],
-            ), {"content-type": "text/csv"}
-        if query_name == "population:nara_linked:page:1":
-            return _csv_bytes(
-                ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q500"}],
+                [{"format": f"http://www.wikidata.org/entity/{qid}"}],
             ), {"content-type": "text/csv"}
 
         qids = _qids_from_values(query)
@@ -197,19 +188,43 @@ def test_default_queries_use_explicit_population_policy_and_values_batches():
     population_text = "\n".join(POPULATION_QUERY_TEMPLATES.values())
     batch_text = "\n".join(DEFAULT_QUERY_PARTS.values())
 
-    assert WIKIDATA_POPULATION_POLICY_VERSION == "2026-08-20-v2"
+    assert WIKIDATA_POPULATION_POLICY_VERSION == "2026-08-20-v3"
     assert "wdt:P31/wdt:P279* wd:Q235557" not in population_text
     assert "?format wdt:P31 wd:Q235557" in population_text
     assert "?format wdt:P31 wd:Q26085352" in population_text
-    assert "VALUES ?class" in population_text
+
+    reviewed_query = POPULATION_QUERY_TEMPLATES["reviewed_format_classes"]
     for qid in REVIEWED_FORMAT_CLASS_QIDS:
-        assert f"wd:{qid}" in population_text
+        assert f"wd:{qid}" in reviewed_query
 
     xml_query = POPULATION_QUERY_TEMPLATES["conditional_xml_formats"]
     assert f"?format wdt:P31 wd:{CONDITIONAL_XML_FORMAT_CLASS_QID}" in xml_query
-    assert "VALUES ?evidenceProperty" in xml_query
-    for property_id in ("P2748", "P3266", "P11167", "P1195", "P1163", "P4152"):
-        assert f"wdt:{property_id}" in xml_query
+
+    parent_query = POPULATION_QUERY_TEMPLATES["conditional_format_parents"]
+    for qid in REVIEWED_FORMAT_PARENT_QIDS:
+        assert f"wd:{qid}" in parent_query
+
+    context_query = POPULATION_QUERY_TEMPLATES["conditional_context_classes"]
+    for qid in CONDITIONAL_CONTEXT_CLASS_QIDS:
+        assert f"wd:{qid}" in context_query
+
+    open_query = POPULATION_QUERY_TEMPLATES["conditional_open_formats"]
+    assert f"wd:{CONDITIONAL_OPEN_FORMAT_CLASS_QID}" in open_query
+    assert "FILTER NOT EXISTS" in open_query
+    for qid in CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS:
+        assert f"wd:{qid}" in open_query
+
+    for query in (xml_query, parent_query, context_query, open_query):
+        assert "VALUES ?evidenceProperty" in query
+        for property_id in (
+            "P2748",
+            "P3266",
+            "P11167",
+            "P1195",
+            "P1163",
+            "P4152",
+        ):
+            assert f"wdt:{property_id}" in query
 
     assert "wdt:P2748" in population_text
     assert "wdt:P3266" in population_text
@@ -256,6 +271,9 @@ def test_staged_acquisition_freezes_union_population_and_batches_properties(
         "Q250",
         "Q275",
         "Q290",
+        "Q291",
+        "Q292",
+        "Q293",
         "Q300",
         "Q400",
         "Q500",
@@ -264,35 +282,53 @@ def test_staged_acquisition_freezes_union_population_and_batches_properties(
     assert rows_by_qid["Q300"]["puid"] == "fmt/300"
     assert rows_by_qid["Q400"]["locFdd"] == "fdd000400"
     assert rows_by_qid["Q500"]["naraFormatPlanId"] == "NF00500"
-    assert rows_by_qid["Q250"]["puid"] == ""
-    assert rows_by_qid["Q275"]["puid"] == ""
-    assert rows_by_qid["Q290"]["puid"] == ""
+    assert rows_by_qid["Q291"]["puid"] == ""
+    assert rows_by_qid["Q292"]["puid"] == ""
+    assert rows_by_qid["Q293"]["puid"] == ""
     assert rows_by_qid["Q100"]["developerQid"] == "Q999"
     assert rows_by_qid["Q100"]["developerLabel"] == "Example Developer"
 
     assert snapshot.metadata["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
     assert snapshot.metadata["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
     assert snapshot.metadata["conditional_xml_format_class_qid"] == CONDITIONAL_XML_FORMAT_CLASS_QID
+    assert snapshot.metadata["reviewed_format_parent_qids"] == list(REVIEWED_FORMAT_PARENT_QIDS)
+    assert snapshot.metadata["conditional_context_class_qids"] == list(
+        CONDITIONAL_CONTEXT_CLASS_QIDS
+    )
+    assert snapshot.metadata["conditional_open_format_class_qid"] == (
+        CONDITIONAL_OPEN_FORMAT_CLASS_QID
+    )
+    assert snapshot.metadata["conditional_open_format_excluded_class_qids"] == list(
+        CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS
+    )
 
     staged = snapshot.metadata["staged_acquisition"]
-    assert staged["population_count"] == 8
+    assert staged["population_count"] == 11
     assert staged["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
-    assert staged["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
-    assert staged["conditional_xml_format_class_qid"] == CONDITIONAL_XML_FORMAT_CLASS_QID
+    assert staged["reviewed_format_parent_qids"] == list(REVIEWED_FORMAT_PARENT_QIDS)
+    assert staged["conditional_context_class_qids"] == list(
+        CONDITIONAL_CONTEXT_CLASS_QIDS
+    )
     assert staged["batch_size"] == 2
-    assert staged["total_batches"] == 4
+    assert staged["total_batches"] == 6
     assert staged["resumed"] is False
-    assert staged["parts"]["core"]["batches"] == 4
-    assert staged["parts"]["core"]["network_fetches"] == 4
+    assert staged["parts"]["core"]["batches"] == 6
+    assert staged["parts"]["core"]["network_fetches"] == 6
 
-    assert calls.count("population:direct_file_formats:page:1") == 1
+    for route in (
+        "direct_file_formats",
+        "file_format_families",
+        "reviewed_format_classes",
+        "conditional_xml_formats",
+        "conditional_format_parents",
+        "conditional_context_classes",
+        "conditional_open_formats",
+        "pronom_linked",
+        "loc_linked",
+        "nara_linked",
+    ):
+        assert calls.count(f"population:{route}:page:1") == 1
     assert calls.count("population:direct_file_formats:page:2") == 1
-    assert calls.count("population:file_format_families:page:1") == 1
-    assert calls.count("population:reviewed_format_classes:page:1") == 1
-    assert calls.count("population:conditional_xml_formats:page:1") == 1
-    assert calls.count("population:pronom_linked:page:1") == 1
-    assert calls.count("population:loc_linked:page:1") == 1
-    assert calls.count("population:nara_linked:page:1") == 1
     assert adapter.extract([snapshot]) == []
 
 
@@ -346,7 +382,7 @@ def test_interrupted_acquisition_resumes_frozen_population_and_cached_batches(
     staged = snapshot.metadata["staged_acquisition"]
     assert staged["resumed"] is True
     assert staged["parts"]["core"]["cache_hits"] == 1
-    assert staged["parts"]["core"]["network_fetches"] == 3
+    assert staged["parts"]["core"]["network_fetches"] == 5
 
 
 def test_offline_reuses_completed_final_snapshot(tmp_path, monkeypatch):
