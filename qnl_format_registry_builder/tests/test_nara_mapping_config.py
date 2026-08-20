@@ -143,3 +143,39 @@ def test_not_applicable_is_only_a_real_answer_on_conditional_questions():
             f"{rule['id']} reads N/A as {value!r} on a question that is neither conditional "
             "nor answered non-committally"
         )
+
+
+def test_provisional_mapping_does_not_claim_reviewed_approval():
+    """Promoted-but-unreviewed rules must be distinguishable from reviewed ones.
+
+    The approved mapping carries a real committee attribution. Rules promoted to
+    unblock work have not been through that review, so they must not inherit it:
+    their claims are emitted as `unreviewed`, which downstream still consumes but
+    can filter or re-examine before a decision rests on them.
+    """
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "criterion_mappings"
+    approved = json.loads((root / "nara_digital_preservation_framework.v1.approved.json").read_text(encoding="utf-8"))
+    provisional = json.loads((root / "nara_digital_preservation_framework.v1.provisional.json").read_text(encoding="utf-8"))
+
+    assert provisional["claim_review_status"] == "unreviewed"
+    assert provisional["decided_by"] != approved["decided_by"]
+
+    reviewed_questions = {rule.get("nara_question_id") for rule in approved["maps"]}
+    by_status = {"approved": set(), "unreviewed": set()}
+    for rule in provisional["maps"]:
+        status = rule.get("claim_review_status") or provisional["claim_review_status"]
+        by_status.setdefault(status, set()).add(rule.get("nara_question_id"))
+
+    # Exactly the genuinely reviewed questions keep approved status.
+    assert by_status["approved"] == reviewed_questions
+    assert by_status["unreviewed"] == {
+        rule.get("nara_question_id") for rule in provisional["maps"]
+    } - reviewed_questions
+    for rule in provisional["maps"]:
+        if rule.get("nara_question_id") in reviewed_questions:
+            assert rule.get("decided_by") == approved["decided_by"]
+        else:
+            assert "decided_by" not in rule

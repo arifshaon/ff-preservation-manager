@@ -282,3 +282,32 @@ A `..._Numbered.csv` already dropped in an input folder still works and is
 recognised as `risk_matrix_numbered`. If both views are supplied the labeled one
 wins, because the two files share column names and a rubric cell must read
 `Unknown` rather than a score that cannot express it.
+
+## Mapping files and review state
+
+Three NARA mapping files ship, and the difference between them is governance,
+not content:
+
+| File | Rules | Claim review status |
+| --- | --- | --- |
+| `...v1.approved.json` | 4 | `approved` — reviewed, attributed to QNL DCPA |
+| `...v1.provisional.json` | 27 | `unreviewed`, except the 4 reviewed rules which keep their approval and attribution per-rule |
+| `...v1.draft.json` | 27 | `needs_review` — the authoring scaffold |
+
+`config/sources.nara.local.json` uses the **provisional** file, which is what
+takes NARA from 4 criteria to 22 and the registry as a whole from 10 to 24 of 26.
+
+The provisional file exists so promotion is visible rather than implicit. Its
+rules were promoted to unblock downstream work, not reviewed, so they must not
+inherit the approved file's committee attribution. Their claims carry
+`review_status: "unreviewed"`, which the risk manager still consumes —
+`unreviewed` is not in its excluded set — but which can be filtered, counted, or
+re-examined before any institutional decision rests on them.
+
+```bash
+# how many claims are resting on unreviewed rules
+python -c "import json;from collections import Counter;print(Counter(json.loads(l)['review_status'] for l in open('out/criterion_claims.jsonl')))"
+```
+
+To promote a rule properly: review it, move it into the approved file with a real
+`decided_by`/`decided_at`, and drop it from the provisional file.

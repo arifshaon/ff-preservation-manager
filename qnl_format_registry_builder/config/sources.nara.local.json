@@ -12,16 +12,36 @@
     "enabled": true,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings/nara_digital_preservation_framework.v1.approved.json",
+    "mappings": "criterion_mappings/nara_digital_preservation_framework.v1.provisional.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "NARA-only local run: file storage, no MongoDB. Applies the approved NARA rubric mappings."
+    "notes": "NARA-only local run: file storage, no MongoDB. Applies the provisional 27-rule NARA mapping against the labeled risk matrix. Four rules carry reviewed approval; the other 23 emit claims with review_status 'unreviewed' until they are reviewed."
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
-    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
-    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
-    "wikidata": {"strength": "weak", "verified_from": []}
+    "puid": {
+      "strength": "strong",
+      "verified_from": [
+        "pronom_registry",
+        "pronom_droid_xml"
+      ]
+    },
+    "loc": {
+      "strength": "strong",
+      "verified_from": [
+        "loc_fdd_xml"
+      ]
+    },
+    "nara": {
+      "strength": "strong",
+      "verified_from": [
+        "nara_digital_preservation_framework",
+        "nara_preservation_csv"
+      ]
+    },
+    "wikidata": {
+      "strength": "weak",
+      "verified_from": []
+    }
   },
   "sources": [
     {
