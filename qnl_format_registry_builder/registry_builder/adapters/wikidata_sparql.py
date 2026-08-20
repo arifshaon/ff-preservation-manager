@@ -34,23 +34,45 @@ PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 # Population membership is deliberately explicit.  The earlier unrestricted
 # P31/P279* traversal reached large Wikimedia-module/template branches and made
 # the acquisition population depend on remote ontology changes.  Discovery now
-# unions direct core classes, a small reviewed specialist-class allowlist, and
-# authority-linked QIDs.  P279 is still harvested later as context; it does not
-# decide population membership transitively.
-WIKIDATA_POPULATION_POLICY_VERSION = "2026-08-20-v1"
+# unions direct core classes, a reviewed specialist-class allowlist, a bounded
+# evidence-gated XML route, and authority-linked QIDs.  P279 is still harvested
+# later as context; it does not decide population membership transitively.
+WIKIDATA_POPULATION_POLICY_VERSION = "2026-08-20-v2"
 
 # These are direct P31 classes whose instances are genuinely file-format
 # concepts but are not consistently modelled as direct instances of Q235557.
-# Keep this list small and evidence-based; expand it only after reviewing the
-# observed non-direct class census.  Labels are comments only: QIDs are policy.
+# The v2 expansion is evidence-based: these classes were observed in the 204
+# useful non-direct QIDs missed by v1 and their sampled records were reviewed.
+# Labels are comments only: QIDs are policy.
 REVIEWED_FORMAT_CLASS_QIDS: tuple[str, ...] = (
-    "Q1572121",  # image file format
-    "Q1351368",  # archive file format
-    "Q336705",   # document file format
+    "Q1572121",    # image file format
+    "Q1351368",    # archive file format
+    "Q336705",     # document file format
+    "Q138827382",  # disk image format
+    "Q654383",     # raw image format
+    "Q105599390",  # raster-graphics file format
+    "Q55281818",   # font file format
+    "Q1955133",    # music file format
+    "Q167772",     # digital container format
+    "Q115729440",  # patch format
+    "Q682626",     # audio file format
+    "Q18359031",   # video file format
+    "Q105599400",  # vector graphics file format
+    "Q2026749",    # package format
+    "Q17560478",   # executable file format
+    "Q5090461",    # chemical file format
+    "Q133897645",  # GIS project file
 )
 _REVIEWED_FORMAT_CLASS_VALUES = " ".join(
     f"wd:{qid}" for qid in REVIEWED_FORMAT_CLASS_QIDS
 )
+
+# XML-based format is intentionally not an unconditional allowlist class.
+# It is broad enough to need direct format evidence.  Authority identifiers are
+# included here for policy clarity even though independent authority routes also
+# acquire those QIDs.  The non-authority signals are extension, MIME type and
+# file-format identification pattern.
+CONDITIONAL_XML_FORMAT_CLASS_QID = "Q20155966"
 
 # Population discovery is deliberately separated from property harvesting.
 # Each population query is keyset-paginated by entity URI, then the merged QID
@@ -85,6 +107,26 @@ LIMIT __LIMIT__
 SELECT DISTINCT ?format WHERE {{
   VALUES ?class {{ {_REVIEWED_FORMAT_CLASS_VALUES} }}
   ?format wdt:P31 ?class .
+  __AFTER_FILTER__
+}}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "conditional_xml_formats": (
+        _PREFIXES
+        + f"""
+SELECT DISTINCT ?format WHERE {{
+  ?format wdt:P31 wd:{CONDITIONAL_XML_FORMAT_CLASS_QID} .
+  VALUES ?evidenceProperty {{
+    wdt:P2748
+    wdt:P3266
+    wdt:P11167
+    wdt:P1195
+    wdt:P1163
+    wdt:P4152
+  }}
+  ?format ?evidenceProperty ?evidence .
   __AFTER_FILTER__
 }}
 ORDER BY ?format
@@ -345,6 +387,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         )
         pieces.append("### population-policy\n" + WIKIDATA_POPULATION_POLICY_VERSION)
         pieces.append("### reviewed-format-classes\n" + "\n".join(REVIEWED_FORMAT_CLASS_QIDS))
+        pieces.append("### conditional-xml-format-class\n" + CONDITIONAL_XML_FORMAT_CLASS_QID)
         pieces.append("### output-columns\n" + "\n".join(_OUTPUT_COLUMNS))
         return "\n\n".join(pieces)
 
@@ -630,6 +673,7 @@ class WikidataSparqlAdapter(SourceAdapter):
                 "session_id": session_id,
                 "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
                 "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
+                "conditional_xml_format_class_qid": CONDITIONAL_XML_FORMAT_CLASS_QID,
                 "population_sha256": population_sha256,
                 "row_count": len(ordered_qids),
                 "discovery": discovery_stats,
@@ -643,6 +687,7 @@ class WikidataSparqlAdapter(SourceAdapter):
             "query_sha256": self._query_sha256(),
             "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
             "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
+            "conditional_xml_format_class_qid": CONDITIONAL_XML_FORMAT_CLASS_QID,
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "population_path": population_snapshot.local_path,
@@ -921,6 +966,9 @@ class WikidataSparqlAdapter(SourceAdapter):
             "population_discovery": manifest.get("population_discovery"),
             "population_policy_version": manifest.get("population_policy_version"),
             "reviewed_format_class_qids": manifest.get("reviewed_format_class_qids"),
+            "conditional_xml_format_class_qid": manifest.get(
+                "conditional_xml_format_class_qid"
+            ),
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "total_batches": total_batches,
@@ -949,6 +997,9 @@ class WikidataSparqlAdapter(SourceAdapter):
         else:
             metadata["population_policy_version"] = WIKIDATA_POPULATION_POLICY_VERSION
             metadata["reviewed_format_class_qids"] = list(REVIEWED_FORMAT_CLASS_QIDS)
+            metadata["conditional_xml_format_class_qid"] = (
+                CONDITIONAL_XML_FORMAT_CLASS_QID
+            )
             metadata["population_queries"] = dict(POPULATION_QUERY_TEMPLATES)
             metadata["batch_query_templates"] = dict(DEFAULT_QUERY_PARTS)
             metadata["batch_size"] = self.batch_size
