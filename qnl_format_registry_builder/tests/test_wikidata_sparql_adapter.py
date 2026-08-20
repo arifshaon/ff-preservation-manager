@@ -52,12 +52,12 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
         if query_name == "population:file_format_families:page:1":
             return _csv_bytes(
                 ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q200"}],
+                [{"format": "http://www.wikidata.org/entity/Q250"}],
             ), {"content-type": "text/csv"}
         if query_name == "population:reviewed_format_classes:page:1":
             return _csv_bytes(
                 ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q200"}],
+                [{"format": "http://www.wikidata.org/entity/Q275"}],
             ), {"content-type": "text/csv"}
         if query_name == "population:pronom_linked:page:1":
             return _csv_bytes(
@@ -67,12 +67,12 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
         if query_name == "population:loc_linked:page:1":
             return _csv_bytes(
                 ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q200"}],
+                [{"format": "http://www.wikidata.org/entity/Q400"}],
             ), {"content-type": "text/csv"}
         if query_name == "population:nara_linked:page:1":
             return _csv_bytes(
                 ["format"],
-                [{"format": "http://www.wikidata.org/entity/Q300"}],
+                [{"format": "http://www.wikidata.org/entity/Q500"}],
             ), {"content-type": "text/csv"}
 
         qids = _qids_from_values(query)
@@ -127,20 +127,28 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
                             "value": "fmt/1",
                         }
                     )
-                elif qid == "Q200":
-                    rows.append(
-                        {
-                            "format": "http://www.wikidata.org/entity/Q200",
-                            "predicate": "http://www.wikidata.org/prop/direct/P3266",
-                            "value": "fdd000200",
-                        }
-                    )
                 elif qid == "Q300":
                     rows.append(
                         {
                             "format": "http://www.wikidata.org/entity/Q300",
+                            "predicate": "http://www.wikidata.org/prop/direct/P2748",
+                            "value": "fmt/300",
+                        }
+                    )
+                elif qid == "Q400":
+                    rows.append(
+                        {
+                            "format": "http://www.wikidata.org/entity/Q400",
+                            "predicate": "http://www.wikidata.org/prop/direct/P3266",
+                            "value": "fdd000400",
+                        }
+                    )
+                elif qid == "Q500":
+                    rows.append(
+                        {
+                            "format": "http://www.wikidata.org/entity/Q500",
                             "predicate": "http://www.wikidata.org/prop/direct/P11167",
-                            "value": "NF00300",
+                            "value": "NF00500",
                         }
                     )
             return _csv_bytes(["format", "predicate", "value"], rows), {
@@ -205,7 +213,7 @@ def test_default_queries_use_explicit_population_policy_and_values_batches():
     assert "VALUES ?format { __VALUES__ }" in batch_text
 
 
-def test_staged_acquisition_freezes_population_and_batches_properties(
+def test_staged_acquisition_freezes_union_population_and_batches_properties(
     tmp_path, monkeypatch
 ):
     calls = []
@@ -228,25 +236,29 @@ def test_staged_acquisition_freezes_population_and_batches_properties(
     snapshot = adapter.download_to(output)
 
     rows = list(csv.DictReader(io.StringIO(output.read_text(encoding="utf-8"))))
-    assert [row["qid"] for row in rows] == ["Q100", "Q200", "Q300"]
-    assert rows[0]["puid"] == "fmt/1"
-    assert rows[1]["locFdd"] == "fdd000200"
-    assert rows[2]["naraFormatPlanId"] == "NF00300"
-    assert rows[0]["developerQid"] == "Q999"
-    assert rows[0]["developerLabel"] == "Example Developer"
+    rows_by_qid = {row["qid"]: row for row in rows}
+    assert list(rows_by_qid) == ["Q100", "Q200", "Q250", "Q275", "Q300", "Q400", "Q500"]
+    assert rows_by_qid["Q100"]["puid"] == "fmt/1"
+    assert rows_by_qid["Q300"]["puid"] == "fmt/300"
+    assert rows_by_qid["Q400"]["locFdd"] == "fdd000400"
+    assert rows_by_qid["Q500"]["naraFormatPlanId"] == "NF00500"
+    assert rows_by_qid["Q250"]["puid"] == ""
+    assert rows_by_qid["Q275"]["puid"] == ""
+    assert rows_by_qid["Q100"]["developerQid"] == "Q999"
+    assert rows_by_qid["Q100"]["developerLabel"] == "Example Developer"
 
     assert snapshot.metadata["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
     assert snapshot.metadata["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
 
     staged = snapshot.metadata["staged_acquisition"]
-    assert staged["population_count"] == 3
+    assert staged["population_count"] == 7
     assert staged["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
     assert staged["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
     assert staged["batch_size"] == 2
-    assert staged["total_batches"] == 2
+    assert staged["total_batches"] == 4
     assert staged["resumed"] is False
-    assert staged["parts"]["core"]["batches"] == 2
-    assert staged["parts"]["core"]["network_fetches"] == 2
+    assert staged["parts"]["core"]["batches"] == 4
+    assert staged["parts"]["core"]["network_fetches"] == 4
 
     assert calls.count("population:direct_file_formats:page:1") == 1
     assert calls.count("population:direct_file_formats:page:2") == 1
@@ -308,7 +320,7 @@ def test_interrupted_acquisition_resumes_frozen_population_and_cached_batches(
     staged = snapshot.metadata["staged_acquisition"]
     assert staged["resumed"] is True
     assert staged["parts"]["core"]["cache_hits"] == 1
-    assert staged["parts"]["core"]["network_fetches"] == 1
+    assert staged["parts"]["core"]["network_fetches"] == 3
 
 
 def test_offline_reuses_completed_final_snapshot(tmp_path, monkeypatch):
