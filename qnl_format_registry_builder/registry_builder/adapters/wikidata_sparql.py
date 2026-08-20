@@ -31,18 +31,62 @@ PREFIX schema: <http://schema.org/>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 """
 
+# Population membership is deliberately explicit.  The earlier unrestricted
+# P31/P279* traversal reached large Wikimedia-module/template branches and made
+# the acquisition population depend on remote ontology changes.  Discovery now
+# unions direct core classes, a small reviewed specialist-class allowlist, and
+# authority-linked QIDs.  P279 is still harvested later as context; it does not
+# decide population membership transitively.
+WIKIDATA_POPULATION_POLICY_VERSION = "2026-08-20-v1"
+
+# These are direct P31 classes whose instances are genuinely file-format
+# concepts but are not consistently modelled as direct instances of Q235557.
+# Keep this list small and evidence-based; expand it only after reviewing the
+# observed non-direct class census.  Labels are comments only: QIDs are policy.
+REVIEWED_FORMAT_CLASS_QIDS: tuple[str, ...] = (
+    "Q1572121",  # image file format
+    "Q1351368",  # archive file format
+    "Q336705",   # document file format
+)
+_REVIEWED_FORMAT_CLASS_VALUES = " ".join(
+    f"wd:{qid}" for qid in REVIEWED_FORMAT_CLASS_QIDS
+)
+
 # Population discovery is deliberately separated from property harvesting.
 # Each population query is keyset-paginated by entity URI, then the merged QID
 # set is frozen for the acquisition session. Property queries use VALUES batches
-# over that frozen set rather than repeating the broad taxonomy traversal.
+# over that frozen set rather than repeating population-selection logic.
 POPULATION_QUERY_TEMPLATES: dict[str, str] = {
-    "taxonomy": (
+    "direct_file_formats": (
         _PREFIXES
         + """
 SELECT DISTINCT ?format WHERE {
-  ?format wdt:P31/wdt:P279* wd:Q235557 .
+  ?format wdt:P31 wd:Q235557 .
   __AFTER_FILTER__
 }
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "file_format_families": (
+        _PREFIXES
+        + """
+SELECT DISTINCT ?format WHERE {
+  ?format wdt:P31 wd:Q26085352 .
+  __AFTER_FILTER__
+}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "reviewed_format_classes": (
+        _PREFIXES
+        + f"""
+SELECT DISTINCT ?format WHERE {{
+  VALUES ?class {{ {_REVIEWED_FORMAT_CLASS_VALUES} }}
+  ?format wdt:P31 ?class .
+  __AFTER_FILTER__
+}}
 ORDER BY ?format
 LIMIT __LIMIT__
 """.strip()
@@ -52,6 +96,28 @@ LIMIT __LIMIT__
         + """
 SELECT DISTINCT ?format WHERE {
   ?format wdt:P2748 ?puid .
+  __AFTER_FILTER__
+}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "loc_linked": (
+        _PREFIXES
+        + """
+SELECT DISTINCT ?format WHERE {
+  ?format wdt:P3266 ?locFdd .
+  __AFTER_FILTER__
+}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "nara_linked": (
+        _PREFIXES
+        + """
+SELECT DISTINCT ?format WHERE {
+  ?format wdt:P11167 ?naraFormatPlanId .
   __AFTER_FILTER__
 }
 ORDER BY ?format
@@ -159,7 +225,7 @@ ORDER BY ?format ?predicate ?value
     ),
 }
 
-DEFAULT_FILE_FORMAT_QUERY = POPULATION_QUERY_TEMPLATES["taxonomy"]
+DEFAULT_FILE_FORMAT_QUERY = POPULATION_QUERY_TEMPLATES["direct_file_formats"]
 
 _PROPERTY_TO_FIELD = {
     "http://www.wikidata.org/prop/direct/P31": ("instanceOfQid", "instanceOfLabel"),
@@ -277,6 +343,8 @@ class WikidataSparqlAdapter(SourceAdapter):
         pieces.extend(
             f"### batch:{name}\n{query}" for name, query in DEFAULT_QUERY_PARTS.items()
         )
+        pieces.append("### population-policy\n" + WIKIDATA_POPULATION_POLICY_VERSION)
+        pieces.append("### reviewed-format-classes\n" + "\n".join(REVIEWED_FORMAT_CLASS_QIDS))
         pieces.append("### output-columns\n" + "\n".join(_OUTPUT_COLUMNS))
         return "\n\n".join(pieces)
 
@@ -284,7 +352,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         return hashlib.sha256(self._query_material().encode("utf-8")).hexdigest()
 
     def _cache_key(self) -> str:
-        mode = "custom" if self.custom_query else "staged-values-batching-v1"
+        mode = "custom" if self.custom_query else "staged-values-batching-v2"
         return (
             f"{self.endpoint}#query-sha256={self._query_sha256()}"
             f"&format=csv&mode={mode}"
@@ -560,17 +628,21 @@ class WikidataSparqlAdapter(SourceAdapter):
             content_type="text/csv",
             metadata={
                 "session_id": session_id,
+                "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
+                "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
                 "population_sha256": population_sha256,
                 "row_count": len(ordered_qids),
                 "discovery": discovery_stats,
             },
         )
         manifest = {
-            "version": 1,
+            "version": 2,
             "session_id": session_id,
             "started_at": utc_now_iso(),
             "complete": False,
             "query_sha256": self._query_sha256(),
+            "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
+            "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "population_path": population_snapshot.local_path,
@@ -847,6 +919,8 @@ class WikidataSparqlAdapter(SourceAdapter):
             "population_count": len(qids),
             "population_sha256": manifest.get("population_sha256"),
             "population_discovery": manifest.get("population_discovery"),
+            "population_policy_version": manifest.get("population_policy_version"),
+            "reviewed_format_class_qids": manifest.get("reviewed_format_class_qids"),
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "total_batches": total_batches,
@@ -859,7 +933,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         query_mode = (
             "custom_single_query"
             if self.custom_query
-            else "staged_population_values_batches_v1"
+            else "staged_population_values_batches_v2"
         )
         metadata: dict[str, Any] = {
             "endpoint": self.endpoint,
@@ -873,6 +947,8 @@ class WikidataSparqlAdapter(SourceAdapter):
         if self.custom_query:
             metadata["query"] = self.custom_query
         else:
+            metadata["population_policy_version"] = WIKIDATA_POPULATION_POLICY_VERSION
+            metadata["reviewed_format_class_qids"] = list(REVIEWED_FORMAT_CLASS_QIDS)
             metadata["population_queries"] = dict(POPULATION_QUERY_TEMPLATES)
             metadata["batch_query_templates"] = dict(DEFAULT_QUERY_PARTS)
             metadata["batch_size"] = self.batch_size
