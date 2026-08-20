@@ -4,35 +4,59 @@ The `wikidata_sparql` source adapter is currently **acquisition-only**. It downl
 
 It does **not** normalize Wikidata rows into `RawFormatRecord`, reconcile QIDs/PUIDs, create criterion claims, alter canonical formats, or write Wikidata-derived data to MongoDB.
 
-## Source population
+## Why population policy is explicit
 
-The default acquisition uses an explicit, versioned population policy. It no longer uses the unrestricted transitive query `P31/P279* -> Q235557`, because analysis of the completed 85,269-QID acquisition showed that this traversal pulled in large unrelated branches such as Wikimedia modules, templates and map-data modules.
+The default acquisition no longer uses unrestricted transitive `P31/P279* -> Q235557` discovery. The completed broad acquisition contained 85,269 QIDs and pulled in large unrelated ontology branches such as Wikimedia modules, templates and map-data modules.
 
-### Policy v1 validation
+The replacement policy is explicit, versioned, evidence-based and deliberately conservative. `P279` is still harvested as source context, but never determines population membership transitively.
 
-Policy v1 reduced the acquisition from 85,269 QIDs to 15,233 while preserving almost all useful technical evidence. A repeatable comparison against the broad snapshot reproduced the previously identified 595 useful non-direct records exactly:
+## Validation history
 
-- 391 were retained by v1;
-- 204 were missed by v1;
-- the missing-class census was then reviewed to define policy v2.
+### Policy v1
 
-The v2 allowlist is therefore evidence-based rather than derived from another ontology traversal.
+Policy v1 reduced the population from 85,269 QIDs to 15,233. The repeatable comparison command reproduced the previously identified 595 useful non-direct records exactly:
 
-### Policy v2 population union
+- 391 / 595 retained;
+- 204 / 595 missing.
+
+The missing-class census was reviewed to define policy v2.
+
+### Policy v2
+
+Policy v2 expanded the reviewed specialist-class allowlist and added an evidence-gated XML route.
+
+The resulting acquisition contained 15,421 QIDs:
+
+- 539 / 595 useful non-direct records retained;
+- 56 / 595 still missing;
+- 90.6% retention of the old useful non-direct diagnostic set;
+- only 188 QIDs added compared with v1;
+- no v1 QIDs removed.
+
+The remaining 56 records were reviewed individually. Most were preservation-relevant versions or variants whose Wikidata `P31` points to a specific parent format/family/product rather than a reusable format class. Examples included Word Binary versions, SWF versions, PDF/VT variants, STATISTICA file types, Softdisk Family Tree file types, Parchive versions, Python bytecode and WebP Extended.
+
+That review defines policy v3.
+
+## Policy v3 population union
 
 The current population is the union of:
 
 1. direct instances of **file format** (`P31 = Q235557`);
 2. direct instances of **file format family** (`P31 = Q26085352`);
-3. direct instances of the reviewed specialist-class allowlist;
-4. evidence-bearing instances of **XML-based format** (`P31 = Q20155966` plus authority or technical format evidence);
-5. any item carrying a PRONOM file-format ID (`P2748`);
-6. any item carrying a Library of Congress FDD ID (`P3266`);
-7. any item carrying a NARA File Format Preservation Plan ID (`P11167`).
+3. direct instances of reviewed specialist file-format classes;
+4. evidence-bearing instances of **XML-based format**;
+5. evidence-bearing instances of a reviewed set of specific format-parent concepts;
+6. evidence-bearing instances of reviewed contextual format classes such as video compression format;
+7. evidence-bearing instances of **open file format**, excluding known protocol/standard co-classifications;
+8. any item carrying a PRONOM file-format ID (`P2748`);
+9. any item carrying a Library of Congress FDD ID (`P3266`);
+10. any item carrying a NARA File Format Preservation Plan ID (`P11167`).
 
-The authority-linked routes are independent of Wikidata classification. This retains useful cross-registry assertions even where a QID is incompletely or unusually classified.
+The authority-linked routes remain independent of Wikidata classification.
 
-The current reviewed specialist-class allowlist is:
+## Reviewed specialist file-format classes
+
+These direct `P31` classes are treated as format classes for acquisition:
 
 - image file format (`Q1572121`);
 - archive file format (`Q1351368`);
@@ -50,17 +74,15 @@ The current reviewed specialist-class allowlist is:
 - package format (`Q2026749`);
 - executable file format (`Q17560478`);
 - chemical file format (`Q5090461`);
-- GIS project file (`Q133897645`).
+- GIS project file (`Q133897645`);
+- e-book file format (`Q81986407`);
+- exe-extension-associated executable file format (`Q17560541`).
 
-These classes were selected after reviewing the 204 useful non-direct QIDs missed by policy v1. The sample contained concrete file-format records such as disk images, RAW camera formats, raster/vector graphics, fonts, audio/video formats, containers, patches, executable formats, chemical formats and GIS project formats.
+A record can carry additional `P31` values. Those remain source-native context and do not erase the approved format-class evidence.
 
-Some retained QIDs have additional `P31` classifications such as standards, markup languages, package managers or compression concepts. Those additional classifications remain source-native context; they do not change the acquisition decision made by an approved file-format class.
+## Evidence-gated routes
 
-### Conditional XML route
-
-`XML-based format` (`Q20155966`) is deliberately **not** an unconditional allowlist class. It is broad enough that classification alone is insufficient.
-
-An XML-based QID is acquired only when it has at least one of:
+The conditional routes require at least one of:
 
 - PRONOM ID (`P2748`);
 - LOC FDD ID (`P3266`);
@@ -69,19 +91,74 @@ An XML-based QID is acquired only when it has at least one of:
 - MIME type (`P1163`);
 - file-format identification pattern (`P4152`).
 
-The authority predicates are included in the XML route for policy clarity even though the independent authority routes would also acquire those QIDs.
+### XML-based format
 
-### Classes deliberately not promoted
+`XML-based format` (`Q20155966`) remains conditional rather than an unconditional allowlist class.
 
-The v1 missing-class census also contained broader or non-format concepts such as markup language, video compression format, technical standard, ISO standard, specification edition, programming language, protocol, package manager and technology. These are not promoted to unconditional population classes.
+### Reviewed format parents
 
-They may still appear as source context on acquired QIDs or be revisited later if a separate contextual-entity model is introduced.
+Some version/variant records are modeled as direct instances of a particular parent concept. These parents are acquisition selectors only; they are **not** promoted to reusable file-format classes:
 
-`P279` relationships are still harvested as source context. They simply do not determine acquisition membership transitively.
+- Renoise Song (`Q2597575`);
+- Parchive (`Q497118`);
+- Microsoft Word Binary File Format (`Q28858032`);
+- Excel Binary File Format (`Q3502441`);
+- Small Web Format family (`Q594447`);
+- PDF/VT (`Q125650`);
+- Softdisk Family Tree (`Q34739013`);
+- STATISTICA (`Q34746188`);
+- git packfile index (`Q53756508`);
+- Python bytecode (`Q28009469`);
+- WebP Extended (`Q45989477`).
 
-The current population-policy version is `2026-08-20-v2`. The policy version, reviewed class QIDs and conditional XML class QID are written into acquisition metadata and the session manifest and are included in the query-set hash. A policy change therefore cannot silently reuse a snapshot created under an older population rule.
+This distinction is deliberate: a product or specific parent concept can be useful for discovering its preservation-relevant child versions without asserting that the parent itself is a general file-format class.
 
-Population discovery is separate from property harvesting. The discovered QIDs are deduplicated and frozen for one acquisition session.
+### Context classes
+
+`video compression format` (`Q7927899`) is acquired conditionally as preservation context. These records are expected to receive a later role such as `codec_or_encoding`, not automatic canonical file-format status.
+
+### Open file format
+
+`open file format` (`Q1056408`) is evidence-gated and excludes records also classified as:
+
+- domain application protocol (`Q16937237`);
+- de facto standard (`Q385853`).
+
+This keeps useful format-like records while avoiding known ambiguous protocol/standard cases.
+
+## Deliberate exclusions from the final 56 review
+
+Policy v3 does not aim mechanically for 595 / 595 recovery. The remaining review included concepts that should stay outside the file-format acquisition boundary, such as protocol/language/pathological-file examples.
+
+Examples deliberately not promoted by class include:
+
+- oEmbed where classified as a domain application protocol;
+- Biological Expression Language where classified as a domain-specific/programming language;
+- 42.zip as a zip-bomb/computer-file example;
+- HTTP Cache where modeled as a de facto standard;
+- broad programming-language, protocol, standard and generic computer-file classes.
+
+The target is a defensible acquisition boundary, not perfect reproduction of everything the old transitive crawl happened to find.
+
+## Policy identity and reproducibility
+
+The current population-policy version is `2026-08-20-v3`.
+
+The query-set hash includes:
+
+- all population-query templates;
+- policy version;
+- reviewed specialist-class QIDs;
+- conditional XML class;
+- reviewed format-parent QIDs;
+- contextual class QIDs;
+- open-format class and exclusions;
+- batch query templates;
+- output columns.
+
+The same policy metadata is written into the population snapshot, acquisition session manifest and final acquisition metadata. A policy change therefore cannot silently reuse a snapshot created under an older rule.
+
+Population discovery is separate from property harvesting. Discovered QIDs are deduplicated and frozen for one acquisition session.
 
 Population queries are keyset-paginated by Wikidata entity URI. The default page size is 500.
 
@@ -116,7 +193,7 @@ The adapter does **not** repeat population-selection logic for every property qu
 Instead it:
 
 1. discovers and freezes the QID population;
-2. splits the QIDs into bounded batches (default 200);
+2. splits QIDs into bounded batches (default 200);
 3. uses `VALUES ?format { ... }` for each property query;
 4. stores each completed batch as a source snapshot;
 5. merges all batches locally into the final CSV.
@@ -131,13 +208,9 @@ An incomplete acquisition session is recorded at:
 work/snapshots/wikidata_file_formats/.wikidata_acquisition_session.json
 ```
 
-Each completed property batch is cached separately. If the command is interrupted, rerunning the same command resumes the frozen population and reuses completed batches. It does not restart population discovery or already completed batches.
+Each completed property batch is cached separately. Rerunning the same command resumes the frozen population and reuses completed batches. It does not repeat population discovery or completed batches.
 
-The query-set hash includes the population queries, policy version, reviewed specialist-class QIDs, conditional XML policy, batch query templates and output columns. If any of these change, an incomplete session created under the previous policy is not resumed.
-
-After a successful final CSV snapshot is written, the session is marked complete. A later normal run starts a fresh acquisition and therefore can observe Wikidata changes.
-
-Use `--restart` to abandon an incomplete session and start a fresh population immediately.
+Use `--restart` to deliberately abandon an incomplete session and discover a fresh population.
 
 ## Download
 
@@ -160,15 +233,6 @@ python -m registry_builder.wikidata_download `
   --transport-retries 5
 ```
 
-To deliberately abandon an incomplete run:
-
-```powershell
-python -m registry_builder.wikidata_download `
-  --out wikidata-file-formats.csv `
-  --workdir work `
-  --restart
-```
-
 The default endpoint is:
 
 ```text
@@ -179,7 +243,7 @@ HTTP 429 and transient 5xx responses are retried with bounded backoff. The CLI a
 
 ## Compare acquisition policies
 
-The population-comparison command compares two acquisition CSVs by QID and identifies useful non-direct records lost by a policy change:
+The comparison command compares two acquisition CSVs by QID and identifies useful non-direct records lost by a policy change:
 
 ```powershell
 python -m registry_builder.wikidata_population_compare `
@@ -189,16 +253,16 @@ python -m registry_builder.wikidata_population_compare `
   --prefix policy-comparison
 ```
 
-A **useful non-direct** record is defined for this diagnostic as a QID that is not a direct `P31 = Q235557` instance but has at least one PRONOM/LOC/NARA identifier, file extension, MIME type or identification pattern.
+For this diagnostic, a **useful non-direct** record is a QID that is not a direct `P31 = Q235557` instance but has at least one PRONOM/LOC/NARA identifier, extension, MIME type or identification pattern.
 
 The command writes:
 
-- a JSON summary;
+- JSON summary;
 - added QIDs;
 - removed QIDs;
 - old useful non-direct QIDs retained by the new policy;
 - old useful non-direct QIDs missing from the new policy;
-- a direct `P31` class census for those missing records.
+- direct `P31` class census for those missing records.
 
 ## Custom query
 
@@ -227,6 +291,6 @@ Offline mode uses the cached final snapshot and does not contact Wikidata.
 
 ## Deliberate current boundary
 
-`WikidataSparqlAdapter.extract()` returns an empty list. Wikidata is being acquired for source study only. It does not yet participate in identity reconciliation, criterion mapping, risk scoring, or registry persistence.
+`WikidataSparqlAdapter.extract()` still returns an empty list. Wikidata is acquired for source study only and does not yet participate in identity reconciliation, criterion mapping, risk scoring or registry persistence.
 
-The next stage is to run policy v2, compare it with both the broad 85,269-QID snapshot and the policy-v1 15,233-QID snapshot, and review any remaining useful non-direct records before enabling Wikidata-to-registry projection.
+The next step is to run policy v3, compare it with the original 85,269-QID broad snapshot and policy v2, confirm the intended remaining exclusions, and then move to source projection/reconciliation rather than continuing to broaden discovery.
