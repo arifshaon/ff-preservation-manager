@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 import pytest
 
 from registry_builder.adapters.wikidata_sparql import (
+    CONDITIONAL_XML_FORMAT_CLASS_QID,
     DEFAULT_QUERY_PARTS,
     POPULATION_QUERY_TEMPLATES,
     REVIEWED_FORMAT_CLASS_QIDS,
@@ -58,6 +59,11 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
             return _csv_bytes(
                 ["format"],
                 [{"format": "http://www.wikidata.org/entity/Q275"}],
+            ), {"content-type": "text/csv"}
+        if query_name == "population:conditional_xml_formats:page:1":
+            return _csv_bytes(
+                ["format"],
+                [{"format": "http://www.wikidata.org/entity/Q290"}],
             ), {"content-type": "text/csv"}
         if query_name == "population:pronom_linked:page:1":
             return _csv_bytes(
@@ -191,12 +197,19 @@ def test_default_queries_use_explicit_population_policy_and_values_batches():
     population_text = "\n".join(POPULATION_QUERY_TEMPLATES.values())
     batch_text = "\n".join(DEFAULT_QUERY_PARTS.values())
 
+    assert WIKIDATA_POPULATION_POLICY_VERSION == "2026-08-20-v2"
     assert "wdt:P31/wdt:P279* wd:Q235557" not in population_text
     assert "?format wdt:P31 wd:Q235557" in population_text
     assert "?format wdt:P31 wd:Q26085352" in population_text
     assert "VALUES ?class" in population_text
     for qid in REVIEWED_FORMAT_CLASS_QIDS:
         assert f"wd:{qid}" in population_text
+
+    xml_query = POPULATION_QUERY_TEMPLATES["conditional_xml_formats"]
+    assert f"?format wdt:P31 wd:{CONDITIONAL_XML_FORMAT_CLASS_QID}" in xml_query
+    assert "VALUES ?evidenceProperty" in xml_query
+    for property_id in ("P2748", "P3266", "P11167", "P1195", "P1163", "P4152"):
+        assert f"wdt:{property_id}" in xml_query
 
     assert "wdt:P2748" in population_text
     assert "wdt:P3266" in population_text
@@ -237,23 +250,35 @@ def test_staged_acquisition_freezes_union_population_and_batches_properties(
 
     rows = list(csv.DictReader(io.StringIO(output.read_text(encoding="utf-8"))))
     rows_by_qid = {row["qid"]: row for row in rows}
-    assert list(rows_by_qid) == ["Q100", "Q200", "Q250", "Q275", "Q300", "Q400", "Q500"]
+    assert list(rows_by_qid) == [
+        "Q100",
+        "Q200",
+        "Q250",
+        "Q275",
+        "Q290",
+        "Q300",
+        "Q400",
+        "Q500",
+    ]
     assert rows_by_qid["Q100"]["puid"] == "fmt/1"
     assert rows_by_qid["Q300"]["puid"] == "fmt/300"
     assert rows_by_qid["Q400"]["locFdd"] == "fdd000400"
     assert rows_by_qid["Q500"]["naraFormatPlanId"] == "NF00500"
     assert rows_by_qid["Q250"]["puid"] == ""
     assert rows_by_qid["Q275"]["puid"] == ""
+    assert rows_by_qid["Q290"]["puid"] == ""
     assert rows_by_qid["Q100"]["developerQid"] == "Q999"
     assert rows_by_qid["Q100"]["developerLabel"] == "Example Developer"
 
     assert snapshot.metadata["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
     assert snapshot.metadata["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
+    assert snapshot.metadata["conditional_xml_format_class_qid"] == CONDITIONAL_XML_FORMAT_CLASS_QID
 
     staged = snapshot.metadata["staged_acquisition"]
-    assert staged["population_count"] == 7
+    assert staged["population_count"] == 8
     assert staged["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
     assert staged["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
+    assert staged["conditional_xml_format_class_qid"] == CONDITIONAL_XML_FORMAT_CLASS_QID
     assert staged["batch_size"] == 2
     assert staged["total_batches"] == 4
     assert staged["resumed"] is False
@@ -264,6 +289,7 @@ def test_staged_acquisition_freezes_union_population_and_batches_properties(
     assert calls.count("population:direct_file_formats:page:2") == 1
     assert calls.count("population:file_format_families:page:1") == 1
     assert calls.count("population:reviewed_format_classes:page:1") == 1
+    assert calls.count("population:conditional_xml_formats:page:1") == 1
     assert calls.count("population:pronom_linked:page:1") == 1
     assert calls.count("population:loc_linked:page:1") == 1
     assert calls.count("population:nara_linked:page:1") == 1
