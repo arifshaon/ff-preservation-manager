@@ -184,6 +184,16 @@ def main() -> None:
         "conditional_xml_format_class_qid": staged.get(
             "conditional_xml_format_class_qid"
         ),
+        "reviewed_format_parent_qids": staged.get("reviewed_format_parent_qids"),
+        "conditional_context_class_qids": staged.get(
+            "conditional_context_class_qids"
+        ),
+        "conditional_open_format_class_qid": staged.get(
+            "conditional_open_format_class_qid"
+        ),
+        "conditional_open_format_excluded_class_qids": staged.get(
+            "conditional_open_format_excluded_class_qids"
+        ),
         "batch_size": staged.get("batch_size"),
         "population_page_size": staged.get("population_page_size"),
         "total_batches": staged.get("total_batches"),
