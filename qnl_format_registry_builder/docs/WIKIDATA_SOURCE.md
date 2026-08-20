@@ -127,6 +127,38 @@ https://query.wikidata.org/sparql
 
 HTTP 429 and transient 5xx responses are retried with bounded backoff. The CLI also retries interrupted or partial HTTP transfers.
 
+## Compare population policies
+
+Use the reproducible population comparator before expanding the class policy or enabling Wikidata normalization:
+
+```powershell
+python -m registry_builder.wikidata_population_compare `
+  --old <old-wikidata-snapshot.csv> `
+  --new <new-wikidata-snapshot.csv> `
+  --out-dir wikidata-population-comparison `
+  --prefix policy-v1
+```
+
+The comparison is QID-based. It reports retained, added and removed records and separately tracks the old snapshot's **useful non-direct** records. For this purpose, a useful non-direct record is one that is not directly `P31 = Q235557` but has at least one of:
+
+- PRONOM ID (`puid`);
+- LOC FDD ID (`locFdd`);
+- NARA preservation-plan ID (`naraFormatPlanId`);
+- file extension (`extension`);
+- MIME type (`mimeType`);
+- identification pattern (`identificationPattern`).
+
+The command creates:
+
+- `<prefix>.summary.json` — headline population and useful-non-direct counts;
+- `<prefix>.added.csv` — QIDs present only in the new population;
+- `<prefix>.removed.csv` — QIDs present only in the old population;
+- `<prefix>.old-useful-nondirect-retained.csv` — useful old non-direct QIDs retained by the new policy;
+- `<prefix>.old-useful-nondirect-missing.csv` — useful old non-direct QIDs lost by the new policy;
+- `<prefix>.missing-class-census.csv` — direct `P31` class counts for the missing useful records.
+
+The census is the review input for the next population-policy version. Specialist classes should be added only after reviewing the missing records and deciding whether the class belongs in the file-format acquisition boundary.
+
 ## Custom query
 
 A reviewed custom SPARQL query can still be supplied:
@@ -156,4 +188,4 @@ Offline mode uses the cached final snapshot and does not contact Wikidata.
 
 `WikidataSparqlAdapter.extract()` returns an empty list. Wikidata is being acquired for source study only. It does not yet participate in identity reconciliation, criterion mapping, risk scoring, or registry persistence.
 
-The next stage is to run the corrected acquisition, compare its population and class distribution with the previous 85,269-QID snapshot, and then review the retained non-direct classes before enabling any Wikidata-to-registry projection.
+The next stage is to compare the corrected population with the previous broad acquisition, review the missing useful non-direct class census, and revise the explicit population policy before enabling any Wikidata-to-registry projection.
