@@ -12,9 +12,11 @@ htmlcov/
 venv/
 .env
 
-# Local pipeline runtime data
+# Local pipeline runtime data. `out/` is the --out directory used throughout
+# the docs; `output/` is the default storage path in the local source configs.
 qnl_format_registry_builder/work/
 qnl_format_registry_builder/input/
+qnl_format_registry_builder/out/
 qnl_format_registry_builder/output/
 
 # Local AI configuration / secrets
