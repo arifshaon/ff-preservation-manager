@@ -181,6 +181,9 @@ def main() -> None:
         "population_sha256": staged.get("population_sha256"),
         "population_policy_version": staged.get("population_policy_version"),
         "reviewed_format_class_qids": staged.get("reviewed_format_class_qids"),
+        "conditional_xml_format_class_qid": staged.get(
+            "conditional_xml_format_class_qid"
+        ),
         "batch_size": staged.get("batch_size"),
         "population_page_size": staged.get("population_page_size"),
         "total_batches": staged.get("total_batches"),
