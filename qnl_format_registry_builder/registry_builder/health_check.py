@@ -55,29 +55,38 @@ def check_claims_point_at_live_canonicals(
     )
 
 
-def check_every_source_is_represented(
-    registry: list[dict[str, Any]],
+def check_no_source_lost_its_claims(
     claims: list[dict[str, Any]],
+    stored_claim_sources: set[str] | None,
 ) -> dict[str, Any]:
-    """Every source contributing records should still have claims in the export."""
-    record_sources = {
-        str(ref.get("source_id"))
-        for row in registry
-        for ref in (row.get("source_records") or [])
-        if ref.get("source_id")
-    }
-    claim_sources = {str(c.get("source_id")) for c in claims if c.get("source_id")}
-    missing = sorted(record_sources - claim_sources)
+    """No source that has claims in the store may be missing from the export.
+
+    This guards the export regression where a run wrote only its own claims, so
+    ingesting PRONOM silently dropped NARA's 3,032 claims from the file the risk
+    manager reads.
+
+    It deliberately compares against the *store*, not against which sources have
+    records. A graph-linking source such as Wikidata contributes identity links
+    and no criterion claims at all, so "has records but no claims" is normal and
+    must not be reported as a failure.
+    """
+    if stored_claim_sources is None:
+        return _skipped(
+            "no_source_lost_its_claims",
+            "not run; pass --storage-config so stored claims can be compared against the export",
+        )
+    exported = {str(c.get("source_id")) for c in claims if c.get("source_id")}
+    missing = sorted(stored_claim_sources - exported)
     return _check(
-        "every_source_is_represented",
+        "no_source_lost_its_claims",
         not missing,
         (
-            "sources with records but no exported claims: " + ", ".join(missing)
+            "source(s) with stored claims missing from the export: " + ", ".join(missing)
             if missing
-            else f"all {len(record_sources)} contributing source(s) have claims"
+            else f"all {len(stored_claim_sources)} claim-contributing source(s) are in the export"
         ),
-        sources_with_records=sorted(record_sources),
-        missing_from_claims=missing,
+        claim_contributing_sources=sorted(stored_claim_sources),
+        missing_from_export=missing,
     )
 
 
@@ -167,13 +176,14 @@ def run_health_check(
     claims: list[dict[str, Any]],
     *,
     source_records: list[Any] | None = None,
+    stored_claim_sources: set[str] | None = None,
     reconcile_fn=None,
     canonical_objects: list[CanonicalFormat] | None = None,
     shuffles: int = 3,
 ) -> dict[str, Any]:
     checks = [
         check_claims_point_at_live_canonicals(registry, claims),
-        check_every_source_is_represented(registry, claims),
+        check_no_source_lost_its_claims(claims, stored_claim_sources),
         check_unendorsed_claims_are_not_identifiers(registry),
     ]
     if source_records is not None and reconcile_fn is not None:

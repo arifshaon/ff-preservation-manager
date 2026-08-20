@@ -116,6 +116,10 @@ config/sources.nara.mongodb.example.json
 config/sources.pronom.mongodb.example.json
 config/sources.loc.mongodb.example.json
 config/sources.wikidata.mongodb.example.json
+config/sources.nara.local.json
+config/sources.pronom.local.json
+config/sources.loc.local.json
+config/sources.wikidata.local.json
 config/qnl-institution-format-evidence.mongodb.example.json
 config/storage.mongodb.example.json
 config/storage.file.example.json
@@ -351,8 +355,8 @@ registry health: ok
 
   [pass] claims_point_at_live_canonicals
          0 of 8857 claim(s) reference a canonical_id that is not in the registry
-  [pass] every_source_is_represented
-         all 3 contributing source(s) have claims
+  [pass] no_source_lost_its_claims
+         all 3 claim-contributing source(s) are in the export
   [pass] unendorsed_claims_are_not_identifiers
          0 unendorsed claim(s) leaked into the identifier map (102 retained as evidence)
   [pass] reconciliation_is_order_independent
@@ -369,15 +373,21 @@ failure names a real regression rather than a style violation:
 | Check | Catches |
 | --- | --- |
 | `claims_point_at_live_canonicals` | claims left dangling after a later source reshaped canonicals |
-| `every_source_is_represented` | a source's claims dropped from the export |
+| `no_source_lost_its_claims` | a source's claims dropped from the export |
 | `unendorsed_claims_are_not_identifiers` | a PUID an authority declined to assert presented as one of the format's ids |
 | `reconciliation_is_order_independent` | the canonical set depending on which source ran first |
 
-`--storage-config` is what enables the order-independence check: it re-reconciles
-the stored source records in shuffled orders and compares. Without it that check
-reports **SKIP**, never `pass`, and the overall status becomes `incomplete` — an
-unrun check must not read as a clean bill of health. The command exits non-zero
-only on `FAIL`.
+`--storage-config` enables the two checks that need the store: the
+order-independence check re-reconciles the stored source records in shuffled
+orders and compares, and the claims check compares stored claims against the
+export. Without it both report **SKIP**, never `pass`, and the overall status
+becomes `incomplete` — an unrun check must not read as a clean bill of health.
+The command exits non-zero only on `FAIL`.
+
+`no_source_lost_its_claims` compares against the store rather than against which
+sources have records, because a graph-linking source such as `wikidata_sparql`
+contributes identity links and no criterion claims at all. "Has records but no
+claims" is normal for that tier and is not a failure.
 
 The merge counts underneath are not pass/fail. They are the number to watch as
 sources are added: adding an authority should only ever increase them.

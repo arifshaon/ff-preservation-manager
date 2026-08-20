@@ -383,6 +383,7 @@ def cmd_health_check(args) -> dict[str, Any]:
 
     source_records = None
     reconcile_fn = None
+    stored_claim_sources = None
     if args.storage_config:
         config = _load_json(args.storage_config)
         # Storage paths are relative to the working directory, exactly as the
@@ -393,6 +394,11 @@ def cmd_health_check(args) -> dict[str, Any]:
             if record.get("current", True) is False:
                 continue
             latest[(record.get("source_id"), record.get("source_record_id"))] = record
+        stored_claim_sources = {
+            str(claim.get("source_id"))
+            for claim in store.query("criterion_claims")
+            if claim.get("source_id")
+        }
         rules = load_identifier_rules(config.get("identifier_kinds"))
         source_records = [
             normalize_record(_raw_record_from_dict(record), identifier_rules=rules)
@@ -405,6 +411,7 @@ def cmd_health_check(args) -> dict[str, Any]:
         registry,
         claims,
         source_records=source_records,
+        stored_claim_sources=stored_claim_sources,
         reconcile_fn=reconcile_fn,
         canonical_objects=canonical_objects,
         shuffles=args.shuffles,

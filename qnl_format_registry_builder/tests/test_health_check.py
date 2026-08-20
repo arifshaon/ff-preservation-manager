@@ -2,7 +2,7 @@
 
 from registry_builder.health_check import (
     check_claims_point_at_live_canonicals,
-    check_every_source_is_represented,
+    check_no_source_lost_its_claims,
     check_reconciliation_is_order_independent,
     check_unendorsed_claims_are_not_identifiers,
     run_health_check,
@@ -41,13 +41,26 @@ def test_live_claim_passes():
     assert check_claims_point_at_live_canonicals(_registry(), claims)["status"] == "pass"
 
 
-def test_source_with_records_but_no_claims_is_caught():
+def test_source_whose_stored_claims_vanished_from_the_export_is_caught():
     claims = [{"canonical_id": "puid-fmt-354", "source_id": "pronom_registry"}]
 
-    result = check_every_source_is_represented(_registry(), claims)
+    result = check_no_source_lost_its_claims(claims, {"pronom_registry", "loc_fdd_xml"})
 
     assert result["status"] == "FAIL"
-    assert result["missing_from_claims"] == ["loc_fdd_xml"]
+    assert result["missing_from_export"] == ["loc_fdd_xml"]
+
+
+def test_source_that_never_had_claims_is_not_a_failure():
+    """A graph-linking source such as Wikidata contributes identity, not claims."""
+    claims = [{"canonical_id": "puid-fmt-354", "source_id": "pronom_registry"}]
+
+    result = check_no_source_lost_its_claims(claims, {"pronom_registry"})
+
+    assert result["status"] == "pass"
+
+
+def test_claims_check_is_skipped_without_the_store():
+    assert check_no_source_lost_its_claims([], None)["status"] == "SKIP"
 
 
 def test_unendorsed_claim_leaking_into_the_identifier_map_is_caught():
@@ -114,8 +127,9 @@ def _healthy_claims():
 def test_skipped_check_never_reports_pass():
     report = run_health_check(_registry(), _healthy_claims())
 
-    order_check = next(c for c in report["checks"] if c["check"] == "reconciliation_is_order_independent")
-    assert order_check["status"] == "SKIP"
+    for name in ("reconciliation_is_order_independent", "no_source_lost_its_claims"):
+        assert next(c for c in report["checks"] if c["check"] == name)["status"] == "SKIP"
+
     # A skipped check must not let the run claim a clean bill of health.
     assert report["status"] == "incomplete"
 
@@ -123,7 +137,7 @@ def test_skipped_check_never_reports_pass():
 def test_failing_check_makes_the_whole_report_fail():
     claims = _healthy_claims() + [{"canonical_id": "gone", "source_id": "pronom_registry"}]
 
-    report = run_health_check(_registry(), claims)
+    report = run_health_check(_registry(), claims, stored_claim_sources={"pronom_registry", "loc_fdd_xml"})
 
     assert report["status"] == "FAIL"
 
@@ -132,6 +146,7 @@ def test_all_checks_passing_reports_ok():
     report = run_health_check(
         _registry(), _healthy_claims(),
         source_records=["r"], reconcile_fn=lambda records: [],
+        stored_claim_sources={"pronom_registry", "loc_fdd_xml"},
     )
 
     assert [c["status"] for c in report["checks"]] == ["pass"] * 4
