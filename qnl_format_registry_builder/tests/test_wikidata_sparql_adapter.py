@@ -10,6 +10,8 @@ import pytest
 from registry_builder.adapters.wikidata_sparql import (
     DEFAULT_QUERY_PARTS,
     POPULATION_QUERY_TEMPLATES,
+    REVIEWED_FORMAT_CLASS_QIDS,
+    WIKIDATA_POPULATION_POLICY_VERSION,
     WikidataSparqlAdapter,
 )
 
@@ -37,7 +39,7 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
             state["failed"] = True
             raise RuntimeError("simulated interruption")
 
-        if query_name == "population:taxonomy:page:1":
+        if query_name == "population:direct_file_formats:page:1":
             return _csv_bytes(
                 ["format"],
                 [
@@ -45,9 +47,29 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
                     {"format": "http://www.wikidata.org/entity/Q200"},
                 ],
             ), {"content-type": "text/csv"}
-        if query_name == "population:taxonomy:page:2":
+        if query_name == "population:direct_file_formats:page:2":
             return _csv_bytes(["format"], []), {"content-type": "text/csv"}
+        if query_name == "population:file_format_families:page:1":
+            return _csv_bytes(
+                ["format"],
+                [{"format": "http://www.wikidata.org/entity/Q200"}],
+            ), {"content-type": "text/csv"}
+        if query_name == "population:reviewed_format_classes:page:1":
+            return _csv_bytes(
+                ["format"],
+                [{"format": "http://www.wikidata.org/entity/Q200"}],
+            ), {"content-type": "text/csv"}
         if query_name == "population:pronom_linked:page:1":
+            return _csv_bytes(
+                ["format"],
+                [{"format": "http://www.wikidata.org/entity/Q300"}],
+            ), {"content-type": "text/csv"}
+        if query_name == "population:loc_linked:page:1":
+            return _csv_bytes(
+                ["format"],
+                [{"format": "http://www.wikidata.org/entity/Q200"}],
+            ), {"content-type": "text/csv"}
+        if query_name == "population:nara_linked:page:1":
             return _csv_bytes(
                 ["format"],
                 [{"format": "http://www.wikidata.org/entity/Q300"}],
@@ -157,13 +179,22 @@ def _fake_staged_request_factory(*, fail_once: str | None = None, calls=None):
     return fake_request
 
 
-def test_default_queries_use_correct_file_format_properties_and_values_batches():
+def test_default_queries_use_explicit_population_policy_and_values_batches():
     population_text = "\n".join(POPULATION_QUERY_TEMPLATES.values())
     batch_text = "\n".join(DEFAULT_QUERY_PARTS.values())
 
+    assert "wdt:P31/wdt:P279* wd:Q235557" not in population_text
+    assert "?format wdt:P31 wd:Q235557" in population_text
+    assert "?format wdt:P31 wd:Q26085352" in population_text
+    assert "VALUES ?class" in population_text
+    for qid in REVIEWED_FORMAT_CLASS_QIDS:
+        assert f"wd:{qid}" in population_text
+
     assert "wdt:P2748" in population_text
-    assert "wdt:P31/wdt:P279* wd:Q235557" in population_text
+    assert "wdt:P3266" in population_text
+    assert "wdt:P11167" in population_text
     assert "wdt:P2749" not in population_text
+    assert "wdt:P3267" not in population_text
 
     assert "wdt:P2748" in batch_text
     assert "wdt:P3266" in batch_text
@@ -204,17 +235,26 @@ def test_staged_acquisition_freezes_population_and_batches_properties(
     assert rows[0]["developerQid"] == "Q999"
     assert rows[0]["developerLabel"] == "Example Developer"
 
+    assert snapshot.metadata["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
+    assert snapshot.metadata["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
+
     staged = snapshot.metadata["staged_acquisition"]
     assert staged["population_count"] == 3
+    assert staged["population_policy_version"] == WIKIDATA_POPULATION_POLICY_VERSION
+    assert staged["reviewed_format_class_qids"] == list(REVIEWED_FORMAT_CLASS_QIDS)
     assert staged["batch_size"] == 2
     assert staged["total_batches"] == 2
     assert staged["resumed"] is False
     assert staged["parts"]["core"]["batches"] == 2
     assert staged["parts"]["core"]["network_fetches"] == 2
 
-    assert calls.count("population:taxonomy:page:1") == 1
-    assert calls.count("population:taxonomy:page:2") == 1
+    assert calls.count("population:direct_file_formats:page:1") == 1
+    assert calls.count("population:direct_file_formats:page:2") == 1
+    assert calls.count("population:file_format_families:page:1") == 1
+    assert calls.count("population:reviewed_format_classes:page:1") == 1
     assert calls.count("population:pronom_linked:page:1") == 1
+    assert calls.count("population:loc_linked:page:1") == 1
+    assert calls.count("population:nara_linked:page:1") == 1
     assert adapter.extract([snapshot]) == []
 
 
