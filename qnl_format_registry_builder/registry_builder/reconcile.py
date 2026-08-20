@@ -24,6 +24,50 @@ _COPIED_IDENTIFIER_HEURISTIC_REASON = (
     "Copied identifier bridged to a single verified authority group, but only one side carries "
     "an explicit version discriminator."
 )
+_RANKED_BRIDGE_HEURISTIC_REASON = (
+    "Record cites copied identifiers naming more than one verified authority group; bridged to the "
+    "group held by the strongest identifier namespace. The other cited groups were not merged."
+)
+
+
+def _preferred_bridge_target(
+    candidates: set[tuple[str, str]],
+    strong_order: list[str],
+) -> tuple[str, str] | None:
+    """Choose which verified group a record's copied identifiers point at.
+
+    A record may cite identifiers from several authorities at once — NARA names
+    both a PUID and a LOC FDD ID for the same format. When those groups do not
+    themselves merge, the citations name two different canonical records and the
+    record cannot join both.
+
+    Refusing outright is the wrong answer, because it discards the *uncontested*
+    bridge too: NARA's PUID link worked perfectly until LOC was ingested and made
+    the FDD ID a verified group of its own. Ingesting an authority must not undo
+    an existing merge.
+
+    So the strongest identifier namespace wins — PRONOM owns format
+    identification, so a PUID outranks a LOC FDD ID, which outranks a NARA ID.
+    A tie *within* one namespace is different: a record citing two different
+    PUIDs is genuinely ambiguous about which format it means, and is left alone.
+
+    Note what this deliberately does not do: it never merges the groups the
+    record cited. A third party's crosswalk is not evidence that two authorities
+    describe the same format; only those authorities can assert that.
+    """
+    def rank(key: tuple[str, str]) -> int:
+        try:
+            return strong_order.index(key[0])
+        except ValueError:
+            return len(strong_order)
+
+    if not candidates:
+        return None
+    ranked = sorted(candidates, key=lambda key: (rank(key), key))
+    best = rank(ranked[0])
+    if sum(1 for key in candidates if rank(key) == best) > 1:
+        return None
+    return ranked[0]
 
 
 def _verified_identifiers(record: RawFormatRecord, kind: str | None = None) -> list[Identifier]:
@@ -354,6 +398,7 @@ def _safe_claimed_strong_identifier_aliases(
     groups: dict[tuple[str, str], list[RawFormatRecord]],
     *,
     strong_kinds: set[str],
+    strong_order: list[str] | None = None,
 ) -> tuple[dict[tuple[str, str], tuple[str, str]], dict[tuple[str, str], dict[str, str]]]:
     """Alias copied strong identifiers to a single verified group when names do not conflict.
 
@@ -365,6 +410,7 @@ def _safe_claimed_strong_identifier_aliases(
     discriminator, the bridge is allowed but the copied identifier claim is
     marked as heuristic for collision review.
     """
+    strong_order = list(strong_order) if strong_order is not None else sorted(strong_kinds)
     verified_targets: dict[tuple[str, str], set[tuple[str, str]]] = defaultdict(set)
     for group_key, items in groups.items():
         for record in items:
@@ -423,14 +469,19 @@ def _safe_claimed_strong_identifier_aliases(
                         candidates.update(targets)
             candidates = {_resolve(candidate) for candidate in candidates}
             candidates.discard(_resolve(group_key))
-            if len(candidates) != 1:
+            target = _preferred_bridge_target(candidates, strong_order)
+            if target is None:
                 continue
-            target = next(iter(candidates))
             if _groups_name_conflict(items, groups[target]):
                 continue
             aliases[group_key] = target
             progressed = True
-            if _groups_have_asymmetric_version_signal(items, groups[target]):
+            if len(candidates) > 1:
+                alias_confidence[group_key] = {
+                    "confidence": "heuristic",
+                    "confidence_reason": _RANKED_BRIDGE_HEURISTIC_REASON,
+                }
+            elif _groups_have_asymmetric_version_signal(items, groups[target]):
                 alias_confidence[group_key] = {
                     "confidence": "heuristic",
                     "confidence_reason": _COPIED_IDENTIFIER_HEURISTIC_REASON,
@@ -481,7 +532,9 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
     for weak_key, target_key in sorted(_safe_weak_aliases(groups, strong_kinds=strong_kinds).items()):
         alias_keys.setdefault(weak_key, target_key)
 
-    claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(groups, strong_kinds=strong_kinds)
+    claimed_aliases, claimed_alias_confidence = _safe_claimed_strong_identifier_aliases(
+        groups, strong_kinds=strong_kinds, strong_order=strong_order
+    )
     for claimed_key, target_key in sorted(claimed_aliases.items()):
         existing_target = alias_keys.get(claimed_key)
         if existing_target is None or existing_target == claimed_key:

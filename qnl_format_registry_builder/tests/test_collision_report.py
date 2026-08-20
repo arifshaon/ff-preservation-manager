@@ -67,4 +67,37 @@ def test_collision_report_ok_when_no_review_items():
         "heuristic_identifier_bridges": 0,
         "weak_identifier_overlaps": 0,
         "verified_strong_identifier_conflicts": 0,
+        "ambiguous_identifier_citations": 0,
     }
+
+
+def test_report_names_records_citing_several_formats_in_one_namespace():
+    """A record reconciliation cannot place is a finding, not silence.
+
+    NARA says Broadcast Wave v.0 is fmt/1; LOC's signature says fmt/6.
+    Reconciliation refuses to pick between them, so the report has to say why
+    the record stayed on its own.
+    """
+    from registry_builder.models import RawFormatRecord
+    from registry_builder.normalize import normalize_record
+    from registry_builder.reconcile import reconcile
+
+    records = [
+        RawFormatRecord(source_id="pronom_registry", source_type="pronom_registry",
+                        source_record_id="fmt/1", name="Broadcast WAVE 0 Generic", puids=["fmt/1"]),
+        RawFormatRecord(source_id="pronom_registry", source_type="pronom_registry",
+                        source_record_id="fmt/6", name="Waveform Audio", puids=["fmt/6"]),
+        RawFormatRecord(source_id="nara_digital_preservation_framework",
+                        source_type="nara_digital_preservation_framework",
+                        source_record_id="NF00136", name="Broadcast Wave (BWF) v. 0",
+                        nara_ids=["NF00136"], puids=["fmt/1", "fmt/6"]),
+    ]
+    registry = reconcile([normalize_record(r) for r in records])
+
+    report = build_collision_report(registry)
+
+    assert report["summary"]["ambiguous_identifier_citations"] == 1
+    finding = report["ambiguous_identifier_citations"][0]
+    assert finding["preferred_name"] == "Broadcast Wave (BWF) v. 0"
+    assert finding["cited_canonical_ids_by_kind"]["puid"] == ["puid-fmt-1", "puid-fmt-6"]
+    assert report["status"] == "review"

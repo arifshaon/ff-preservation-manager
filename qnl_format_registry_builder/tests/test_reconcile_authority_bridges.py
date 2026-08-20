@@ -151,39 +151,99 @@ def test_ingestion_order_does_not_change_the_result():
     assert results == {(1, "puid-fmt-354")}
 
 
-def test_claims_naming_genuinely_different_formats_still_do_not_bridge():
-    """The convergence rule must not merge a record citing two distinct formats."""
+def test_record_citing_two_authorities_bridges_to_the_strongest_namespace():
+    """Citing a PUID and an FDD must not cost the record its PUID bridge.
+
+    NARA routinely cites both. While only PRONOM was ingested those citations
+    named one verified group and the bridge was made; ingesting LOC turned the
+    FDD ID into a verified group of its own, and refusing on ambiguity then
+    silently undid the existing merge. PRONOM owns format identification, so the
+    PUID wins — but the two authorities' own records are left unmerged, because
+    a third party's crosswalk is not their assertion to make.
+    """
     records = [
         RawFormatRecord(
             source_id="pronom_registry",
             source_type="pronom_registry",
-            source_record_id="fmt/18",
-            name="Acrobat PDF 1.4 - Portable Document Format",
-            puids=["fmt/18"],
+            source_record_id="fmt/356",
+            name="Adaptive Multi-Rate Audio",
+            puids=["fmt/356"],
         ),
         RawFormatRecord(
             source_id="loc_fdd_xml",
             source_type="loc_fdd_xml",
-            source_record_id="fdd000123",
-            name="TIFF, Revision 6.0",
-            loc_ids=["fdd000123"],
+            source_record_id="fdd000254",
+            name="AMR, Adaptive Multi-Rate Speech Codec",
+            loc_ids=["fdd000254"],
         ),
-        # An institutional record wrongly citing both a PDF PUID and a TIFF FDD.
         RawFormatRecord(
-            source_id="institution",
-            source_type="institution_policy_xlsx",
-            source_record_id="row-1",
-            name="Mixed citation row",
-            puids=["fmt/18"],
-            loc_ids=["fdd000123"],
+            source_id="nara_digital_preservation_framework",
+            source_type="nara_digital_preservation_framework",
+            source_record_id="NF00102",
+            name="Adaptive Multi Rate Audio (AMR)",
+            nara_ids=["NF00102"],
+            puids=["fmt/356"],
+            loc_ids=["fdd000254"],
         ),
     ]
 
     registry = reconcile(_norm(records))
     by_id = {fmt.canonical_id: fmt for fmt in registry}
 
-    # The two authority records stay separate, and the ambiguous row does not
-    # drag them together.
-    assert "puid-fmt-18" in by_id
-    assert "loc-fdd000123" in by_id
-    assert len(registry) == 3
+    assert set(by_id) == {"puid-fmt-356", "loc-fdd000254"}
+    nara_home = by_id["puid-fmt-356"]
+    assert sorted({r["source_id"] for r in nara_home.source_records}) == [
+        "nara_digital_preservation_framework",
+        "pronom_registry",
+    ]
+    # LOC's own record is untouched: NARA's crosswalk is not LOC's assertion.
+    assert [r["source_id"] for r in by_id["loc-fdd000254"].source_records] == ["loc_fdd_xml"]
+    # The choice among cited groups is flagged for collision review.
+    claim = next(c for c in nara_home.identifier_claims
+                 if c["kind"] == "loc" and c["value"] == "fdd000254")
+    assert claim["confidence"] == "heuristic"
+
+
+def test_ingesting_a_third_authority_never_reduces_merges():
+    """The property the ranking rule exists to protect."""
+    pronom, nara, loc = _pdfa_records()
+    amr = [
+        RawFormatRecord(source_id="pronom_registry", source_type="pronom_registry",
+                        source_record_id="fmt/356", name="Adaptive Multi-Rate Audio", puids=["fmt/356"]),
+        RawFormatRecord(source_id="nara_digital_preservation_framework",
+                        source_type="nara_digital_preservation_framework",
+                        source_record_id="NF00102", name="Adaptive Multi Rate Audio (AMR)",
+                        nara_ids=["NF00102"], puids=["fmt/356"], loc_ids=["fdd000254"]),
+        RawFormatRecord(source_id="loc_fdd_xml", source_type="loc_fdd_xml",
+                        source_record_id="fdd000254", name="AMR, Adaptive Multi-Rate Speech Codec",
+                        loc_ids=["fdd000254"]),
+    ]
+
+    def merged_source_records(records):
+        merged = set()
+        for fmt in reconcile(_norm(records)):
+            sources = {r["source_id"] for r in fmt.source_records}
+            if len(sources) > 1:
+                merged |= {(r["source_id"], r["source_record_id"]) for r in fmt.source_records}
+        return merged
+
+    without_loc = merged_source_records([pronom, nara] + amr[:2])
+    with_loc = merged_source_records([pronom, nara, loc] + amr)
+
+    assert without_loc <= with_loc, "ingesting LOC must not un-merge anything"
+
+
+def test_record_citing_two_formats_in_one_namespace_stays_ambiguous():
+    """A tie inside one namespace is real ambiguity and must not be guessed at."""
+    records = [
+        RawFormatRecord(source_id="pronom_registry", source_type="pronom_registry",
+                        source_record_id="fmt/18", name="Acrobat PDF 1.4", puids=["fmt/18"]),
+        RawFormatRecord(source_id="pronom_registry", source_type="pronom_registry",
+                        source_record_id="fmt/19", name="Acrobat PDF 1.5", puids=["fmt/19"]),
+        RawFormatRecord(source_id="institution", source_type="institution_policy_xlsx",
+                        source_record_id="row-1", name="Some PDF row", puids=["fmt/18", "fmt/19"]),
+    ]
+
+    registry = reconcile(_norm(records))
+
+    assert len(registry) == 3, "a row naming two PUIDs must not be assigned to either"
