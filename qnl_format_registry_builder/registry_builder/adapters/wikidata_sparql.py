@@ -31,19 +31,18 @@ PREFIX schema: <http://schema.org/>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 """
 
-# Population membership is deliberately explicit.  The earlier unrestricted
+# Population membership is deliberately explicit. The earlier unrestricted
 # P31/P279* traversal reached large Wikimedia-module/template branches and made
-# the acquisition population depend on remote ontology changes.  Discovery now
-# unions direct core classes, a reviewed specialist-class allowlist, a bounded
-# evidence-gated XML route, and authority-linked QIDs.  P279 is still harvested
-# later as context; it does not decide population membership transitively.
-WIKIDATA_POPULATION_POLICY_VERSION = "2026-08-20-v2"
+# the acquisition population depend on remote ontology changes. Discovery now
+# unions direct core classes, reviewed specialist classes, bounded evidence-
+# gated XML/parent/context routes, and authority-linked QIDs. P279 is still
+# harvested later as source context; it does not decide population membership
+# transitively.
+WIKIDATA_POPULATION_POLICY_VERSION = "2026-08-20-v3"
 
-# These are direct P31 classes whose instances are genuinely file-format
-# concepts but are not consistently modelled as direct instances of Q235557.
-# The v2 expansion is evidence-based: these classes were observed in the 204
-# useful non-direct QIDs missed by v1 and their sampled records were reviewed.
-# Labels are comments only: QIDs are policy.
+# Direct P31 classes whose instances are genuinely file-format concepts but are
+# not consistently modelled as direct instances of Q235557. Labels are comments
+# only: QIDs are policy.
 REVIEWED_FORMAT_CLASS_QIDS: tuple[str, ...] = (
     "Q1572121",    # image file format
     "Q1351368",    # archive file format
@@ -62,17 +61,68 @@ REVIEWED_FORMAT_CLASS_QIDS: tuple[str, ...] = (
     "Q17560478",   # executable file format
     "Q5090461",    # chemical file format
     "Q133897645",  # GIS project file
+    "Q81986407",   # e-book file format
+    "Q17560541",   # exe extension associated executable fileformat
 )
 _REVIEWED_FORMAT_CLASS_VALUES = " ".join(
     f"wd:{qid}" for qid in REVIEWED_FORMAT_CLASS_QIDS
 )
 
-# XML-based format is intentionally not an unconditional allowlist class.
-# It is broad enough to need direct format evidence.  Authority identifiers are
-# included here for policy clarity even though independent authority routes also
-# acquire those QIDs.  The non-authority signals are extension, MIME type and
-# file-format identification pattern.
+# XML-based format is intentionally not an unconditional allowlist class. It is
+# broad enough to need direct format evidence.
 CONDITIONAL_XML_FORMAT_CLASS_QID = "Q20155966"
+
+# Some preservation-relevant version/variant records are modelled as direct
+# instances of a particular parent format, family, or software-associated parent
+# rather than a reusable file-format class. These parents are therefore a
+# separate evidence-gated discovery route and are NOT promoted to format classes.
+REVIEWED_FORMAT_PARENT_QIDS: tuple[str, ...] = (
+    "Q2597575",   # Renoise Song
+    "Q497118",    # Parchive
+    "Q28858032",  # Microsoft Word Binary File Format
+    "Q3502441",   # Excel Binary File Format
+    "Q594447",    # Small Web Format family
+    "Q125650",    # PDF/VT
+    "Q34739013",  # Softdisk Family Tree
+    "Q34746188",  # STATISTICA
+    "Q53756508",  # git packfile index
+    "Q28009469",  # Python bytecode
+    "Q45989477",  # WebP Extended
+)
+_REVIEWED_FORMAT_PARENT_VALUES = " ".join(
+    f"wd:{qid}" for qid in REVIEWED_FORMAT_PARENT_QIDS
+)
+
+# Context classes can describe preservation-relevant encodings/codecs that are
+# useful to acquire but must not later be treated automatically as canonical
+# file formats.
+CONDITIONAL_CONTEXT_CLASS_QIDS: tuple[str, ...] = (
+    "Q7927899",  # video compression format
+)
+_CONDITIONAL_CONTEXT_CLASS_VALUES = " ".join(
+    f"wd:{qid}" for qid in CONDITIONAL_CONTEXT_CLASS_QIDS
+)
+
+# The broad "open file format" class contains a mix of useful formats and
+# protocol/standard concepts. Acquire only evidence-bearing records and exclude
+# known ambiguous co-classifications.
+CONDITIONAL_OPEN_FORMAT_CLASS_QID = "Q1056408"
+CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS: tuple[str, ...] = (
+    "Q16937237",  # domain application protocol
+    "Q385853",    # de facto standard
+)
+_CONDITIONAL_OPEN_FORMAT_EXCLUDED_VALUES = " ".join(
+    f"wd:{qid}" for qid in CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS
+)
+
+_EVIDENCE_PROPERTY_VALUES = """
+    wdt:P2748
+    wdt:P3266
+    wdt:P11167
+    wdt:P1195
+    wdt:P1163
+    wdt:P4152
+""".strip()
 
 # Population discovery is deliberately separated from property harvesting.
 # Each population query is keyset-paginated by entity URI, then the merged QID
@@ -119,14 +169,60 @@ LIMIT __LIMIT__
 SELECT DISTINCT ?format WHERE {{
   ?format wdt:P31 wd:{CONDITIONAL_XML_FORMAT_CLASS_QID} .
   VALUES ?evidenceProperty {{
-    wdt:P2748
-    wdt:P3266
-    wdt:P11167
-    wdt:P1195
-    wdt:P1163
-    wdt:P4152
+    {_EVIDENCE_PROPERTY_VALUES}
   }}
   ?format ?evidenceProperty ?evidence .
+  __AFTER_FILTER__
+}}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "conditional_format_parents": (
+        _PREFIXES
+        + f"""
+SELECT DISTINCT ?format WHERE {{
+  VALUES ?parent {{ {_REVIEWED_FORMAT_PARENT_VALUES} }}
+  ?format wdt:P31 ?parent .
+  VALUES ?evidenceProperty {{
+    {_EVIDENCE_PROPERTY_VALUES}
+  }}
+  ?format ?evidenceProperty ?evidence .
+  __AFTER_FILTER__
+}}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "conditional_context_classes": (
+        _PREFIXES
+        + f"""
+SELECT DISTINCT ?format WHERE {{
+  VALUES ?class {{ {_CONDITIONAL_CONTEXT_CLASS_VALUES} }}
+  ?format wdt:P31 ?class .
+  VALUES ?evidenceProperty {{
+    {_EVIDENCE_PROPERTY_VALUES}
+  }}
+  ?format ?evidenceProperty ?evidence .
+  __AFTER_FILTER__
+}}
+ORDER BY ?format
+LIMIT __LIMIT__
+""".strip()
+    ),
+    "conditional_open_formats": (
+        _PREFIXES
+        + f"""
+SELECT DISTINCT ?format WHERE {{
+  ?format wdt:P31 wd:{CONDITIONAL_OPEN_FORMAT_CLASS_QID} .
+  VALUES ?evidenceProperty {{
+    {_EVIDENCE_PROPERTY_VALUES}
+  }}
+  ?format ?evidenceProperty ?evidence .
+  FILTER NOT EXISTS {{
+    VALUES ?excludedClass {{ {_CONDITIONAL_OPEN_FORMAT_EXCLUDED_VALUES} }}
+    ?format wdt:P31 ?excludedClass .
+  }}
   __AFTER_FILTER__
 }}
 ORDER BY ?format
@@ -388,6 +484,13 @@ class WikidataSparqlAdapter(SourceAdapter):
         pieces.append("### population-policy\n" + WIKIDATA_POPULATION_POLICY_VERSION)
         pieces.append("### reviewed-format-classes\n" + "\n".join(REVIEWED_FORMAT_CLASS_QIDS))
         pieces.append("### conditional-xml-format-class\n" + CONDITIONAL_XML_FORMAT_CLASS_QID)
+        pieces.append("### reviewed-format-parents\n" + "\n".join(REVIEWED_FORMAT_PARENT_QIDS))
+        pieces.append("### conditional-context-classes\n" + "\n".join(CONDITIONAL_CONTEXT_CLASS_QIDS))
+        pieces.append("### conditional-open-format-class\n" + CONDITIONAL_OPEN_FORMAT_CLASS_QID)
+        pieces.append(
+            "### conditional-open-format-exclusions\n"
+            + "\n".join(CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS)
+        )
         pieces.append("### output-columns\n" + "\n".join(_OUTPUT_COLUMNS))
         return "\n\n".join(pieces)
 
@@ -395,7 +498,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         return hashlib.sha256(self._query_material().encode("utf-8")).hexdigest()
 
     def _cache_key(self) -> str:
-        mode = "custom" if self.custom_query else "staged-values-batching-v2"
+        mode = "custom" if self.custom_query else "staged-values-batching-v3"
         return (
             f"{self.endpoint}#query-sha256={self._query_sha256()}"
             f"&format=csv&mode={mode}"
@@ -659,6 +762,17 @@ class WikidataSparqlAdapter(SourceAdapter):
         population_sha256 = hashlib.sha256(population_bytes).hexdigest()
 
         session_id = uuid.uuid4().hex
+        policy_metadata = {
+            "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
+            "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
+            "conditional_xml_format_class_qid": CONDITIONAL_XML_FORMAT_CLASS_QID,
+            "reviewed_format_parent_qids": list(REVIEWED_FORMAT_PARENT_QIDS),
+            "conditional_context_class_qids": list(CONDITIONAL_CONTEXT_CLASS_QIDS),
+            "conditional_open_format_class_qid": CONDITIONAL_OPEN_FORMAT_CLASS_QID,
+            "conditional_open_format_excluded_class_qids": list(
+                CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS
+            ),
+        }
         population_snapshot = self._store_snapshot_bytes(
             index_key=(
                 f"{self.endpoint}#wikidata-population-session={session_id}"
@@ -671,23 +785,19 @@ class WikidataSparqlAdapter(SourceAdapter):
             content_type="text/csv",
             metadata={
                 "session_id": session_id,
-                "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
-                "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
-                "conditional_xml_format_class_qid": CONDITIONAL_XML_FORMAT_CLASS_QID,
+                **policy_metadata,
                 "population_sha256": population_sha256,
                 "row_count": len(ordered_qids),
                 "discovery": discovery_stats,
             },
         )
         manifest = {
-            "version": 2,
+            "version": 3,
             "session_id": session_id,
             "started_at": utc_now_iso(),
             "complete": False,
             "query_sha256": self._query_sha256(),
-            "population_policy_version": WIKIDATA_POPULATION_POLICY_VERSION,
-            "reviewed_format_class_qids": list(REVIEWED_FORMAT_CLASS_QIDS),
-            "conditional_xml_format_class_qid": CONDITIONAL_XML_FORMAT_CLASS_QID,
+            **policy_metadata,
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "population_path": population_snapshot.local_path,
@@ -969,6 +1079,16 @@ class WikidataSparqlAdapter(SourceAdapter):
             "conditional_xml_format_class_qid": manifest.get(
                 "conditional_xml_format_class_qid"
             ),
+            "reviewed_format_parent_qids": manifest.get("reviewed_format_parent_qids"),
+            "conditional_context_class_qids": manifest.get(
+                "conditional_context_class_qids"
+            ),
+            "conditional_open_format_class_qid": manifest.get(
+                "conditional_open_format_class_qid"
+            ),
+            "conditional_open_format_excluded_class_qids": manifest.get(
+                "conditional_open_format_excluded_class_qids"
+            ),
             "batch_size": self.batch_size,
             "population_page_size": self.population_page_size,
             "total_batches": total_batches,
@@ -981,7 +1101,7 @@ class WikidataSparqlAdapter(SourceAdapter):
         query_mode = (
             "custom_single_query"
             if self.custom_query
-            else "staged_population_values_batches_v2"
+            else "staged_population_values_batches_v3"
         )
         metadata: dict[str, Any] = {
             "endpoint": self.endpoint,
@@ -999,6 +1119,16 @@ class WikidataSparqlAdapter(SourceAdapter):
             metadata["reviewed_format_class_qids"] = list(REVIEWED_FORMAT_CLASS_QIDS)
             metadata["conditional_xml_format_class_qid"] = (
                 CONDITIONAL_XML_FORMAT_CLASS_QID
+            )
+            metadata["reviewed_format_parent_qids"] = list(REVIEWED_FORMAT_PARENT_QIDS)
+            metadata["conditional_context_class_qids"] = list(
+                CONDITIONAL_CONTEXT_CLASS_QIDS
+            )
+            metadata["conditional_open_format_class_qid"] = (
+                CONDITIONAL_OPEN_FORMAT_CLASS_QID
+            )
+            metadata["conditional_open_format_excluded_class_qids"] = list(
+                CONDITIONAL_OPEN_FORMAT_EXCLUDED_CLASS_QIDS
             )
             metadata["population_queries"] = dict(POPULATION_QUERY_TEMPLATES)
             metadata["batch_query_templates"] = dict(DEFAULT_QUERY_PARTS)
