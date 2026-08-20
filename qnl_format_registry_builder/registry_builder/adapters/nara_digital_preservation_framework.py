@@ -22,11 +22,29 @@ _NARA_REPO_API_BASE = "https://api.github.com/repos/usnationalarchives/digital-p
 _NARA_ACTION_DIR = "Digital_Preservation_Plan_Spreadsheet"
 _NARA_RISK_DIR = "Digital_Preservation_Risk_Matrix"
 _DEFAULT_NARA_RELEASE_DATE = "20260320"
-_NARA_PRIMARY_ROW_KIND = "risk_matrix_numbered"
+
+# NARA publishes the risk matrix twice. Both files carry identical values in all
+# 20 non-rubric columns — every aggregate score, band and total — and differ only
+# in how the 27 individual rubric answers are written.
+#
+# The Numbered view stores each answer's *risk contribution*, and NARA's own
+# weights file documents that in 26 of the 27 questions it fuses Unknown with the
+# risk-increasing answer ("-1 = Yes or Unknown", "2 = Yes, -2 = No or Unknown").
+# That is a sound scoring choice and a poor evidence record: read as evidence it
+# asserts findings NARA explicitly declined to make. It also discards question
+# 1.4 entirely, bucketing real specification years into a score.
+#
+# The Labeled view writes Yes/No/Unknown/N/A and keeps the years, so for
+# everything this adapter consumes it is a strict superset. It is the primary row.
+_NARA_PRIMARY_ROW_KIND = "risk_matrix_labeled"
+_NARA_NUMBERED_ROW_KIND = "risk_matrix_numbered"
+# Preference order; the numbered view stays supported for existing configs and
+# for files already dropped in an input folder.
+_NARA_RISK_MATRIX_KINDS = (_NARA_PRIMARY_ROW_KIND, _NARA_NUMBERED_ROW_KIND)
 
 DEFAULT_NARA_URIS = [
     f"{_NARA_REPO_RAW_BASE}/master/{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{_DEFAULT_NARA_RELEASE_DATE}.csv",
-    f"{_NARA_REPO_RAW_BASE}/master/{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{_DEFAULT_NARA_RELEASE_DATE}_Numbered.csv",
+    f"{_NARA_REPO_RAW_BASE}/master/{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{_DEFAULT_NARA_RELEASE_DATE}_Labeled.csv",
 ]
 
 
@@ -158,8 +176,10 @@ def _kind_from_file_name(value: str) -> str | None:
     name = Path(value).name
     if re.search(r"PreservationActionPlan_FileFormats_20\d{6}\.csv$", name):
         return "preservation_action_plan"
+    if re.search(r"File_Format_Risk_Matrix_20\d{6}_Labeled\.csv$", name):
+        return _NARA_PRIMARY_ROW_KIND
     if re.search(r"File_Format_Risk_Matrix_20\d{6}_Numbered\.csv$", name):
-        return "risk_matrix_numbered"
+        return _NARA_NUMBERED_ROW_KIND
     return None
 
 
@@ -179,7 +199,7 @@ def _group_key(row: dict[str, Any], row_no: int, kind: str) -> str:
 
 
 def _preferred_item(items: list[dict[str, Any]]) -> dict[str, Any]:
-    for kind in (_NARA_PRIMARY_ROW_KIND, "preservation_action_plan"):
+    for kind in (*_NARA_RISK_MATRIX_KINDS, "preservation_action_plan"):
         for item in items:
             if item.get("kind") == kind:
                 return item
@@ -194,14 +214,63 @@ def _merged_row(items: list[dict[str, Any]]) -> dict[str, Any]:
     contributes action/readiness/planning fields and is retained in raw/evidence.
     """
     merged: dict[str, Any] = {}
-    for kind in ("preservation_action_plan", _NARA_PRIMARY_ROW_KIND):
+    # Both risk-matrix views use identical column names, so the labeled view is
+    # applied last and wins: a rubric cell must read "Unknown" rather than a
+    # score that cannot distinguish Unknown from a real answer.
+    for kind in ("preservation_action_plan", _NARA_NUMBERED_ROW_KIND, _NARA_PRIMARY_ROW_KIND):
         for item in items:
             if item.get("kind") == kind:
                 merged.update(item["row"])
+    known = {"preservation_action_plan", *_NARA_RISK_MATRIX_KINDS}
     for item in items:
-        if item.get("kind") not in {"preservation_action_plan", _NARA_PRIMARY_ROW_KIND}:
+        if item.get("kind") not in known:
             merged.update(item["row"])
     return merged
+
+
+def _specification_year(row: dict[str, Any]) -> int | None:
+    """The year NARA records for rubric question 1.4.
+
+    Only the labeled view carries this. The numbered view buckets it into a risk
+    score (0 = 5 years or less, -2 = 6-15 years, -4 = 16+ years or Unknown), so
+    the actual year — the input a specification-age term needs — is unrecoverable
+    from it.
+    """
+    for key, value in row.items():
+        if not str(key).startswith(("1.4", "1．4")):
+            continue
+        text = str(value or "").strip()
+        if re.fullmatch(r"(19|20)\d{2}", text):
+            return int(text)
+        return None
+    return None
+
+
+def _specification_currency_bucket(year: int | None, release_date: str | None) -> str | None:
+    """NARA's own age bands for question 1.4, recovered from the real year.
+
+    The weights file defines them as "0 = 5 years old or less, -2 = 6-15 years,
+    -4 = 16+ years or Unknown". Those bands are what the numbered view stores in
+    place of the year; recomputing them from the labeled year restores the band
+    without inheriting the "or Unknown" fusion.
+
+    Ages are measured against the NARA release, not today, so the band matches
+    the one NARA itself scored and does not drift as the file sits on disk.
+    """
+    if year is None or not release_date:
+        return None
+    try:
+        released = int(str(release_date)[:4])
+    except (TypeError, ValueError):
+        return None
+    age = released - year
+    if age < 0:
+        return None
+    if age <= 5:
+        return "5_years_or_less"
+    if age <= 15:
+        return "6_to_15_years"
+    return "16_plus_years"
 
 
 def _rubric_answers(row: dict[str, Any]) -> dict[str, Any]:
@@ -257,7 +326,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     inbox_hint = (
         "Drop the NARA release CSVs here, keeping their published filenames "
         "(e.g. NARA_PreservationActionPlan_FileFormats_20260320.csv and "
-        "NARA_File_Format_Risk_Matrix_20260320_Numbered.csv). Kind and release "
+        "NARA_File_Format_Risk_Matrix_20260320_Labeled.csv). Kind and release "
         "date are inferred from the filename; a manifest.json is only needed "
         "for renamed files."
     )
@@ -302,7 +371,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
 
     def _pinned_sources(self, release_date: str, *, release_mode: str, resolution_error: str | None = None) -> list[dict[str, Any]]:
         action_path = f"{_NARA_ACTION_DIR}/NARA_PreservationActionPlan_FileFormats_{release_date}.csv"
-        risk_path = f"{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{release_date}_Numbered.csv"
+        risk_path = f"{_NARA_RISK_DIR}/NARA_File_Format_Risk_Matrix_{release_date}_Labeled.csv"
         sources = [
             {
                 "uri": self._raw_uri_for_path(action_path),
@@ -315,7 +384,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             },
             {
                 "uri": self._raw_uri_for_path(risk_path),
-                "kind": "risk_matrix_numbered",
+                "kind": _NARA_PRIMARY_ROW_KIND,
                 "release_mode": release_mode,
                 "release_date": release_date,
                 "github_ref": self._github_ref(),
@@ -427,12 +496,12 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 action_by_date[match.group(1)] = item
         for item in risk_items:
             name = str(item.get("name") or "")
-            match = re.fullmatch(r"NARA_File_Format_Risk_Matrix_(20\d{6})_Numbered\.csv", name)
+            match = re.fullmatch(r"NARA_File_Format_Risk_Matrix_(20\d{6})_Labeled\.csv", name)
             if match:
                 risk_by_date[match.group(1)] = item
         common_dates = sorted(set(action_by_date) & set(risk_by_date))
         if not common_dates:
-            raise ValueError("Could not resolve latest NARA release: no matching action-plan and numbered-risk CSV release dates found")
+            raise ValueError("Could not resolve latest NARA release: no matching action-plan and labeled-risk CSV release dates found")
         release_date = common_dates[-1]
         sources: list[dict[str, Any]] = []
         for kind, item in (
@@ -516,7 +585,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
     def describe_local_file(self, path: Path) -> dict[str, Any]:
         """NARA filenames are self-describing: kind and release date are inferred.
 
-        e.g. NARA_File_Format_Risk_Matrix_20260320_Numbered.csv
+        e.g. NARA_File_Format_Risk_Matrix_20260320_Labeled.csv
         """
         described = super().describe_local_file(path)
         release_date = described.get("release_date") or described.get("edition") or _release_date_from_text(path.name)
@@ -661,6 +730,7 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
             loc_url = _get(row, "LOC URL")
             wikidata_url = _get(row, "WikiData URL", "Wikidata URL")
             evidence = [_evidence_for_item(item) for item in items]
+            spec_year = _specification_year(row)
             rows_by_kind = {str(item.get("kind") or "unknown"): item["row"] for item in items}
             row_numbers_by_kind = {str(item.get("kind") or "unknown"): item["row_no"] for item in items}
             snapshot_sha256_by_kind = {
@@ -671,6 +741,8 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                 for item in items
                 if item.get("metadata") and item["metadata"].get("release_date")
             })
+
+            spec_bracket = _specification_currency_bucket(spec_year, release_dates[-1] if release_dates else None)
 
             records.append(RawFormatRecord(
                 source_id=self.source_id,
@@ -693,6 +765,8 @@ class NaraDigitalPreservationFrameworkAdapter(SourceAdapter):
                     "nara_file_kinds": sorted(rows_by_kind),
                     "nara_release_dates": release_dates,
                     "rubric_answers": _rubric_answers(row),
+                    **({"specification_year": spec_year} if spec_year is not None else {}),
+                    **({"specification_age_bracket": spec_bracket} if spec_bracket else {}),
                 },
                 raw={
                     "snapshot_sha256": primary["snapshot"].sha256,

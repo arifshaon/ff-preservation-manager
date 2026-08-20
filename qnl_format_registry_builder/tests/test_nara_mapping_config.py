@@ -73,3 +73,73 @@ def test_nara_mapping_keeps_conclusions_and_decisions_out_of_criterion_rules():
     assert "TOTAL Numeric Risk Rating" in excluded_fields
     assert "NARA Preservation Action" in excluded_fields
     assert "Feasibility Score" in excluded_fields
+
+
+def test_labeled_rules_never_read_a_numeric_rubric_value():
+    """The rules must not silently keep working against the numbered view.
+
+    Numeric keys would still *match* numbered input and quietly reintroduce the
+    Unknown fusion, so their absence is the guard.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "criterion_mappings"
+    for name in ("nara_digital_preservation_framework.v1.draft.json",
+                 "nara_digital_preservation_framework.v1.approved.json"):
+        mapping = json.loads((root / name).read_text(encoding="utf-8"))
+        for rule in mapping["maps"]:
+            numeric = [k for k in (rule.get("values") or {}) if re.fullmatch(r"-\d+", str(k))]
+            assert not numeric, f"{name}:{rule['id']} still maps numeric rubric values {numeric}"
+
+
+def test_every_labeled_rule_treats_unassessed_markers_as_unknown():
+    """An answer NARA did not decide must never become a finding.
+
+    NARA writes three markers for a cell it did not decide: `Unknown`, `0` (the
+    labeled view's unassessed marker, written as FALSE in the numbered view) and
+    `FALSE` itself in older exports.
+
+    `N/A` is deliberately excluded. It is not an unassessed marker: most of the
+    questions carrying it are conditional ("If the format requires compression,
+    can it be lossy?"), where "not applicable" is a real and informative answer.
+    """
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "criterion_mappings"
+    for name in ("nara_digital_preservation_framework.v1.draft.json",
+                 "nara_digital_preservation_framework.v1.approved.json"):
+        mapping = json.loads((root / name).read_text(encoding="utf-8"))
+        for rule in mapping["maps"]:
+            if rule.get("nara_question_id") == "1.4":
+                continue  # reads a recomputed age bracket, not raw rubric labels
+            values = rule.get("values") or {}
+            for marker in ("Unknown", "0", "FALSE"):
+                assert values.get(marker) == "unknown", (
+                    f"{name}:{rule['id']} maps {marker!r} to {values.get(marker)!r}, "
+                    "so an unassessed answer would read as a decision"
+                )
+
+
+def test_not_applicable_is_only_a_real_answer_on_conditional_questions():
+    """Where N/A means something other than unknown, the question must warrant it."""
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config" / "criterion_mappings"
+    mapping = json.loads(
+        (root / "nara_digital_preservation_framework.v1.draft.json").read_text(encoding="utf-8")
+    )
+    for rule in mapping["maps"]:
+        value = (rule.get("values") or {}).get("N/A")
+        if not value or value == "unknown":
+            continue
+        question = rule.get("from_field", "")
+        conditional = ": If " in question or ", if " in question.lower()
+        non_committal = value in {"not_applicable", "none_or_not_applicable", "limited_or_unknown"}
+        assert conditional or non_committal, (
+            f"{rule['id']} reads N/A as {value!r} on a question that is neither conditional "
+            "nor answered non-committally"
+        )

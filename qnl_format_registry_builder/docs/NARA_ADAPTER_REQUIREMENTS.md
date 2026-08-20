@@ -217,3 +217,68 @@ The adapter and reconciler now have regression tests for:
 - PUIDs from NARA PRONOM URL kept unverified;
 - NARA + institutional agreement produces `corroborated`;
 - ambiguous weak matches do not merge multiple NARA authority records.
+
+## Which risk-matrix view to ingest
+
+NARA publishes the risk matrix twice, `..._Labeled.csv` and `..._Numbered.csv`.
+**The adapter reads the Labeled view.** Both files carry identical values in all
+20 non-rubric columns — every aggregate score, band and total — and differ only
+in how the 27 rubric answers are written, so the choice costs nothing and gains
+two things.
+
+**The numbered view cannot say "Unknown".** NARA's own weights file
+(`NARA_File_Format_Risk_Matrix_Weights_*.csv`) documents the encoding:
+
+```text
+1.1  Is the format proprietary?     -1 = Yes or Unknown,  2 = No
+1.2  Published open specification?   2 = Yes, -2 = No or Unknown
+2.2  Actively maintained?            2 = Yes, -1 = No or Unknown
+```
+
+In **26 of the 27 questions** the numeric value fuses Unknown with the
+risk-increasing answer. That is a sound scoring choice — uncertainty ought to
+count against a format's score — and a poor evidence record, because read as
+evidence it asserts findings NARA explicitly declined to make. Mapping the
+numbered view produced 566 claims stating a definite value for cells NARA had
+marked Unknown, 326 of them on `sustainability.tpm_encryption` alone.
+
+**The numbered view also destroys question 1.4.** It buckets the specification
+year into a score (`0` = ≤5 years, `-2` = 6-15, `-4` = 16+ **or Unknown**). The
+labeled view keeps 499 real years spanning 1975-2025 — the input a
+specification-age term needs, and unrecoverable from the score.
+
+A further trap the labeled view removes: the numbers are risk *contributions*,
+not answers, so 12 of the 27 questions are reverse-scored (`1.1` scores Yes as
+`-1` and No as `2`). Every numeric mapping rule had to know its column's
+polarity. `Yes`/`No`/`Unknown`/`N/A` cannot be got wrong.
+
+### Unassessed markers
+
+NARA marks a cell it did not decide three ways, and all three map to `unknown`:
+
+| Marker | Where |
+| --- | --- |
+| `Unknown` | labeled view |
+| `0` | labeled view, the counterpart of the numbered view's `FALSE` |
+| `FALSE` | numbered view and older exports |
+
+`N/A` is **not** an unassessed marker. Most questions carrying it are conditional
+("If the format requires compression, can it be lossy?"), where "not applicable"
+is a real and informative answer.
+
+### Derived fields
+
+The labeled year is exposed as two native fields:
+
+- `native_fields.specification_year` — the year itself, for temporal scoring
+- `native_fields.specification_age_bracket` — NARA's own bands recomputed from
+  the year (`5_years_or_less`, `6_to_15_years`, `16_plus_years`), measured
+  against the NARA release rather than today so the band matches the one NARA
+  scored and does not drift as the file ages on disk
+
+### Back-compatibility
+
+A `..._Numbered.csv` already dropped in an input folder still works and is
+recognised as `risk_matrix_numbered`. If both views are supplied the labeled one
+wins, because the two files share column names and a rubric cell must read
+`Unknown` rather than a score that cannot express it.

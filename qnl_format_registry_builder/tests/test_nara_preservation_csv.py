@@ -99,7 +99,8 @@ def test_nara_pinned_release_resolves_dated_pair(tmp_path):
 
     sources = adapter._resolved_sources()
 
-    assert [source["kind"] for source in sources] == ["preservation_action_plan", "risk_matrix_numbered"]
+    assert [source["kind"] for source in sources] == ["preservation_action_plan", "risk_matrix_labeled"]
+    assert any("_Labeled.csv" in source["uri"] for source in sources)
     assert {source["release_date"] for source in sources} == {"20260320"}
     assert all("20260320" in source["uri"] for source in sources)
     assert all(source["release_mode"] == "pinned" for source in sources)
@@ -118,8 +119,8 @@ def test_nara_latest_release_resolves_highest_common_dated_pair(tmp_path, monkey
                 {"name": "NARA_PreservationActionPlan_FileFormats_20260320.csv", "path": f"{directory}/NARA_PreservationActionPlan_FileFormats_20260320.csv", "download_url": "https://example.test/action-20260320.csv", "sha": "sha-action-new"},
             ]
         return [
-            {"name": "NARA_File_Format_Risk_Matrix_20250101_Numbered.csv", "path": f"{directory}/NARA_File_Format_Risk_Matrix_20250101_Numbered.csv", "download_url": "https://example.test/risk-20250101.csv", "sha": "sha-risk-old"},
-            {"name": "NARA_File_Format_Risk_Matrix_20260320_Numbered.csv", "path": f"{directory}/NARA_File_Format_Risk_Matrix_20260320_Numbered.csv", "download_url": "https://example.test/risk-20260320.csv", "sha": "sha-risk-new"},
+            {"name": "NARA_File_Format_Risk_Matrix_20250101_Labeled.csv", "path": f"{directory}/NARA_File_Format_Risk_Matrix_20250101_Labeled.csv", "download_url": "https://example.test/risk-20250101.csv", "sha": "sha-risk-old"},
+            {"name": "NARA_File_Format_Risk_Matrix_20260320_Labeled.csv", "path": f"{directory}/NARA_File_Format_Risk_Matrix_20260320_Labeled.csv", "download_url": "https://example.test/risk-20260320.csv", "sha": "sha-risk-new"},
         ]
 
     monkeypatch.setattr(adapter, "_fetch_github_directory", fake_directory)
@@ -259,3 +260,80 @@ def test_nara_latest_discovery_failure_falls_back_to_default_pinned_release(tmp_
 def test_legacy_nara_csv_adapter_alias_keeps_old_type_name(tmp_path):
     adapter = NaraPreservationCsvAdapter({"id": "nara_legacy", "uris": []}, tmp_path)
     assert adapter.type_name == "nara_preservation_csv"
+
+
+LABELED_CSV = (
+    "Format Name,File Extension(s),NARA Format ID,Risk Level,Numeric Risk Rating,"
+    "1.1: Is the format proprietary?,"
+    "1.4: When was the format specification for this version last updated?,"
+    "8.3: Does the format natively allow the use of technical protection measures?\n"
+    "Test Format,tst,NF09001,Moderate Risk,4.00,Yes,2019,Unknown\n"
+)
+NUMBERED_CSV = (
+    "Format Name,File Extension(s),NARA Format ID,Risk Level,Numeric Risk Rating,"
+    "1.1: Is the format proprietary?,"
+    "1.4: When was the format specification for this version last updated?,"
+    "8.3: Does the format natively allow the use of technical protection measures?\n"
+    "Test Format,tst,NF09001,Moderate Risk,4.00,-1,-2,-2\n"
+)
+
+
+def _labeled_adapter(tmp_path, *files):
+    paths = []
+    for name, text in files:
+        path = tmp_path / name
+        path.write_text(text, encoding="utf-8")
+        paths.append(str(path))
+    adapter = NaraDigitalPreservationFrameworkAdapter(
+        {"id": "nara_test", "release_mode": "local_files", "local_files": paths}, tmp_path
+    )
+    return adapter, adapter.acquire()
+
+
+def test_labeled_view_preserves_unknown_as_unknown(tmp_path):
+    """The numbered view cannot say Unknown; the labeled view must."""
+    adapter, snapshots = _labeled_adapter(
+        tmp_path, ("NARA_File_Format_Risk_Matrix_20260320_Labeled.csv", LABELED_CSV)
+    )
+
+    record = adapter.extract(snapshots)[0]
+    answers = record.native_fields["rubric_answers"]
+
+    assert answers["1.1"] == "Yes"
+    assert answers["8.3"] == "Unknown", "an unassessed rubric answer must not read as a decision"
+    assert record.native_fields["specification_year"] == 2019
+
+
+def test_numbered_view_still_works_for_already_dropped_files(tmp_path):
+    adapter, snapshots = _labeled_adapter(
+        tmp_path, ("NARA_File_Format_Risk_Matrix_20260320_Numbered.csv", NUMBERED_CSV)
+    )
+
+    record = adapter.extract(snapshots)[0]
+
+    assert record.native_fields["primary_nara_file_kind"] == "risk_matrix_numbered"
+    assert record.native_fields["rubric_answers"]["1.1"] == "-1"
+    # The numbered view has no year to give.
+    assert "specification_year" not in record.native_fields
+
+
+def test_labeled_view_wins_when_both_are_supplied(tmp_path):
+    """Both files share column names, so precedence has to be explicit."""
+    adapter, snapshots = _labeled_adapter(
+        tmp_path,
+        ("NARA_File_Format_Risk_Matrix_20260320_Numbered.csv", NUMBERED_CSV),
+        ("NARA_File_Format_Risk_Matrix_20260320_Labeled.csv", LABELED_CSV),
+    )
+
+    record = adapter.extract(snapshots)[0]
+    answers = record.native_fields["rubric_answers"]
+
+    assert record.native_fields["primary_nara_file_kind"] == "risk_matrix_labeled"
+    assert answers["8.3"] == "Unknown", "the labeled answer must win over the fused score"
+    assert record.native_fields["specification_year"] == 2019
+    assert sorted(record.native_fields["nara_file_kinds"]) == [
+        "risk_matrix_labeled",
+        "risk_matrix_numbered",
+    ]
+    # Scores are identical in both views, so hazard is unaffected either way.
+    assert record.hazard["external_rating_native"] == 4.0

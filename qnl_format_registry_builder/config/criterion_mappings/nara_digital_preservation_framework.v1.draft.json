@@ -1,62 +1,712 @@
 {
   "source_type": "nara_digital_preservation_framework",
-  "mapping_version": "2026-08-16-draft",
+  "mapping_version": "v1-labeled",
   "criteria_version": "v1",
   "native_vocabulary": "nara_file_format_risk_matrix",
   "mapping_mode": "manual_draft",
   "review_status": "draft",
   "claim_review_status": "unreviewed",
-  "notes": "NARA Risk Level, Numeric Risk Rating, TOTAL Numeric Risk Rating and preservation actions remain hazard/readiness/action inputs, not scored criterion evidence. Only individually reviewed NARA rubric answers may become criterion claims. Current NARA ingests store rubric columns under raw.row; Mongo storage replaces dots in source field names with the fullwidth dot character.",
+  "notes": "Rules read NARA's Labeled risk matrix. The Numbered view fuses Unknown with the risk-increasing answer in 26 of 27 questions (see the NARA weights file), so mapping it would assert findings NARA declined to make.",
   "excluded_from_criteria": [
-    {"field": "NARA Risk Level", "reason": "Composite conclusion; already consumed as external hazard estimator."},
-    {"field": "Risk Level", "reason": "Composite conclusion; already consumed as external hazard estimator."},
-    {"field": "Numeric Risk Rating", "reason": "Composite NARA native rating; hazard estimator only."},
-    {"field": "TOTAL Numeric Risk Rating", "reason": "Composite NARA native rating; hazard estimator only."},
-    {"field": "NARA TOTAL", "reason": "Composite total; hazard estimator only."},
-    {"field": "NARA Preservation Action", "reason": "Decision/action recommendation, not criterion observation."},
-    {"field": "NARA Proposed Preservation Plan", "reason": "Decision/action planning evidence, not criterion observation."},
-    {"field": "NARA Preferred Processing and Transformation Tool(s)", "reason": "Readiness/tooling evidence, not sustainability or hazard criterion."},
-    {"field": "NARA Transfer Guidance: Preferred", "reason": "Transfer-policy guidance, not neutral sustainability evidence."},
-    {"field": "NARA Transfer Guidance: Acceptable", "reason": "Transfer-policy guidance, not neutral sustainability evidence."},
-    {"field": "Percentage of 2 billion files in NARA ERA holdings", "reason": "NARA-local holdings exposure; not institution-neutral format sustainability evidence."},
-    {"field": "Prevalence: Format Adoption Level as measured by Proportion of File Format in the Overall NARA Holdings", "reason": "NARA-local prevalence score; exposure/adoption context, not neutral criterion evidence."},
-    {"field": "Feasibility Score", "reason": "Composite feasibility judgement; not a source-native criterion observation."},
-    {"field": "1: TOTAL Disclosure Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "2: TOTAL Adoption Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "3: TOTAL Transparency Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "4: TOTAL Self-Documentation Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "5: TOTAL External Hardware Dependencies Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "6: TOTAL External Software Dependencies Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "7: TOTAL Impact of Patents Score", "reason": "Composite section score; not a criterion observation."},
-    {"field": "8: TOTAL Technical Protection Mechanisms Score", "reason": "Composite section score; not a criterion observation."}
+    {
+      "field": "NARA Risk Level",
+      "reason": "Composite conclusion; already consumed as external hazard estimator."
+    },
+    {
+      "field": "Risk Level",
+      "reason": "Composite conclusion; already consumed as external hazard estimator."
+    },
+    {
+      "field": "Numeric Risk Rating",
+      "reason": "Composite NARA native rating; hazard estimator only."
+    },
+    {
+      "field": "TOTAL Numeric Risk Rating",
+      "reason": "Composite NARA native rating; hazard estimator only."
+    },
+    {
+      "field": "NARA TOTAL",
+      "reason": "Composite total; hazard estimator only."
+    },
+    {
+      "field": "NARA Preservation Action",
+      "reason": "Decision/action recommendation, not criterion observation."
+    },
+    {
+      "field": "NARA Proposed Preservation Plan",
+      "reason": "Decision/action planning evidence, not criterion observation."
+    },
+    {
+      "field": "NARA Preferred Processing and Transformation Tool(s)",
+      "reason": "Readiness/tooling evidence, not sustainability or hazard criterion."
+    },
+    {
+      "field": "NARA Transfer Guidance: Preferred",
+      "reason": "Transfer-policy guidance, not neutral sustainability evidence."
+    },
+    {
+      "field": "NARA Transfer Guidance: Acceptable",
+      "reason": "Transfer-policy guidance, not neutral sustainability evidence."
+    },
+    {
+      "field": "Percentage of 2 billion files in NARA ERA holdings",
+      "reason": "NARA-local holdings exposure; not institution-neutral format sustainability evidence."
+    },
+    {
+      "field": "Prevalence: Format Adoption Level as measured by Proportion of File Format in the Overall NARA Holdings",
+      "reason": "NARA-local prevalence score; exposure/adoption context, not neutral criterion evidence."
+    },
+    {
+      "field": "Feasibility Score",
+      "reason": "Composite feasibility judgement; not a source-native criterion observation."
+    },
+    {
+      "field": "1: TOTAL Disclosure Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "2: TOTAL Adoption Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "3: TOTAL Transparency Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "4: TOTAL Self-Documentation Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "5: TOTAL External Hardware Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "6: TOTAL External Software Dependencies Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "7: TOTAL Impact of Patents Score",
+      "reason": "Composite section score; not a criterion observation."
+    },
+    {
+      "field": "8: TOTAL Technical Protection Mechanisms Score",
+      "reason": "Composite section score; not a criterion observation."
+    }
   ],
   "maps": [
-    {"id": "nara.rubric.1_1.sustainability_disclosure.v1", "criterion": "sustainability.disclosure", "from_field": "raw.row.1．1: Is the format proprietary?", "alternate_fields": ["raw.row.1.1: Is the format proprietary?", "native_fields.rubric_answers.1．1", "native_fields.rubric_answers.1.1"], "nara_question_id": "1.1", "directness": "derived", "covers": "partial", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "public_specification", "-1": "proprietary_documented", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 1.1 is a scored proprietary-status observation. Positive values are treated as evidence against proprietary status; negative values indicate proprietary documentation. This is partial disclosure evidence because proprietary status and public specification are related but not identical."},
-    {"id": "nara.rubric.1_2.sustainability_disclosure.v1", "criterion": "sustainability.disclosure", "from_field": "raw.row.1．2: Does the format have a published open specification?", "alternate_fields": ["raw.row.1.2: Does the format have a published open specification?", "native_fields.rubric_answers.1．2", "native_fields.rubric_answers.1.2"], "nara_question_id": "1.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "public_specification", "-2": "undocumented", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 1.2 is the strongest NARA disclosure signal because it asks whether a published open specification exists. It remains derived because stored values are rubric scores, not literal answers."},
-    {"id": "nara.rubric.1_3.sustainability_standardization.v1", "criterion": "sustainability.standardization", "from_field": "raw.row.1．3: If there is a published specification, has it been approved and published by an internationally recognized standards organization?", "alternate_fields": ["raw.row.1.3: If there is a published specification, has it been approved and published by an internationally recognized standards organization?", "native_fields.rubric_answers.1．3", "native_fields.rubric_answers.1.3"], "nara_question_id": "1.3", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "international_standard", "-1": "not_standardized", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 1.3 supports standardization evidence. A zero or FALSE value is treated as unknown/not applicable rather than as proof of no standard."},
-    {"id": "nara.rubric.1_4.sustainability_specification_currency.v1", "criterion": "sustainability.specification_currency", "from_field": "raw.row.1．4: When was the format specification for this version last updated (or, if the last updated date is not available, when was it created)?", "alternate_fields": ["raw.row.1.4: When was the format specification for this version last updated (or, if the last updated date is not available, when was it created)?", "native_fields.rubric_answers.1．4", "native_fields.rubric_answers.1.4"], "nara_question_id": "1.4", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"0": "current_or_recent", "-2": "dated", "-4": "stale_or_legacy", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 1.4 is a scored proxy for specification currency. It should not be confused with source-record currency."},
-    {"id": "nara.rubric.2_1.sustainability_adoption.v1", "criterion": "sustainability.adoption", "from_field": "raw.row.2．1: Has the file format commonly been used to create or maintain permanent records within the federal government at any point in time?", "alternate_fields": ["raw.row.2.1: Has the file format commonly been used to create or maintain permanent records within the federal government at any point in time?", "native_fields.rubric_answers.2．1", "native_fields.rubric_answers.2.1"], "nara_question_id": "2.1", "directness": "derived", "covers": "partial", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "high", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 2.1 is an adoption signal scoped to US federal permanent records, so it maps to high adoption only as source-derived partial evidence."},
-    {"id": "nara.rubric.2_2.sustainability_maintenance.v1", "criterion": "sustainability.maintenance", "from_field": "raw.row.2．2: Is the format, or format family, actively maintained and updated by an organization or community?", "alternate_fields": ["raw.row.2.2: Is the format, or format family, actively maintained and updated by an organization or community?", "native_fields.rubric_answers.2．2", "native_fields.rubric_answers.2.2"], "nara_question_id": "2.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "actively_maintained", "-1": "not_maintained", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 2.2 directly supports maintenance status."},
-    {"id": "nara.rubric.2_3.sustainability_community_guidance.v1", "criterion": "sustainability.community_guidance", "from_field": "raw.row.2．3: Have the archives or library communities identified the format as one to avoid for creation and transfer of permanent materials?", "alternate_fields": ["raw.row.2.3: Have the archives or library communities identified the format as one to avoid for creation and transfer of permanent materials?", "native_fields.rubric_answers.2．3", "native_fields.rubric_answers.2.3"], "nara_question_id": "2.3", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "recommended_or_neutral", "-2": "identified_to_avoid", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 2.3 captures community avoidance guidance; a positive score is treated only as recommended-or-neutral, not as positive endorsement."},
-    {"id": "nara.rubric.3_1.sustainability_transparency_readability.v1", "criterion": "sustainability.transparency_readability", "from_field": "raw.row.3．1: Is the format character-based, rather than binary?", "alternate_fields": ["raw.row.3.1: Is the format character-based, rather than binary?", "native_fields.rubric_answers.3．1", "native_fields.rubric_answers.3.1"], "nara_question_id": "3.1", "directness": "derived", "covers": "partial", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "transparent", "-1": "opaque", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.1 is a transparency/readability proxy. Binary formats can still be well documented, so this remains derived evidence."},
-    {"id": "nara.rubric.3_2.technical_identifiability.v1", "criterion": "technical.identifiability", "from_field": "raw.row.3．2: Is there an internal signature in an authoritative format registry that can be used to identify a file in this format?", "alternate_fields": ["raw.row.3.2: Is there an internal signature in an authoritative format registry that can be used to identify a file in this format?", "native_fields.rubric_answers.3．2", "native_fields.rubric_answers.3.2"], "nara_question_id": "3.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "authoritative_signature", "-2": "no_authoritative_signature", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.2 directly supports technical identifiability."},
-    {"id": "nara.rubric.3_3.technical_compression.v1", "criterion": "technical.compression", "from_field": "raw.row.3．3: Does the format require the use of compression?", "alternate_fields": ["raw.row.3.3: Does the format require the use of compression?", "native_fields.rubric_answers.3．3", "native_fields.rubric_answers.3.3"], "nara_question_id": "3.3", "directness": "derived", "covers": "partial", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "none_or_standard", "-1": "tool_supported", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.3 indicates whether compression is required. This maps only coarsely to the neutral compression vocabulary."},
-    {"id": "nara.rubric.3_4.technical_lossy_compression.v1", "criterion": "technical.lossy_compression", "from_field": "raw.row.3．4: If the format requires the use of compression, can it be lossy?", "alternate_fields": ["raw.row.3.4: If the format requires the use of compression, can it be lossy?", "native_fields.rubric_answers.3．4", "native_fields.rubric_answers.3.4"], "nara_question_id": "3.4", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"0": "none_or_not_applicable", "-1": "possible_or_lossy", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.4 supports lossy-compression risk evidence when compression is applicable."},
-    {"id": "nara.rubric.3_5.technical_embedded_data_support.v1", "criterion": "technical.embedded_data_support", "from_field": "raw.row.3．5: Does this format support declared or hidden embedded data?", "alternate_fields": ["raw.row.3.5: Does this format support declared or hidden embedded data?", "native_fields.rubric_answers.3．5", "native_fields.rubric_answers.3.5"], "nara_question_id": "3.5", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "none_or_not_supported", "-1": "supports_declared_or_hidden_data", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.5 indicates whether declared or hidden embedded data may be present."},
-    {"id": "nara.rubric.3_6.technical_embedded_data_documentation.v1", "criterion": "technical.embedded_data_documentation", "from_field": "raw.row.3．6: If the format supports declared or hidden embedded data, does the format list or provide standard information about embedded data?", "alternate_fields": ["raw.row.3.6: If the format supports declared or hidden embedded data, does the format list or provide standard information about embedded data?", "native_fields.rubric_answers.3．6", "native_fields.rubric_answers.3.6"], "nara_question_id": "3.6", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "documented", "0": "not_applicable", "-1": "undocumented", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 3.6 supports documentation status for embedded data, with zero treated as not applicable."},
-    {"id": "nara.rubric.4_1.sustainability_self_documentation.v1", "criterion": "sustainability.self_documentation", "from_field": "raw.row.4．1: Does the format natively include metadata that documents the file and the technical environment used to create (and/or modify) it?", "alternate_fields": ["raw.row.4.1: Does the format natively include metadata that documents the file and the technical environment used to create (and/or modify) it?", "native_fields.rubric_answers.4．1", "native_fields.rubric_answers.4.1"], "nara_question_id": "4.1", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "self_describing", "-2": "not_self_describing", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 4.1 directly supports self-documentation evidence."},
-    {"id": "nara.rubric.4_2.technical_metadata_extensibility.v1", "criterion": "technical.metadata_extensibility", "from_field": "raw.row.4．2: Does the format support adding embedded descriptive and administrative metadata through manual or automated processes?", "alternate_fields": ["raw.row.4.2: Does the format support adding embedded descriptive and administrative metadata through manual or automated processes?", "native_fields.rubric_answers.4．2", "native_fields.rubric_answers.4.2"], "nara_question_id": "4.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "supports_embedded_metadata", "-1": "no_embedded_metadata_support", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 4.2 supports metadata extensibility rather than proving existing files contain metadata."},
-    {"id": "nara.rubric.5_1.technical_hardware_dependency.v1", "criterion": "technical.hardware_dependency", "from_field": "raw.row.5．1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?", "alternate_fields": ["raw.row.5.1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?", "native_fields.rubric_answers.5．1", "native_fields.rubric_answers.5.1"], "nara_question_id": "5.1", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "none", "-6": "high", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 5.1 directly supports hardware dependency evidence."},
-    {"id": "nara.rubric.5_2.technical_hardware_dependency.v1", "criterion": "technical.hardware_dependency", "from_field": "raw.row.5．2: Does the format require specific playback hardware (e．g．, Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?", "alternate_fields": ["raw.row.5.2: Does the format require specific playback hardware (e.g., Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?", "native_fields.rubric_answers.5．2", "native_fields.rubric_answers.5.2"], "nara_question_id": "5.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "none", "-4": "high", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 5.2 directly supports playback-hardware dependency evidence."},
-    {"id": "nara.rubric.6_1.technical_renderer_availability.v1", "criterion": "technical.renderer_availability", "from_field": "raw.row.6．1: Are renderers available?", "alternate_fields": ["raw.row.6.1: Are renderers available?", "native_fields.rubric_answers.6．1", "native_fields.rubric_answers.6.1"], "nara_question_id": "6.1", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "renderers_available", "0": "limited_or_unknown", "-4": "no_known_renderer", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 6.1 directly supports renderer availability."},
-    {"id": "nara.rubric.6_2.technical_open_source_tooling.v1", "criterion": "technical.open_source_tooling", "from_field": "raw.row.6．2: If renderers are available, is at least one of them open source?", "alternate_fields": ["raw.row.6.2: If renderers are available, is at least one of them open source?", "native_fields.rubric_answers.6．2", "native_fields.rubric_answers.6.2"], "nara_question_id": "6.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "open_source_available", "0": "unknown", "-1": "no_open_source_tooling", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 6.2 directly supports open-source rendering/tooling availability."},
-    {"id": "nara.rubric.6_3.technical_plugin_script_dependency.v1", "criterion": "technical.plugin_script_dependency", "from_field": "raw.row.6．3: Does the format rely on plug-ins and/or scripts, etc． to render or execute files?", "alternate_fields": ["raw.row.6.3: Does the format rely on plug-ins and/or scripts, etc. to render or execute files?", "native_fields.rubric_answers.6．3", "native_fields.rubric_answers.6.3"], "nara_question_id": "6.3", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "none", "-4": "high", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 6.3 supports plug-in/script dependency evidence. The field text uses a Mongo-safe fullwidth dot after 'etc'."},
-    {"id": "nara.rubric.6_4.technical_operating_system_support.v1", "criterion": "technical.operating_system_support", "from_field": "raw.row.6．4: Can the format be rendered or executed in more than one computing operating system?", "alternate_fields": ["raw.row.6.4: Can the format be rendered or executed in more than one computing operating system?", "native_fields.rubric_answers.6．4", "native_fields.rubric_answers.6.4"], "nara_question_id": "6.4", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "cross_platform", "-2": "limited_platform_support", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 6.4 directly supports operating-system support."},
-    {"id": "nara.rubric.6_5.technical_creation_software_support.v1", "criterion": "technical.creation_software_support", "from_field": "raw.row.6．5: Is there software supported by current computing environments that can create the format?", "alternate_fields": ["raw.row.6.5: Is there software supported by current computing environments that can create the format?", "native_fields.rubric_answers.6．5", "native_fields.rubric_answers.6.5"], "nara_question_id": "6.5", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"1": "currently_supported", "-1": "unsupported_or_legacy", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 6.5 supports current creation-software support."},
-    {"id": "nara.rubric.7_1.sustainability_ip_licensing.v1", "criterion": "sustainability.ip_licensing", "from_field": "raw.row.7．1: Is the format subject to patent claims that may impede the development of open source tools for opening and managing the files?", "alternate_fields": ["raw.row.7.1: Is the format subject to patent claims that may impede the development of open source tools for opening and managing the files?", "native_fields.rubric_answers.7．1", "native_fields.rubric_answers.7.1"], "nara_question_id": "7.1", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "no_known_barrier", "-2": "known_constraint", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 7.1 directly supports patent/licensing barrier evidence."},
-    {"id": "nara.rubric.7_2.sustainability_ip_licensing.v1", "criterion": "sustainability.ip_licensing", "from_field": "raw.row.7．2: Does the format have open source license terms?", "alternate_fields": ["raw.row.7.2: Does the format have open source license terms?", "native_fields.rubric_answers.7．2", "native_fields.rubric_answers.7.2"], "nara_question_id": "7.2", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "no_known_barrier", "-2": "limited_or_unclear", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 7.2 supports licensing openness. A negative score is treated as limited/unclear rather than a known legal constraint."},
-    {"id": "nara.rubric.8_1.sustainability_tpm_encryption.v1", "criterion": "sustainability.tpm_encryption", "from_field": "raw.row.8．1: Does the format require the use of encryption?", "alternate_fields": ["raw.row.8.1: Does the format require the use of encryption?", "native_fields.rubric_answers.8．1", "native_fields.rubric_answers.8.1"], "nara_question_id": "8.1", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "none_or_not_applicable", "-4": "known_constraint", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 8.1 directly supports encryption dependency evidence."},
-    {"id": "nara.rubric.8_2.sustainability_tpm_encryption.v1", "criterion": "sustainability.tpm_encryption", "from_field": "raw.row.8．2: If the format requires the use of encryption, is it robust (cryptographically secure)?", "alternate_fields": ["raw.row.8.2: If the format requires the use of encryption, is it robust (cryptographically secure)?", "native_fields.rubric_answers.8．2", "native_fields.rubric_answers.8.2"], "nara_question_id": "8.2", "directness": "derived", "covers": "partial", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"0": "possible", "-1": "known_constraint", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 8.2 only applies when encryption is required; it should be reconciled with 8.1 rather than read alone."},
-    {"id": "nara.rubric.8_3.sustainability_tpm_encryption.v1", "criterion": "sustainability.tpm_encryption", "from_field": "raw.row.8．3: Does the format natively allow the use of technical protection measures (e.g. digital rights management)?", "alternate_fields": ["raw.row.8.3: Does the format natively allow the use of technical protection measures (e.g. digital rights management)?", "native_fields.rubric_answers.8．3", "native_fields.rubric_answers.8.3"], "nara_question_id": "8.3", "directness": "derived", "covers": "full", "source_independence": "source_derived", "mapping_status": "needs_review", "values": {"2": "none_or_not_applicable", "-2": "known_constraint", "0": "unknown", "FALSE": "unknown", "Unknown": "unknown"}, "rationale": "Candidate. NARA question 8.3 directly supports TPM/DRM possibility evidence."}
+    {
+      "id": "nara.rubric.1_1.sustainability_disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "raw.row.1．1: Is the format proprietary?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.1．1",
+        "native_fields.rubric_answers.1.1"
+      ],
+      "nara_question_id": "1.1",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "public_specification",
+        "Unknown": "unknown",
+        "Yes": "proprietary_documented",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 1.1 is a scored proprietary-status observation. Positive values are treated as evidence against proprietary status; negative values indicate proprietary documentation. This is partial disclosure evidence because proprietary status and public specification are related but not identical."
+    },
+    {
+      "id": "nara.rubric.1_2.sustainability_disclosure.v1",
+      "criterion": "sustainability.disclosure",
+      "from_field": "raw.row.1．2: Does the format have a published open specification?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.1．2",
+        "native_fields.rubric_answers.1.2"
+      ],
+      "nara_question_id": "1.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "public_specification",
+        "No": "undocumented",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 1.2 is the strongest NARA disclosure signal because it asks whether a published open specification exists. It remains derived because stored values are rubric scores, not literal answers."
+    },
+    {
+      "id": "nara.rubric.1_3.sustainability_standardization.v1",
+      "criterion": "sustainability.standardization",
+      "from_field": "raw.row.1．3: If there is a published specification, has it been approved and published by an internationally recognized standards organization?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.1．3",
+        "native_fields.rubric_answers.1.3"
+      ],
+      "nara_question_id": "1.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "international_standard",
+        "No": "not_standardized",
+        "N/A": "unknown",
+        "Unknown": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 1.3 supports standardization evidence. A zero or FALSE value is treated as unknown/not applicable rather than as proof of no standard."
+    },
+    {
+      "id": "nara.rubric.1_4.sustainability_specification_currency.v1",
+      "criterion": "sustainability.specification_currency",
+      "from_field": "native_fields.specification_age_bracket",
+      "alternate_fields": [],
+      "nara_question_id": "1.4",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "5_years_or_less": "current_or_recent",
+        "6_to_15_years": "dated",
+        "16_plus_years": "stale_or_legacy"
+      },
+      "rationale": "NARA question 1.4 records the year the specification was last updated. The labeled view carries the real year; the adapter recomputes NARA's own age band from it (weights file: 0 = 5 years or less, -2 = 6-15 years, -4 = 16+ years), which avoids the numbered view's fusion of '16+ years' with 'Unknown'. The exact year is exposed separately as native_fields.specification_year for temporal scoring."
+    },
+    {
+      "id": "nara.rubric.2_1.sustainability_adoption.v1",
+      "criterion": "sustainability.adoption",
+      "from_field": "raw.row.2．1: Has the file format commonly been used to create or maintain permanent records within the federal government at any point in time?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.2．1",
+        "native_fields.rubric_answers.2.1"
+      ],
+      "nara_question_id": "2.1",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "high",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 2.1 is an adoption signal scoped to US federal permanent records, so it maps to high adoption only as source-derived partial evidence."
+    },
+    {
+      "id": "nara.rubric.2_2.sustainability_maintenance.v1",
+      "criterion": "sustainability.maintenance",
+      "from_field": "raw.row.2．2: Is the format, or format family, actively maintained and updated by an organization or community?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.2．2",
+        "native_fields.rubric_answers.2.2"
+      ],
+      "nara_question_id": "2.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "actively_maintained",
+        "No": "not_maintained",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 2.2 directly supports maintenance status."
+    },
+    {
+      "id": "nara.rubric.2_3.sustainability_community_guidance.v1",
+      "criterion": "sustainability.community_guidance",
+      "from_field": "raw.row.2．3: Have the archives or library communities identified the format as one to avoid for creation and transfer of permanent materials?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.2．3",
+        "native_fields.rubric_answers.2.3"
+      ],
+      "nara_question_id": "2.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "recommended_or_neutral",
+        "Unknown": "unknown",
+        "Yes": "identified_to_avoid",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 2.3 captures community avoidance guidance; a positive score is treated only as recommended-or-neutral, not as positive endorsement."
+    },
+    {
+      "id": "nara.rubric.3_1.sustainability_transparency_readability.v1",
+      "criterion": "sustainability.transparency_readability",
+      "from_field": "raw.row.3．1: Is the format character-based, rather than binary?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．1",
+        "native_fields.rubric_answers.3.1"
+      ],
+      "nara_question_id": "3.1",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "transparent",
+        "No": "opaque",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.1 is a transparency/readability proxy. Binary formats can still be well documented, so this remains derived evidence."
+    },
+    {
+      "id": "nara.rubric.3_2.technical_identifiability.v1",
+      "criterion": "technical.identifiability",
+      "from_field": "raw.row.3．2: Is there an internal signature in an authoritative format registry that can be used to identify a file in this format?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．2",
+        "native_fields.rubric_answers.3.2"
+      ],
+      "nara_question_id": "3.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "authoritative_signature",
+        "No": "no_authoritative_signature",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.2 directly supports technical identifiability."
+    },
+    {
+      "id": "nara.rubric.3_3.technical_compression.v1",
+      "criterion": "technical.compression",
+      "from_field": "raw.row.3．3: Does the format require the use of compression?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．3",
+        "native_fields.rubric_answers.3.3"
+      ],
+      "nara_question_id": "3.3",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none_or_standard",
+        "Unknown": "unknown",
+        "Yes": "tool_supported",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.3 indicates whether compression is required. This maps only coarsely to the neutral compression vocabulary."
+    },
+    {
+      "id": "nara.rubric.3_4.technical_lossy_compression.v1",
+      "criterion": "technical.lossy_compression",
+      "from_field": "raw.row.3．4: If the format requires the use of compression, can it be lossy?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．4",
+        "native_fields.rubric_answers.3.4"
+      ],
+      "nara_question_id": "3.4",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "N/A": "none_or_not_applicable",
+        "No": "none_or_not_applicable",
+        "Unknown": "unknown",
+        "Yes": "possible_or_lossy",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.4 supports lossy-compression risk evidence when compression is applicable."
+    },
+    {
+      "id": "nara.rubric.3_5.technical_embedded_data_support.v1",
+      "criterion": "technical.embedded_data_support",
+      "from_field": "raw.row.3．5: Does this format support declared or hidden embedded data?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．5",
+        "native_fields.rubric_answers.3.5"
+      ],
+      "nara_question_id": "3.5",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none_or_not_supported",
+        "Unknown": "unknown",
+        "Yes": "supports_declared_or_hidden_data",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.5 indicates whether declared or hidden embedded data may be present."
+    },
+    {
+      "id": "nara.rubric.3_6.technical_embedded_data_documentation.v1",
+      "criterion": "technical.embedded_data_documentation",
+      "from_field": "raw.row.3．6: If the format supports declared or hidden embedded data, does the format list or provide standard information about embedded data?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.3．6",
+        "native_fields.rubric_answers.3.6"
+      ],
+      "nara_question_id": "3.6",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "documented",
+        "N/A": "not_applicable",
+        "No": "undocumented",
+        "Unknown": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 3.6 supports documentation status for embedded data, with zero treated as not applicable."
+    },
+    {
+      "id": "nara.rubric.4_1.sustainability_self_documentation.v1",
+      "criterion": "sustainability.self_documentation",
+      "from_field": "raw.row.4．1: Does the format natively include metadata that documents the file and the technical environment used to create (and/or modify) it?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.4．1",
+        "native_fields.rubric_answers.4.1"
+      ],
+      "nara_question_id": "4.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "self_describing",
+        "No": "not_self_describing",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 4.1 directly supports self-documentation evidence."
+    },
+    {
+      "id": "nara.rubric.4_2.technical_metadata_extensibility.v1",
+      "criterion": "technical.metadata_extensibility",
+      "from_field": "raw.row.4．2: Does the format support adding embedded descriptive and administrative metadata through manual or automated processes?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.4．2",
+        "native_fields.rubric_answers.4.2"
+      ],
+      "nara_question_id": "4.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "supports_embedded_metadata",
+        "No": "no_embedded_metadata_support",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 4.2 supports metadata extensibility rather than proving existing files contain metadata."
+    },
+    {
+      "id": "nara.rubric.5_1.technical_hardware_dependency.v1",
+      "criterion": "technical.hardware_dependency",
+      "from_field": "raw.row.5．1: Does the format require a specific hardware environment, such as a specific graphics card, chipset, or memory requirements, to process or interact with it?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.5．1",
+        "native_fields.rubric_answers.5.1"
+      ],
+      "nara_question_id": "5.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none",
+        "Unknown": "unknown",
+        "Yes": "high",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 5.1 directly supports hardware dependency evidence."
+    },
+    {
+      "id": "nara.rubric.5_2.technical_hardware_dependency.v1",
+      "criterion": "technical.hardware_dependency",
+      "from_field": "raw.row.5．2: Does the format require specific playback hardware (e．g．, Blu-Ray, Audio CD, etc) to transfer the format to the NARA environment?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.5．2",
+        "native_fields.rubric_answers.5.2"
+      ],
+      "nara_question_id": "5.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none",
+        "Unknown": "unknown",
+        "Yes": "high",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 5.2 directly supports playback-hardware dependency evidence."
+    },
+    {
+      "id": "nara.rubric.6_1.technical_renderer_availability.v1",
+      "criterion": "technical.renderer_availability",
+      "from_field": "raw.row.6．1: Are renderers available?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.6．1",
+        "native_fields.rubric_answers.6.1"
+      ],
+      "nara_question_id": "6.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "renderers_available",
+        "N/A": "limited_or_unknown",
+        "No": "no_known_renderer",
+        "Unknown": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 6.1 directly supports renderer availability."
+    },
+    {
+      "id": "nara.rubric.6_2.technical_open_source_tooling.v1",
+      "criterion": "technical.open_source_tooling",
+      "from_field": "raw.row.6．2: If renderers are available, is at least one of them open source?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.6．2",
+        "native_fields.rubric_answers.6.2"
+      ],
+      "nara_question_id": "6.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "open_source_available",
+        "N/A": "unknown",
+        "No": "no_open_source_tooling",
+        "Unknown": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 6.2 directly supports open-source rendering/tooling availability."
+    },
+    {
+      "id": "nara.rubric.6_3.technical_plugin_script_dependency.v1",
+      "criterion": "technical.plugin_script_dependency",
+      "from_field": "raw.row.6．3: Does the format rely on plug-ins and/or scripts, etc． to render or execute files?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.6．3",
+        "native_fields.rubric_answers.6.3"
+      ],
+      "nara_question_id": "6.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none",
+        "Unknown": "unknown",
+        "Yes": "high",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 6.3 supports plug-in/script dependency evidence. The field text uses a Mongo-safe fullwidth dot after 'etc'."
+    },
+    {
+      "id": "nara.rubric.6_4.technical_operating_system_support.v1",
+      "criterion": "technical.operating_system_support",
+      "from_field": "raw.row.6．4: Can the format be rendered or executed in more than one computing operating system?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.6．4",
+        "native_fields.rubric_answers.6.4"
+      ],
+      "nara_question_id": "6.4",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "cross_platform",
+        "No": "limited_platform_support",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 6.4 directly supports operating-system support."
+    },
+    {
+      "id": "nara.rubric.6_5.technical_creation_software_support.v1",
+      "criterion": "technical.creation_software_support",
+      "from_field": "raw.row.6．5: Is there software supported by current computing environments that can create the format?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.6．5",
+        "native_fields.rubric_answers.6.5"
+      ],
+      "nara_question_id": "6.5",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "currently_supported",
+        "No": "unsupported_or_legacy",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 6.5 supports current creation-software support."
+    },
+    {
+      "id": "nara.rubric.7_1.sustainability_ip_licensing.v1",
+      "criterion": "sustainability.ip_licensing",
+      "from_field": "raw.row.7．1: Is the format subject to patent claims that may impede the development of open source tools for opening and managing the files?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.7．1",
+        "native_fields.rubric_answers.7.1"
+      ],
+      "nara_question_id": "7.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "no_known_barrier",
+        "Unknown": "unknown",
+        "Yes": "known_constraint",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 7.1 directly supports patent/licensing barrier evidence."
+    },
+    {
+      "id": "nara.rubric.7_2.sustainability_ip_licensing.v1",
+      "criterion": "sustainability.ip_licensing",
+      "from_field": "raw.row.7．2: Does the format have open source license terms?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.7．2",
+        "native_fields.rubric_answers.7.2"
+      ],
+      "nara_question_id": "7.2",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "Yes": "no_known_barrier",
+        "No": "limited_or_unclear",
+        "Unknown": "unknown",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 7.2 supports licensing openness. A negative score is treated as limited/unclear rather than a known legal constraint."
+    },
+    {
+      "id": "nara.rubric.8_1.sustainability_tpm_encryption.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "raw.row.8．1: Does the format require the use of encryption?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.8．1",
+        "native_fields.rubric_answers.8.1"
+      ],
+      "nara_question_id": "8.1",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none_or_not_applicable",
+        "Unknown": "unknown",
+        "Yes": "known_constraint",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 8.1 directly supports encryption dependency evidence."
+    },
+    {
+      "id": "nara.rubric.8_2.sustainability_tpm_encryption.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "raw.row.8．2: If the format requires the use of encryption, is it robust (cryptographically secure)?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.8．2",
+        "native_fields.rubric_answers.8.2"
+      ],
+      "nara_question_id": "8.2",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "N/A": "possible",
+        "No": "possible",
+        "Unknown": "unknown",
+        "Yes": "known_constraint",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 8.2 only applies when encryption is required; it should be reconciled with 8.1 rather than read alone."
+    },
+    {
+      "id": "nara.rubric.8_3.sustainability_tpm_encryption.v1",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "raw.row.8．3: Does the format natively allow the use of technical protection measures (e.g. digital rights management)?",
+      "alternate_fields": [
+        "native_fields.rubric_answers.8．3",
+        "native_fields.rubric_answers.8.3"
+      ],
+      "nara_question_id": "8.3",
+      "directness": "derived",
+      "covers": "full",
+      "source_independence": "source_derived",
+      "mapping_status": "needs_review",
+      "values": {
+        "No": "none_or_not_applicable",
+        "Unknown": "unknown",
+        "Yes": "known_constraint",
+        "N/A": "unknown",
+        "FALSE": "unknown",
+        "0": "unknown"
+      },
+      "rationale": "Candidate. NARA question 8.3 directly supports TPM/DRM possibility evidence."
+    }
   ]
 }

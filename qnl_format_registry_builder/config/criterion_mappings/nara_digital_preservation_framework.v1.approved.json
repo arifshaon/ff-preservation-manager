@@ -1,6 +1,6 @@
 {
   "source_type": "nara_digital_preservation_framework",
-  "mapping_version": "2026-08-16-approved-example",
+  "mapping_version": "v1-labeled-approved",
   "criteria_version": "v1",
   "native_vocabulary": "nara_file_format_risk_matrix",
   "mapping_mode": "manual_approved_example",
@@ -105,11 +105,12 @@
       "covers": "full",
       "source_independence": "source_derived",
       "values": {
-        "2": "public_specification",
-        "-2": "undocumented",
-        "0": "unknown",
+        "Yes": "public_specification",
+        "No": "undocumented",
+        "Unknown": "unknown",
+        "N/A": "unknown",
         "FALSE": "unknown",
-        "Unknown": "unknown"
+        "0": "unknown"
       },
       "mapping_status": "accepted",
       "decided_by": "QNL DCPA",
@@ -125,11 +126,12 @@
       "covers": "full",
       "source_independence": "source_derived",
       "values": {
-        "2": "authoritative_signature",
-        "-2": "no_authoritative_signature",
-        "0": "unknown",
+        "Yes": "authoritative_signature",
+        "No": "no_authoritative_signature",
+        "Unknown": "unknown",
+        "N/A": "unknown",
         "FALSE": "unknown",
-        "Unknown": "unknown"
+        "0": "unknown"
       },
       "mapping_status": "accepted",
       "decided_by": "QNL DCPA",
@@ -145,11 +147,12 @@
       "covers": "full",
       "source_independence": "source_derived",
       "values": {
-        "2": "renderers_available",
-        "0": "limited_or_unknown",
-        "-4": "no_known_renderer",
+        "Yes": "renderers_available",
+        "N/A": "limited_or_unknown",
+        "No": "no_known_renderer",
+        "Unknown": "unknown",
         "FALSE": "unknown",
-        "Unknown": "unknown"
+        "0": "unknown"
       },
       "mapping_status": "accepted",
       "decided_by": "QNL DCPA",
@@ -165,11 +168,12 @@
       "covers": "full",
       "source_independence": "source_derived",
       "values": {
-        "2": "none_or_not_applicable",
-        "-2": "known_constraint",
-        "0": "unknown",
+        "No": "none_or_not_applicable",
+        "Unknown": "unknown",
+        "Yes": "known_constraint",
+        "N/A": "unknown",
         "FALSE": "unknown",
-        "Unknown": "unknown"
+        "0": "unknown"
       },
       "mapping_status": "accepted",
       "decided_by": "QNL DCPA",
