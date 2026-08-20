@@ -16,6 +16,7 @@ from registry_builder.criterion_mapping import (
     load_mappings,
     validate_mappings,
 )
+from registry_builder.identifier_rules import load_identifier_rules
 from registry_builder.pipeline import run_pipeline
 from registry_builder.storage import create_store
 from registry_builder.validate import validate_registry
@@ -364,6 +365,52 @@ def cmd_init_source_inbox(args) -> dict[str, Any]:
     return {"input_root": str(input_root), "sources": results}
 
 
+def cmd_health_check(args) -> dict[str, Any]:
+    from registry_builder.health_check import run_health_check
+    from registry_builder.models import CanonicalFormat
+    from registry_builder.normalize import normalize_record
+    from registry_builder.pipeline import _raw_record_from_dict
+    from registry_builder.reconcile import reconcile
+    from registry_builder.storage import create_store
+
+    registry_path = Path(args.registry)
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+
+    claims_path = Path(args.claims) if args.claims else registry_path.parent / "criterion_claims.jsonl"
+    claims = []
+    if claims_path.exists():
+        claims = [json.loads(line) for line in claims_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    source_records = None
+    reconcile_fn = None
+    if args.storage_config:
+        config = _load_json(args.storage_config)
+        # Storage paths are relative to the working directory, exactly as the
+        # pipeline resolves them — not to the config file.
+        store = create_store(config.get("storage") or config)
+        latest: dict[tuple, dict] = {}
+        for record in store.query("source_records"):
+            if record.get("current", True) is False:
+                continue
+            latest[(record.get("source_id"), record.get("source_record_id"))] = record
+        rules = load_identifier_rules(config.get("identifier_kinds"))
+        source_records = [
+            normalize_record(_raw_record_from_dict(record), identifier_rules=rules)
+            for record in latest.values()
+        ]
+        reconcile_fn = lambda records: reconcile(records, identifier_rules=rules)
+
+    canonical_objects = [CanonicalFormat(**row) for row in registry]
+    return run_health_check(
+        registry,
+        claims,
+        source_records=source_records,
+        reconcile_fn=reconcile_fn,
+        canonical_objects=canonical_objects,
+        shuffles=args.shuffles,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="registry-builder")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -381,6 +428,17 @@ def main() -> None:
         help="Create input/<source_id>/ drop folders (with README) for every enabled source that reads local input files",
     )
     inbox.add_argument("--config", required=True)
+
+    health = sub.add_parser(
+        "health-check",
+        help="Check the invariants that make one-source-at-a-time ingestion trustworthy",
+    )
+    health.add_argument("--registry", required=True, help="Path to the exported registry.json")
+    health.add_argument("--claims", help="Path to criterion_claims.jsonl (default: next to the registry)")
+    health.add_argument("--storage-config", help="Pipeline config with a storage block; enables the order-independence check")
+    health.add_argument("--shuffles", type=int, default=3, help="How many shuffled re-runs to compare (default 3)")
+    health.add_argument("--json", action="store_true", help="Emit the report as JSON instead of text")
+    health.add_argument("--out", help="Optional JSON output file")
 
     val = sub.add_parser("validate", help="Validate a generated registry.json")
     val.add_argument("--registry", required=True)
@@ -459,6 +517,15 @@ def main() -> None:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     elif args.command == "init-source-inbox":
         _write_or_print(cmd_init_source_inbox(args))
+    elif args.command == "health-check":
+        from registry_builder.health_check import format_health_check
+        report = cmd_health_check(args)
+        if args.json or args.out:
+            _write_or_print(report, args.out)
+        else:
+            print(format_health_check(report))
+        if report["status"] == "FAIL":
+            sys.exit(1)
     elif args.command == "validate":
         registry = _load_registry(args.registry)
         errors, warnings = validate_registry(registry)

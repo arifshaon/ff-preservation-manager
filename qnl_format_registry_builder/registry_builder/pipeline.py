@@ -288,6 +288,9 @@ def _identifier_from_dict(value: Identifier | dict[str, Any]) -> Identifier:
         source=str(value.get("source") or ""),
         verified=bool(value.get("verified", False)),
         source_record_id=value.get("source_record_id"),
+        # Records stored before this flag existed carry no key; they predate any
+        # unendorsed claim, so treating them as endorsed is correct.
+        endorsed=bool(value.get("endorsed", True)),
     )
 
 

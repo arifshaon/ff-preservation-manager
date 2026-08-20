@@ -502,3 +502,41 @@ def test_qnl_evidence_dropped_csv_is_extracted_without_network(tmp_path):
     assert snapshots[0].acquisition_mode == "local"
     records = adapter.extract(snapshots)
     assert records, "expected at least one evidence record from the dropped CSV"
+
+
+def test_endorsement_survives_a_round_trip_through_storage():
+    """An unendorsed claim must stay unendorsed when reloaded from the store.
+
+    Sources are ingested one run at a time, so a source's records are read back
+    from storage on every later run. Losing the flag there would let LOC's
+    prose-only PUIDs start bridging again as soon as any other source ran after
+    LOC — silently, and only depending on run order.
+    """
+    from registry_builder.models import Identifier, RawFormatRecord
+    from registry_builder.pipeline import _raw_record_from_dict, _source_record_dict
+
+    record = RawFormatRecord(
+        source_id="loc_fdd_xml", source_type="loc_fdd_xml", source_record_id="fdd000002",
+        name="WAVE Audio File Format with LPCM audio", loc_ids=["fdd000002"],
+        identifiers=[
+            Identifier("loc", "fdd000002", "loc_fdd_xml", True, "fdd000002"),
+            Identifier("puid", "fmt/141", "loc_fdd_xml", False, "fdd000002", endorsed=False),
+        ],
+    )
+
+    restored = _raw_record_from_dict(_source_record_dict(record, "run-1"))
+
+    assert [(i.kind, i.endorsed) for i in restored.identifiers] == [("loc", True), ("puid", False)]
+
+
+def test_records_stored_before_the_flag_existed_are_treated_as_endorsed():
+    from registry_builder.pipeline import _raw_record_from_dict
+
+    legacy = {
+        "source_id": "loc_fdd_xml", "source_type": "loc_fdd_xml", "source_record_id": "fdd000030",
+        "identifiers": [{"kind": "puid", "value": "fmt/18", "source": "loc_fdd_xml", "verified": False}],
+    }
+
+    restored = _raw_record_from_dict(legacy)
+
+    assert restored.identifiers[0].endorsed is True

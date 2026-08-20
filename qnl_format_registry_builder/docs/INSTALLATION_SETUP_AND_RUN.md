@@ -335,6 +335,58 @@ python -m registry_builder validate `
   --registry output\registry.json
 ```
 
+## 13b. Registry health check
+
+`validate` checks a registry's structure. `health-check` checks the invariants
+that make ingesting one source at a time trustworthy — run it after each source:
+
+```bash
+python -m registry_builder health-check \
+  --registry out/registry.json \
+  --storage-config config/sources.loc.local.json
+```
+
+```text
+registry health: ok
+
+  [pass] claims_point_at_live_canonicals
+         0 of 8857 claim(s) reference a canonical_id that is not in the registry
+  [pass] every_source_is_represented
+         all 3 contributing source(s) have claims
+  [pass] unendorsed_claims_are_not_identifiers
+         0 unendorsed claim(s) leaked into the identifier map (102 retained as evidence)
+  [pass] reconciliation_is_order_independent
+         0 record(s) landed on a different canonical when re-run in a shuffled order
+
+  canonical formats: 3095
+  canonicals drawing on more than one source: 664
+      nara_digital_preservation_framework + pronom_registry: 554
+```
+
+Each check corresponds to a way the pipeline has actually gone wrong, so a
+failure names a real regression rather than a style violation:
+
+| Check | Catches |
+| --- | --- |
+| `claims_point_at_live_canonicals` | claims left dangling after a later source reshaped canonicals |
+| `every_source_is_represented` | a source's claims dropped from the export |
+| `unendorsed_claims_are_not_identifiers` | a PUID an authority declined to assert presented as one of the format's ids |
+| `reconciliation_is_order_independent` | the canonical set depending on which source ran first |
+
+`--storage-config` is what enables the order-independence check: it re-reconciles
+the stored source records in shuffled orders and compares. Without it that check
+reports **SKIP**, never `pass`, and the overall status becomes `incomplete` — an
+unrun check must not read as a clean bill of health. The command exits non-zero
+only on `FAIL`.
+
+The merge counts underneath are not pass/fail. They are the number to watch as
+sources are added: adding an authority should only ever increase them.
+
+The `needs review` block counts what reconciliation could not settle —
+`heuristic_identifier_bridges` and `ambiguous_identifier_citations`. These are
+expected, not errors; the point is that they are counted rather than silent.
+`collision-report` lists them individually.
+
 ## 14. Identifier collision report
 
 ```powershell
