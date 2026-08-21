@@ -16,7 +16,7 @@
     "enabled": false
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
@@ -33,7 +33,7 @@
       "fallback_release_date": "20260320",
       "github_ref": "master",
       "fallback_local_files": [],
-      "notes": "Second persistent integration source. Uses the pinned NARA Digital Preservation Framework release already validated by the project. The pipeline reuses the latest successful DPC source contribution from MongoDB before reconciliation."
+      "notes": "Persistent NARA source. Uses the pinned NARA Digital Preservation Framework release already validated by the project. PUID assertions do not independently verify PRONOM identity."
     }
   ]
 }
