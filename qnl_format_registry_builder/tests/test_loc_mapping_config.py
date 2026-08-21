@@ -60,6 +60,21 @@ def test_loc_mapping_keeps_identity_fields_out_of_criterion_rules():
         assert "wikidata_ids" not in mapped_fields
 
 
+def test_loc_mapping_projects_only_the_official_seven_sustainability_factors():
+    _, approved = _load_loc_pair()
+    mapped_fields = {rule["from_field"] for rule in approved["maps"]}
+    assert mapped_fields == {
+        "native_fields.sustainability_factors.disclosure",
+        "native_fields.sustainability_factors.adoption",
+        "native_fields.sustainability_factors.transparency",
+        "native_fields.sustainability_factors.self_documentation",
+        "native_fields.sustainability_factors.external_dependencies",
+        "native_fields.sustainability_factors.impact_of_patents",
+        "native_fields.sustainability_factors.technical_protection_mechanisms",
+    }
+    assert all("documentation" not in field.replace("self_documentation", "") for field in mapped_fields)
+
+
 def test_loc_pdf_embedded_font_dependency_maps_to_low_external_dependency():
     criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
     _, approved = _load_loc_pair()
