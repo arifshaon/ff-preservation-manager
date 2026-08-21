@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-POLICY_ID = "loc_pronom_direct_single_authority_v1"
+POLICY_ID = "loc_pronom_one_to_one_authority_v2"
 APPROVABLE_STATUS = "bridge_candidate_authority_confirmed"
+_BROAD_FORMAT_MARKERS = ("family", "generic", "unspecified", "all versions", "multiple versions")
+
+
+def _is_broad_format_name(name: str | None) -> bool:
+    text = str(name or "").strip().lower()
+    return any(marker in text for marker in _BROAD_FORMAT_MARKERS)
 
 
 def build_bridge_mapping(
@@ -23,18 +29,60 @@ def build_bridge_mapping(
     }
     rules: list[dict[str, Any]] = []
     excluded = Counter()
+    excluded_relationships: list[dict[str, Any]] = []
 
+    eligible: list[dict[str, Any]] = []
     for result in verification_results:
         status = str(result.get("status") or "unknown")
         if status != APPROVABLE_STATUS:
             excluded[status] += 1
             continue
+        title = str(result.get("title") or result.get("loc_preferred_name") or "")
+        if _is_broad_format_name(title):
+            excluded["broad_scope_review"] += 1
+            excluded_relationships.append({
+                "source_record_id": result.get("source_record_id"),
+                "fdd_id": result.get("fdd_id"),
+                "puid": result.get("puid"),
+                "title": title,
+                "status": "broad_scope_review",
+                "reason": "LOC description is explicitly family/generic/broad and must not be projected as exact PRONOM identity.",
+            })
+            continue
+        eligible.append(result)
+
+    by_puid: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for result in eligible:
+        puid = str(result.get("puid") or "").strip().lower()
+        if puid:
+            by_puid[puid].append(result)
+
+    many_to_one_puids = {puid for puid, rows in by_puid.items() if len(rows) > 1}
+
+    for result in eligible:
         source_record_id = str(result.get("source_record_id") or "")
         review = review_by_id.get(source_record_id) or {}
-        fdd_id = str(result.get("fdd_id") or "")
-        puid = str(result.get("puid") or "")
+        fdd_id = str(result.get("fdd_id") or "").strip().lower()
+        puid = str(result.get("puid") or "").strip().lower()
         if not fdd_id or not puid:
             excluded["invalid_shape"] += 1
+            continue
+        if puid in many_to_one_puids:
+            related_fdd_ids = sorted(
+                str(row.get("fdd_id") or "").strip().lower()
+                for row in by_puid[puid]
+                if row.get("fdd_id")
+            )
+            excluded["many_to_one_scope_review"] += 1
+            excluded_relationships.append({
+                "source_record_id": source_record_id,
+                "fdd_id": fdd_id,
+                "puid": puid,
+                "title": result.get("title") or review.get("title"),
+                "status": "many_to_one_scope_review",
+                "related_fdd_ids": related_fdd_ids,
+                "reason": "More than one non-broad LOC FDD row claims the same PRONOM PUID; granularity must be reviewed before identity projection.",
+            })
             continue
         rules.append({
             "rule_id": f"{POLICY_ID}:{fdd_id}:{puid}",
@@ -46,6 +94,8 @@ def build_bridge_mapping(
                 "authoritative LOC FDD identity exists in the persistent registry",
                 "authoritative PRONOM PUID identity exists in the persistent registry",
                 "no conflicting or asymmetric version signal was detected",
+                "LOC title is not explicitly family/generic/broad",
+                "the PUID occurs in exactly one non-broad approvable LOC row in this policy set",
             ],
             "mapping_date": mapping_date,
             "source_record_id": source_record_id,
@@ -62,6 +112,7 @@ def build_bridge_mapping(
         })
 
     rules.sort(key=lambda rule: (rule["fdd_id"], rule["puid"]))
+    excluded_relationships.sort(key=lambda item: (str(item.get("status") or ""), str(item.get("puid") or ""), str(item.get("fdd_id") or "")))
     snapshot_hashes = sorted({
         str(rule.get("crosswalk_snapshot_sha256"))
         for rule in rules
@@ -74,11 +125,13 @@ def build_bridge_mapping(
         "review_status": "approved_by_policy",
         "policy_notes": (
             "Machine-policy approval only; not a claim of individual human review. "
-            "Only direct-single LOC mappings confirmed against both authority records and without version-scope conflict are projected."
+            "Only direct-single, non-broad, globally one-to-one LOC-to-PRONOM mappings confirmed against both authority records and without version-scope conflict are projected."
         ),
         "crosswalk_snapshot_sha256": snapshot_hashes[0] if len(snapshot_hashes) == 1 else snapshot_hashes,
         "approved_rule_count": len(rules),
         "excluded_status_counts": dict(sorted(excluded.items())),
+        "excluded_relationship_count": len(excluded_relationships),
+        "excluded_relationships": excluded_relationships,
         "rules": rules,
     }
 
@@ -107,6 +160,7 @@ def main() -> None:
         "mapping_version": mapping["mapping_version"],
         "approved_rule_count": mapping["approved_rule_count"],
         "excluded_status_counts": mapping["excluded_status_counts"],
+        "excluded_relationship_count": mapping["excluded_relationship_count"],
         "approval_policy": mapping["approval_policy"],
         "puid_ownership": "copied assertion remains verified=false; PRONOM remains authoritative",
     }, indent=2, ensure_ascii=False))
