@@ -1,0 +1,8 @@
+{
+  "storage_config": "sources.qnl.dpc-only.json",
+  "mapping": "external_risk_mappings/dpc_bit_list_2025.v1.approved.json",
+  "include_drafts": false,
+  "replace_source_claims": true,
+  "materialize_canonical": true,
+  "notes": "Production DPC risk backfill. Source records remain evidence_only. Approved mapped assessments are persisted as versioned risk_assessment_claims and materialized into the current canonical risk view using scope-aware synthesis."
+}
