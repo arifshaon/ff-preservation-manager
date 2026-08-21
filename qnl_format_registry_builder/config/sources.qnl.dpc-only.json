@@ -10,13 +10,13 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "First-ingest validation writes to MongoDB only. Enable file exports after the integrated canonical registry is established."
+    "notes": "Persistent DPC evidence source. DPC entries remain evidence_only and cannot create canonical format identities."
   },
   "method_profiles": {
     "enabled": false
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
@@ -29,7 +29,7 @@
       "required": true,
       "edition": "2025",
       "github_ref": "3ad3fef626ea7c128ef8c323d92227e5cae2efc8",
-      "notes": "First persistent integration source. All DPC entries are evidence_only and therefore cannot create canonical format identities."
+      "notes": "All DPC entries are evidence_only and therefore cannot create canonical format identities. Reviewed external-risk mappings are applied separately after target verification."
     }
   ]
 }
