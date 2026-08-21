@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from preservation_risk_manager.answer_derivation import derive_answers
+from preservation_risk_manager.answer_derivation import EVIDENCE_FIELD_COMPATIBILITY, derive_answers
 from preservation_risk_manager.data_access import RegistryReader
 from preservation_risk_manager.evidence_packs import build_evidence_pack
 from preservation_risk_manager.frameworks import RiskFramework
@@ -87,6 +87,19 @@ def _relationship_scope_counts(formats: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _questions_by_criterion(framework: RiskFramework) -> dict[str, list[str]]:
+    """Index framework questions by canonical and explicitly compatible criteria."""
+    questions_by_criterion: dict[str, list[str]] = defaultdict(list)
+    for question in framework.questions:
+        for evidence_field in question.evidence_fields:
+            field = str(evidence_field)
+            accepted_fields = {field, *EVIDENCE_FIELD_COMPATIBILITY.get(field, set())}
+            for criterion in accepted_fields:
+                if question.id not in questions_by_criterion[criterion]:
+                    questions_by_criterion[criterion].append(question.id)
+    return questions_by_criterion
+
+
 def _projected_draft_mapping_opportunities(
     *,
     reader: RegistryReader,
@@ -148,10 +161,7 @@ def _projected_draft_mapping_opportunities(
 
     accepted_identities = {evidence_identity(claim) for claim in accepted}
     draft_only = [claim for claim in projected if evidence_identity(claim) not in accepted_identities]
-    questions_by_criterion: dict[str, list[str]] = defaultdict(list)
-    for question in framework.questions:
-        for criterion in question.evidence_fields:
-            questions_by_criterion[str(criterion)].append(question.id)
+    questions_by_criterion = _questions_by_criterion(framework)
 
     rule_meta: dict[str, dict[str, Any]] = {}
     for mapping in mappings:
