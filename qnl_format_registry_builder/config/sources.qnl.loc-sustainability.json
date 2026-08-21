@@ -10,7 +10,7 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "Production LOC sustainability refresh target. Criterion mapping is intentionally gated until the v2 draft has been reviewed against fresh reviewed extraction output."
+    "notes": "Production LOC sustainability refresh target. Criterion mapping is intentionally gated until the v2 draft2 has been reviewed against fresh reviewed extraction output."
   },
   "method_profiles": {
     "enabled": false
@@ -19,10 +19,10 @@
     "enabled": false,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft2.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "Production application is blocked pending review/approval of LOC mapping v2. The previous v1 mapping must not be applied after the real audit exposed rule-overlap and negation issues."
+    "notes": "Production application is blocked pending review/approval of LOC mapping v2 draft2. The previous v1 and first v2 draft must not be applied after the real previews exposed rule-overlap, negation, and royalty-free classification issues."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
