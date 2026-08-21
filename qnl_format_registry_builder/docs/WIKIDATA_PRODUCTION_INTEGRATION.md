@@ -122,13 +122,102 @@ The independent verifier returned `status: ok` with no errors and confirmed:
 - zero promoted Wikidata strong identifiers;
 - zero Wikidata risk assessments.
 
-## Current operational boundary
+## Controlled refresh workflow
 
-Do not enable `wikidata_sparql_evidence` in the general production source configuration until the refresh workflow is finalized.
+Wikidata refresh is an explicit governed operation, not part of every normal registry build. The production command is:
 
-A fresh Wikidata acquisition can change copied authority identifiers. The governed relationship layer must therefore be recomputed and replace the previous current Wikidata relationship claims as part of the same operational refresh procedure. Until that workflow is wired as one controlled operation, use the reviewed backfill/verification path.
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --out out/wikidata-refresh-preflight.json
+```
 
-Production backfill:
+Without `--apply`, the command acquires (or with `--offline`, replays) the policy-v3 snapshot and performs a **no-write preflight**. It:
+
+1. requires the current persisted Wikidata layer to pass the independent verifier;
+2. extracts every acquired QID through `wikidata_sparql_evidence`;
+3. confirms every record remains `evidence_only` and carries no risk assessment;
+4. recomputes all copied PRONOM/LOC/NARA authority relationships against the current canonical registry;
+5. calculates relationship additions, removals and unchanged claims by semantic claim ID;
+6. blocks unresolved copied authority identifiers;
+7. blocks any identity creation, identity merge or identifier-promotion signal;
+8. applies configured population, relationship-edge and claim-turnover drift gates.
+
+The production drift thresholds are intentionally review gates rather than permanent expected counts. A future valid Wikidata update may change the 15,479-record or 2,856-edge baseline, but a large change must be reviewed rather than silently accepted.
+
+When the preflight returns:
+
+```text
+status = ready
+gate_passed = true
+```
+
+apply the same controlled workflow with:
+
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --apply `
+  --out out/wikidata-refresh-production.json
+```
+
+The apply phase uses the reviewed preflight invariants to:
+
+1. persist the new evidence-only source records;
+2. supersede relationship claims no longer present;
+3. persist the new current relationship claim set;
+4. rematerialize current relationships onto existing canonicals;
+5. preserve the acquired source snapshot provenance;
+6. independently verify the resulting persistent registry state.
+
+A successful applied refresh must finish with:
+
+```text
+status = completed
+verification.status = ok
+```
+
+If the command returns `blocked`, `write_failed` or `verification_failed`, do not rerun it blindly. Inspect the reported gate or verification errors first.
+
+### Offline preflight
+
+To test the currently cached acquisition without contacting Wikidata or writing the registry:
+
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --offline `
+  --out out/wikidata-refresh-preflight-offline.json
+```
+
+### Deliberately restarting acquisition
+
+An interrupted staged acquisition resumes its frozen population and cached batches. Use `--restart` only when a deliberately fresh population discovery is required:
+
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --restart `
+  --out out/wikidata-refresh-preflight.json
+```
+
+A restarted acquisition is still preflight-only unless `--apply` is also supplied.
+
+## General pipeline boundary
+
+Do not add `wikidata_sparql_evidence` to the ordinary `sources.qnl.json` source loop. Wikidata acquisition and governed relationship replacement must remain one coordinated refresh transaction boundary.
+
+The evidence-only Wikidata source records already persisted by the verified backfill remain available to incremental registry rebuilding, and current `source_relationship_claims` are replayed after normal reconciliation. Therefore ordinary source refreshes can preserve the current Wikidata evidence layer without triggering a new WDQS acquisition.
+
+Use `wikidata_refresh` when the Wikidata source itself is intentionally refreshed.
+
+## Legacy backfill and independent verification
+
+The one-time/recovery backfill remains available:
 
 ```powershell
 python -m registry_builder.wikidata_relationship_backfill `
@@ -136,7 +225,7 @@ python -m registry_builder.wikidata_relationship_backfill `
   --out out/wikidata-relationship-backfill-production.json
 ```
 
-Independent verification:
+Independent verification remains available separately:
 
 ```powershell
 python -m registry_builder.wikidata_relationship_verify `
@@ -144,4 +233,4 @@ python -m registry_builder.wikidata_relationship_verify `
   --out out/wikidata-relationship-verify.json
 ```
 
-The production verifier must return `status: ok` before the refreshed Wikidata relationship layer is accepted.
+The standalone verifier must return `status: ok` before a refreshed Wikidata relationship layer is accepted.
