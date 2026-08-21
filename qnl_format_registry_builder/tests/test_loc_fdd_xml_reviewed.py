@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+
 from registry_builder.adapters import resolve_adapter
 from registry_builder.adapters.loc_fdd_xml_reviewed import (
     LOC_SUSTAINABILITY_TOP_LEVEL_FACTORS,
     LocFddXmlReviewedAdapter,
     contextualize_loc_xml_identifier_references,
+    extract_reviewed_loc_sustainability_factors,
     normalize_loc_sustainability_structure,
 )
 from registry_builder.models import Identifier, RawFormatRecord
@@ -79,3 +82,41 @@ def test_reviewed_loc_projection_keeps_only_official_seven_top_level_factors():
     assert projected.evidence[0]["sustainability_factor_count"] == 7
     assert projected.evidence[0]["sustainability_supporting_evidence_count"] == 1
     assert projected.evidence[0]["sustainability_framework"] == "loc_seven_sustainability_factors"
+
+
+def test_reviewed_factor_extraction_accepts_structured_exact_labels():
+    root = ET.fromstring(
+        """
+        <fdd>
+          <factor type="Disclosure"><p>Fully disclosed.</p></factor>
+          <factor><label>Adoption</label><p>Widely adopted.</p></factor>
+          <technicalProtectionConsiderations>None.</technicalProtectionConsiderations>
+        </fdd>
+        """
+    )
+
+    factors = extract_reviewed_loc_sustainability_factors(root)
+
+    assert factors == {
+        "disclosure": "Fully disclosed.",
+        "adoption": "Widely adopted.",
+        "technical_protection_mechanisms": "None.",
+    }
+
+
+def test_reviewed_factor_extraction_does_not_promote_factor_names_from_free_text():
+    root = ET.fromstring(
+        """
+        <fdd>
+          <notes>
+            See Technical Protection Considerations for another format.
+            Licensing and patents are discussed elsewhere.
+          </notes>
+          <description>
+            This prose mentions transparency and adoption but is not a sustainability factor field.
+          </description>
+        </fdd>
+        """
+    )
+
+    assert extract_reviewed_loc_sustainability_factors(root) == {}
