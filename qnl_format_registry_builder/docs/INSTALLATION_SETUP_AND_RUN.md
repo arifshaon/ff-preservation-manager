@@ -1,8 +1,10 @@
 # Registry Builder: installation, setup, and run guide
 
-This is the primary operator runbook for `qnl_format_registry_builder`.
+This is the general operator runbook for `qnl_format_registry_builder`.
 
-For the first cross-package run from clone to preservation-risk assessment, use **[`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md)**. That path deliberately enables criterion mapping so the risk manager receives usable claims.
+> **If the goal is to build the approved QNL production registry from an empty MongoDB database, one source at a time, use [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) first.** It gives the required PRONOM → LOC → NARA → DPC → Wikidata order, exact production configs, governed claim/backfill steps, source download URLs, manual/local-file fallbacks, verification/stop conditions, and current clean-room reproducibility gaps.
+
+For the first cross-package demonstration from clone to preservation-risk assessment, use **[`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md)**. That path deliberately enables criterion mapping so the risk manager receives usable claims.
 
 ## 1. What this module does
 
@@ -120,6 +122,8 @@ config/storage.mongodb.example.json
 config/storage.file.example.json
 ```
 
+These are examples, not the authoritative clean-room production sequence. For production source-by-source configs use [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md).
+
 Do not place production secrets in committed examples.
 
 ## 5. MongoDB setup
@@ -141,6 +145,8 @@ Example storage block:
   }
 }
 ```
+
+The approved QNL production-style configs use database `qnl_format_registry`; see [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) for the exact setup and connectivity check.
 
 MongoDB is selected through `RegistryStore`; preservation business logic must not depend directly on `pymongo`.
 
@@ -244,40 +250,39 @@ Read [`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md).
 
 ## 10. Run one source at a time
 
-### NARA
+The **approved clean-room production sequence** is documented in [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) and should be used when building the shared `qnl_format_registry` database from scratch.
 
-```powershell
-python -m registry_builder run `
-  --config config\sources.nara.mongodb.example.json `
-  --workdir work `
-  --out output\nara
+At a high level the sequence is:
+
+```text
+PRONOM generic source run
+ -> verify
+LOC FDD generic source run
+ -> LOC crosswalk/approved bridge where available
+ -> LOC criterion-claim backfill
+ -> verify
+NARA generic source run
+ -> NARA governed risk backfill
+ -> verify
+DPC generic source run
+ -> DPC governed risk backfill
+ -> verify
+Wikidata frozen acquisition
+ -> initial relationship backfill
+ -> independent verifier
 ```
 
-### PRONOM
+The following configs are the current production/source-isolation configs used by that runbook:
 
-```powershell
-python -m registry_builder run `
-  --config config\sources.pronom.mongodb.example.json `
-  --workdir work `
-  --out output\pronom
-```
-
-### Library of Congress FDD
-
-```powershell
-python -m registry_builder run `
-  --config config\sources.loc.mongodb.example.json `
-  --workdir work `
-  --out output\loc
-```
-
-### QNL institution evidence
-
-```powershell
-python -m registry_builder run `
-  --config config\qnl-institution-format-evidence.mongodb.example.json `
-  --workdir work `
-  --out output\qnl-evidence
+```text
+config/sources.qnl.pronom-only.json
+config/sources.qnl.loc-sustainability.json
+config/sources.qnl.loc-crosswalk-only.json
+config/sources.qnl.loc-crosswalk-bridge.json
+config/sources.qnl.nara-only.json
+config/sources.qnl.dpc-only.json
+config/wikidata_relationship_backfill.production.json
+config/wikidata_refresh.production.json
 ```
 
 The current canonical view is recomputed from active source contributions; earlier source records remain for provenance/history.
@@ -286,16 +291,7 @@ Read [`INCREMENTAL_SOURCE_UPDATES.md`](INCREMENTAL_SOURCE_UPDATES.md).
 
 ## 11. Periodic source refresh
 
-A monitoring configuration may rerun approved sources periodically:
-
-```powershell
-python -m registry_builder run `
-  --config config\sources.criterion-mapping.mongodb.example.json `
-  --workdir work `
-  --out output
-```
-
-However, rerunning online does not necessarily mean “use newest release.” Release behavior is adapter/config-specific.
+A monitoring configuration may rerun approved sources periodically, but rerunning online does not necessarily mean “use newest release.” Release behavior is adapter/config-specific.
 
 For example, a pinned NARA config stays pinned. For NARA follow-latest monitoring use:
 
@@ -310,7 +306,9 @@ pinned/reviewed production baseline
 follow-latest monitoring configuration
 ```
 
-See:
+Wikidata is an important special case: after the initial approved relationship backfill, future updates use the guarded `wikidata_refresh` preflight/apply workflow rather than an ordinary uncontrolled source refresh. See [`WIKIDATA_PRODUCTION_INTEGRATION.md`](WIKIDATA_PRODUCTION_INTEGRATION.md) and [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md).
+
+See also:
 
 - [`NARA_ADAPTER_REQUIREMENTS.md`](NARA_ADAPTER_REQUIREMENTS.md)
 - [`../../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
@@ -319,10 +317,21 @@ See:
 
 Use adapter-supported local-file modes when automatic acquisition is unavailable or a release must be staged manually.
 
+For the approved PRONOM/LOC/NARA/DPC/Wikidata procedures, [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) lists:
+
+```text
+exact upstream file/endpoint
+recommended inputs/<source>/ location
+local config key
+copy/edit example
+normal command after staging the file
+```
+
 Do not create one-off parsers outside the adapter framework; retain snapshot/provenance behavior.
 
 Read:
 
+- [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md)
 - [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md)
 - [`NARA_LOCAL_FILES.md`](NARA_LOCAL_FILES.md)
 - [`SOURCE_RETRIEVAL_AND_FALLBACKS.md`](SOURCE_RETRIEVAL_AND_FALLBACKS.md)
@@ -422,14 +431,16 @@ source
  -> risk-manager verification
 ```
 
-Start with [`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
+Start with:
 
-For adapter implementation:
+1. the "Adding a new dataset/source" section of [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) for the operational/authority checklist;
+2. [`../../docs/HOW_TO_ADD_A_SOURCE.md`](../../docs/HOW_TO_ADD_A_SOURCE.md) for the repository-wide onboarding route;
+3. [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md) for structured adapter/config patterns;
+4. [`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) when the source contributes criterion evidence;
+5. [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md) for implementation details;
+6. [`IDENTIFIER_RECONCILIATION.md`](IDENTIFIER_RECONCILIATION.md) before allowing any new identifier to affect canonical identity.
 
-1. [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md)
-2. [`ADAPTER_IMPLEMENTATION_GUIDE.md`](ADAPTER_IMPLEMENTATION_GUIDE.md)
-3. [`ADAPTER_REFERENCE.md`](ADAPTER_REFERENCE.md)
-4. [`IDENTIFIER_RECONCILIATION.md`](IDENTIFIER_RECONCILIATION.md)
+The future TODO is to make post-ingest criterion/risk/relationship processors config-driven so a new dataset can use the same generic operator command without adding source-specific pipeline branches. That roadmap is tracked in [`NEXT_STEPS.md`](NEXT_STEPS.md).
 
 ## 19. Add a storage backend
 
@@ -497,26 +508,3 @@ python -m preservation_risk_manager analyze-format `
 ```
 
 The risk manager auto-discovers the sibling claim export.
-
-## 21. Tests
-
-```powershell
-cd qnl_format_registry_builder
-python -m pip install -e ".[dev,mongo]"
-pytest -q
-```
-
-For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report.
-
-## Deeper references
-
-- [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md)
-- [`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
-- [`STORAGE_AND_EXPORT_CONFIG.md`](STORAGE_AND_EXPORT_CONFIG.md)
-- [`MONGODB_STORAGE_SCHEMA.md`](MONGODB_STORAGE_SCHEMA.md)
-- [`IDENTIFIER_RECONCILIATION.md`](IDENTIFIER_RECONCILIATION.md)
-- [`INCREMENTAL_SOURCE_UPDATES.md`](INCREMENTAL_SOURCE_UPDATES.md)
-- [`criterion_mapping_workflow.md`](criterion_mapping_workflow.md)
-- [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
