@@ -135,6 +135,12 @@ def test_nara_backfill_source_replacement_supersedes_previous_projection():
         {"source_id": NARA, "source_type": NARA, "source_record_id": "NF00999"}
     ]
     row["external_hazard"] = [moderate | {"source_id": NARA}]
+    # Simulate the canonical rebuilt by the refreshed source pipeline: old
+    # materialized NARA claims disappear from the canonical view, while DPC stays.
+    row["risk_assessments"] = [
+        item for item in row.get("risk_assessments") or []
+        if item.get("source_id") != NARA
+    ]
     store.upsert_canonical_format(row)
 
     report = run_nara_risk_backfill(store=store)
