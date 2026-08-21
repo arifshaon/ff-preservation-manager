@@ -3,7 +3,7 @@ name = "qnl-format-registry-builder"
 version = "0.1.0"
 description = "Repeatable pipeline for building and updating a local file-format registry from authoritative sources."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["PyYAML>=6.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
