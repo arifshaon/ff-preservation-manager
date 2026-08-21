@@ -28,8 +28,12 @@ def _identifier_claims(record: RawFormatRecord, identifier_rules: dict | None = 
     for value in record.wikidata_ids:
         claims.append(Identifier("wikidata", value, record.source_type, is_verified_identifier("wikidata", record.source_type, rules), record.source_record_id))
 
-    out: list[Identifier] = []
-    seen: set[tuple[str, str, str, bool, str | None]] = set()
+    # The same identifier may arrive twice: once as an explicit generic claim and
+    # once through a legacy typed compatibility field such as `loc_ids`. Treat
+    # those as one logical claim. If either copy is verified, retain verified=True
+    # rather than keeping parallel verified/unverified duplicates where ordering
+    # could accidentally downgrade an authority-backed assertion.
+    consolidated: dict[tuple[str, str, str, str | None], Identifier] = {}
     for claim in claims:
         kind = claim.kind.strip().lower()
         value = normalize_identifier_value(kind, claim.value)
@@ -38,12 +42,11 @@ def _identifier_claims(record: RawFormatRecord, identifier_rules: dict | None = 
         source = claim.source or record.source_type
         source_record_id = claim.source_record_id or record.source_record_id
         verified = bool(claim.verified) or is_verified_identifier(kind, record.source_type, rules)
-        key = (kind, value, source, verified, source_record_id)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(Identifier(kind, value, source, verified, source_record_id))
-    return out
+        key = (kind, value, source, source_record_id)
+        existing = consolidated.get(key)
+        if existing is None or (verified and not existing.verified):
+            consolidated[key] = Identifier(kind, value, source, verified, source_record_id)
+    return list(consolidated.values())
 
 
 def normalize_record(record: RawFormatRecord, *, identifier_rules: dict | None = None) -> RawFormatRecord:
