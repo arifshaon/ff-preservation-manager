@@ -18,7 +18,29 @@ SEMANTIC_RISK_LABELS: dict[str, str] = {
     "critical": "Critical concern",
 }
 
-SYNTHESIS_METHOD = "semantic_risk_synthesis_v1"
+# Lower rank means more specific to the canonical format being assessed.
+# exact_format and format_version are intentionally the same headline tier:
+# both are specific enough to outrank family/group/context assertions.
+SCOPE_SPECIFICITY_ORDER: dict[str, int] = {
+    "exact_format": 0,
+    "format_version": 0,
+    "institutional_format": 0,
+    "format_family": 1,
+    "format_group": 2,
+    "content_type": 3,
+    "contextual": 4,
+}
+
+SCOPE_TIER_LABELS: dict[int, str] = {
+    0: "exact_or_version",
+    1: "format_family",
+    2: "format_group",
+    3: "content_type",
+    4: "contextual",
+    5: "unspecified",
+}
+
+SYNTHESIS_METHOD = "semantic_risk_synthesis_v2_scope_aware"
 
 
 def normalize_semantic_level(value: Any) -> str | None:
@@ -293,14 +315,35 @@ def _contributor_summary(assessment: dict[str, Any]) -> dict[str, Any]:
     return {key: assessment.get(key) for key in keys if assessment.get(key) is not None}
 
 
-def synthesize_risk_assessments(assessments: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Create a transparent semantic decision-support view.
+def _scope_rank(assessment: dict[str, Any]) -> int:
+    scope = str(assessment.get("scope_type") or "").strip()
+    return SCOPE_SPECIFICITY_ORDER.get(scope, 5)
 
-    Source-native assessments are never averaged or overwritten. The synthesis
-    uses only assessments that already carry an explicit semantic level and
-    selects the highest semantic concern as a conservative upper bound. This is
-    intentionally simple and auditable; source-specific vocabulary mapping must
-    happen before this function is called.
+
+def _source_text(assessment: dict[str, Any]) -> str:
+    source = assessment.get("source_label") or assessment.get("source_id") or assessment.get("source_type") or "unknown source"
+    native = assessment.get("native_label")
+    semantic_level = normalize_semantic_level(assessment.get("semantic_level"))
+    semantic = SEMANTIC_RISK_LABELS[semantic_level] if semantic_level else "Unmapped concern"
+    if native and str(native).strip().lower() != semantic.lower():
+        return f"{source}: {native} -> {semantic}"
+    return f"{source}: {native or semantic}"
+
+
+def synthesize_risk_assessments(assessments: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Create a transparent scope-aware semantic decision-support view.
+
+    Source-native assessments are never averaged or overwritten. Only assessments
+    with an explicit semantic level are considered. The headline semantic risk is
+    calculated from the most specific available assessment scope. Broader family,
+    group, content-type, or contextual assessments remain visible as contextual
+    contributors and cannot silently override a more specific exact-format or
+    format-version assessment.
+
+    Within the selected scope tier, the highest semantic concern is retained as a
+    conservative upper bound. This keeps the method auditable while preventing a
+    broad risk statement such as "PDF is Vulnerable" from automatically raising a
+    separately assessed exact PDF/A version from Low to Moderate.
     """
 
     retained = dedupe_risk_assessments(assessments)
@@ -319,48 +362,72 @@ def synthesize_risk_assessments(assessments: Iterable[dict[str, Any]]) -> dict[s
             "confidence": "low",
             "source_divergence": False,
             "scope_divergence": False,
+            "cross_scope_level_divergence": False,
             "contributors": [],
+            "contextual_contributors": [],
             "explanation": (
                 "No source assessment has been mapped to the shared semantic risk scale. "
                 "Source-native assessments remain available individually."
             ),
         }
 
-    levels = [normalize_semantic_level(item.get("semantic_level")) for item in scored]
-    ranks = [SEMANTIC_RISK_ORDER[level] for level in levels if level is not None]
-    selected_rank = max(ranks)
+    selected_scope_rank = min(_scope_rank(item) for item in scored)
+    primary = [item for item in scored if _scope_rank(item) == selected_scope_rank]
+    contextual = [item for item in scored if _scope_rank(item) > selected_scope_rank]
+
+    primary_levels = [normalize_semantic_level(item.get("semantic_level")) for item in primary]
+    primary_ranks = [SEMANTIC_RISK_ORDER[level] for level in primary_levels if level is not None]
+    selected_rank = max(primary_ranks)
     selected_level = next(level for level, rank in SEMANTIC_RISK_ORDER.items() if rank == selected_rank)
-    distinct_levels = sorted(set(level for level in levels if level is not None), key=SEMANTIC_RISK_ORDER.get)
-    spread = max(ranks) - min(ranks)
-    source_divergence = len(distinct_levels) > 1
+    distinct_primary_levels = sorted(
+        set(level for level in primary_levels if level is not None),
+        key=SEMANTIC_RISK_ORDER.get,
+    )
+    primary_spread = max(primary_ranks) - min(primary_ranks)
+    source_divergence = len(distinct_primary_levels) > 1
 
-    scope_types = {str(item.get("scope_type")) for item in scored if item.get("scope_type")}
-    scope_divergence = len(scope_types) > 1
+    all_scope_types = {str(item.get("scope_type")) for item in scored if item.get("scope_type")}
+    scope_divergence = len(all_scope_types) > 1
 
-    if len(scored) == 1:
+    contextual_levels = sorted(
+        {
+            level
+            for item in contextual
+            if (level := normalize_semantic_level(item.get("semantic_level"))) is not None
+        },
+        key=SEMANTIC_RISK_ORDER.get,
+    )
+    cross_scope_level_divergence = bool(
+        contextual_levels
+        and any(level not in set(distinct_primary_levels) for level in contextual_levels)
+    )
+
+    if len(primary) == 1:
         confidence = "medium"
-    elif spread == 0:
+    elif primary_spread == 0:
         confidence = "high"
-    elif spread == 1:
+    elif primary_spread == 1:
         confidence = "medium"
     else:
         confidence = "low"
 
-    contributor_text: list[str] = []
-    for item in scored:
-        source = item.get("source_label") or item.get("source_id") or item.get("source_type") or "unknown source"
-        native = item.get("native_label")
-        semantic = SEMANTIC_RISK_LABELS[normalize_semantic_level(item.get("semantic_level"))]
-        if native and str(native).strip().lower() != semantic.lower():
-            contributor_text.append(f"{source}: {native} -> {semantic}")
-        else:
-            contributor_text.append(f"{source}: {native or semantic}")
+    primary_text = "; ".join(_source_text(item) for item in primary)
+    selected_scope_types = sorted(
+        {str(item.get("scope_type") or "unspecified") for item in primary}
+    )
+    selected_scope_tier = SCOPE_TIER_LABELS.get(selected_scope_rank, "unspecified")
 
     explanation = (
         f"{SEMANTIC_RISK_LABELS[selected_level]} selected as a conservative semantic upper bound from "
-        f"{len(scored)} retained assessment(s): " + "; ".join(contributor_text) + ". "
-        "Native source assessments are retained separately and are not numerically averaged."
+        f"the most specific available scope tier ({selected_scope_tier}) using {len(primary)} assessment(s): "
+        f"{primary_text}. Native source assessments are retained separately and are not numerically averaged."
     )
+    if contextual:
+        contextual_text = "; ".join(_source_text(item) for item in contextual)
+        explanation += (
+            f" {len(contextual)} broader-scope assessment(s) are retained as context and do not override the "
+            f"headline result: {contextual_text}."
+        )
     if scope_divergence:
         explanation += " Contributing assessments have different declared scopes; inspect scope_type/scope_name before operational use."
 
@@ -369,12 +436,18 @@ def synthesize_risk_assessments(assessments: Iterable[dict[str, Any]]) -> dict[s
         "semantic_level": selected_level,
         "semantic_label": SEMANTIC_RISK_LABELS[selected_level],
         "method": SYNTHESIS_METHOD,
-        "basis": "conservative_semantic_upper_bound",
+        "basis": "scope_aware_conservative_semantic_upper_bound",
         "confidence": confidence,
         "source_divergence": source_divergence,
-        "semantic_spread": spread,
-        "contributing_levels": distinct_levels,
+        "semantic_spread": primary_spread,
+        "contributing_levels": distinct_primary_levels,
         "scope_divergence": scope_divergence,
-        "contributors": [_contributor_summary(item) for item in scored],
+        "cross_scope_level_divergence": cross_scope_level_divergence,
+        "selected_scope_rank": selected_scope_rank,
+        "selected_scope_tier": selected_scope_tier,
+        "selected_scope_types": selected_scope_types,
+        "contextual_levels": contextual_levels,
+        "contributors": [_contributor_summary(item) for item in primary],
+        "contextual_contributors": [_contributor_summary(item) for item in contextual],
         "explanation": explanation,
     }
