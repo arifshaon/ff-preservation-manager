@@ -1,0 +1,6 @@
+{
+  "storage_config": "sources.qnl.nara-only.json",
+  "replace_source_claims": true,
+  "materialize_canonical": true,
+  "notes": "Production NARA risk backfill. Source-native NARA risk assessments are projected from verified canonical NARA identities plus the latest persisted NARA source run. Writes are allowed only when the strict migration gate passes."
+}
