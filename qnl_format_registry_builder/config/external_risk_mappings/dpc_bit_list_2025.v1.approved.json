@@ -1,0 +1,58 @@
+{
+  "mapping_version": "dpc-bit-list-2025-v1",
+  "source_id": "dpc_bit_list_2025",
+  "source_type": "dpc_bit_list",
+  "description": "Reviewed mappings from DPC Global Bit List 2025 evidence entries to existing canonical format records. DPC does not create canonical identities. Source-native classifications remain unchanged; mappings only declare scope and target association.",
+  "rules": [
+    {
+      "rule_id": "dpc-2025-pdf-family",
+      "status": "approved",
+      "source_id": "dpc_bit_list_2025",
+      "source_type": "dpc_bit_list",
+      "source_record_id": "Lg7_RYL0UI",
+      "source_slug": "pdf",
+      "scope_type": "format_group",
+      "scope_name": "PDF",
+      "target_selector": {
+        "identifier_values": {
+          "extension": ["pdf"]
+        },
+        "preferred_name_regex": "(?i)(PDF|Portable Document Format)"
+      },
+      "review_note": "DPC explicitly states that this entry covers PDF 1.1-2.0, PDF/A, PDF/X and PDF/E. The broad DPC Vulnerable assessment is therefore retained with format_group scope on matching PDF canonical records rather than treated as an exact version assessment."
+    },
+    {
+      "rule_id": "dpc-2025-native-cloud-formats",
+      "status": "contextual_only",
+      "source_id": "dpc_bit_list_2025",
+      "source_type": "dpc_bit_list",
+      "source_record_id": "NltYdUaHkB",
+      "source_slug": "native-cloud-formats",
+      "scope_type": "contextual",
+      "scope_name": "Native Cloud Formats",
+      "review_note": "Platform/service condition spanning cloud-native content; do not project automatically to individual file-format identities."
+    },
+    {
+      "rule_id": "dpc-2025-legacy-video-files",
+      "status": "contextual_only",
+      "source_id": "dpc_bit_list_2025",
+      "source_type": "dpc_bit_list",
+      "source_record_id": "D_HNpwJ3On",
+      "source_slug": "legacy-video-files",
+      "scope_type": "format_group",
+      "scope_name": "Legacy Video Files",
+      "review_note": "Broad audiovisual group spanning multiple containers/codecs and carrier/DRM conditions; retain as contextual evidence until narrower mappings are explicitly reviewed."
+    },
+    {
+      "rule_id": "dpc-2025-email",
+      "status": "contextual_only",
+      "source_id": "dpc_bit_list_2025",
+      "source_type": "dpc_bit_list",
+      "source_record_id": "N5vlOxZcVm",
+      "source_slug": "email",
+      "scope_type": "format_group",
+      "scope_name": "Email",
+      "review_note": "Covers messages, threads, mailboxes, servers and attachments rather than one exact format; do not project automatically to EML/MBOX/PST/MSG or other individual formats."
+    }
+  ]
+}
