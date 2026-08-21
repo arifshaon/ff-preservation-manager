@@ -10,7 +10,7 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "PRONOM-only persistent ingest into MongoDB."
+    "notes": "Third-ingest validation writes to MongoDB only. Existing successful DPC and NARA source contributions are reused from persistent storage."
   },
   "method_profiles": {
     "enabled": false
@@ -27,7 +27,10 @@
       "type": "pronom_registry",
       "enabled": true,
       "required": true,
-      "notes": "Persistent PRONOM ingest into the shared QNL registry."
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
+      "notes": "Third persistent integration source. PRONOM provides authoritative PUID identity records. The pipeline reuses the latest successful DPC and NARA source contributions from MongoDB before reconciliation."
     }
   ]
 }
