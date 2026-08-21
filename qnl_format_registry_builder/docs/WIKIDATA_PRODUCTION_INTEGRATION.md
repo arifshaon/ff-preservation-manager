@@ -1,6 +1,8 @@
 # Wikidata production integration
 
-Status: production evidence/relationship model approved and first backfill verified on 2026-08-21.
+Status: **production-ready under the controlled evidence/relationship refresh workflow** as of 2026-08-21.
+
+The production evidence model, governed relationship persistence, rebuild survival, independent verifier, drift-gated refresh path and deterministic changed-source simulation have all been validated against the current production registry.
 
 ## Frozen production contract
 
@@ -70,7 +72,7 @@ Governed authority cross-reference projection:
 
 ## Adapters
 
-`wikidata_sparql` remains the low-level acquisition/review adapter. It implements the frozen policy-v3 population, resumable staged acquisition, VALUES batching and offline replay.
+`wikidata_sparql` remains the low-level acquisition/review adapter. It implements the frozen policy-v3 population, resumable staged acquisition, VALUES batching and offline replay. Its extraction boundary remains disabled so it cannot accidentally participate in normal reconciliation.
 
 `wikidata_sparql_evidence` is the production extraction adapter. It inherits the acquisition behavior unchanged, then projects every acquired QID into a `RawFormatRecord` with:
 
@@ -124,7 +126,11 @@ The independent verifier returned `status: ok` with no errors and confirmed:
 
 ## Controlled refresh workflow
 
-Wikidata refresh is an explicit governed operation, not part of every normal registry build. The production command is:
+Wikidata refresh is an explicit governed operation, not part of every normal registry build.
+
+### 1. Preflight
+
+Run without `--apply`:
 
 ```powershell
 python -m registry_builder.wikidata_refresh `
@@ -133,57 +139,7 @@ python -m registry_builder.wikidata_refresh `
   --out out/wikidata-refresh-preflight.json
 ```
 
-Without `--apply`, the command acquires (or with `--offline`, replays) the policy-v3 snapshot and performs a **no-write preflight**. It:
-
-1. requires the current persisted Wikidata layer to pass the independent verifier;
-2. extracts every acquired QID through `wikidata_sparql_evidence`;
-3. confirms every record remains `evidence_only` and carries no risk assessment;
-4. recomputes all copied PRONOM/LOC/NARA authority relationships against the current canonical registry;
-5. calculates relationship additions, removals and unchanged claims by semantic claim ID;
-6. blocks unresolved copied authority identifiers;
-7. blocks any identity creation, identity merge or identifier-promotion signal;
-8. applies configured population, relationship-edge and claim-turnover drift gates.
-
-The production drift thresholds are intentionally review gates rather than permanent expected counts. A future valid Wikidata update may change the 15,479-record or 2,856-edge baseline, but a large change must be reviewed rather than silently accepted.
-
-When the preflight returns:
-
-```text
-status = ready
-gate_passed = true
-```
-
-apply the same controlled workflow with:
-
-```powershell
-python -m registry_builder.wikidata_refresh `
-  --config config/wikidata_refresh.production.json `
-  --workdir work `
-  --apply `
-  --out out/wikidata-refresh-production.json
-```
-
-The apply phase uses the reviewed preflight invariants to:
-
-1. persist the new evidence-only source records;
-2. supersede relationship claims no longer present;
-3. persist the new current relationship claim set;
-4. rematerialize current relationships onto existing canonicals;
-5. preserve the acquired source snapshot provenance;
-6. independently verify the resulting persistent registry state.
-
-A successful applied refresh must finish with:
-
-```text
-status = completed
-verification.status = ok
-```
-
-If the command returns `blocked`, `write_failed` or `verification_failed`, do not rerun it blindly. Inspect the reported gate or verification errors first.
-
-### Offline preflight
-
-To test the currently cached acquisition without contacting Wikidata or writing the registry:
+Or replay the cached acquisition without contacting Wikidata:
 
 ```powershell
 python -m registry_builder.wikidata_refresh `
@@ -193,27 +149,176 @@ python -m registry_builder.wikidata_refresh `
   --out out/wikidata-refresh-preflight-offline.json
 ```
 
-### Deliberately restarting acquisition
+The preflight:
 
-An interrupted staged acquisition resumes its frozen population and cached batches. Use `--restart` only when a deliberately fresh population discovery is required:
+1. requires the current persisted Wikidata layer to pass the independent verifier;
+2. extracts every acquired QID through `wikidata_sparql_evidence`;
+3. confirms every record remains `evidence_only` and carries no risk assessment;
+4. recomputes copied PRONOM/LOC/NARA relationships against the current canonical registry;
+5. calculates relationship additions, removals and unchanged claims by semantic claim ID;
+6. blocks unresolved copied authority identifiers;
+7. blocks any identity creation, identity merge or identifier-promotion signal;
+8. applies configured population, relationship-edge and claim-turnover drift gates.
+
+Proceed only when:
+
+```text
+status = ready
+gate_passed = true
+```
+
+### 2. Apply
+
+After review of a ready preflight:
 
 ```powershell
 python -m registry_builder.wikidata_refresh `
   --config config/wikidata_refresh.production.json `
   --workdir work `
-  --restart `
-  --out out/wikidata-refresh-preflight.json
+  --apply `
+  --out out/wikidata-refresh-production.json
 ```
 
-A restarted acquisition is still preflight-only unless `--apply` is also supplied.
+The apply phase:
+
+1. persists the new evidence-only source records;
+2. supersedes relationship claims no longer present;
+3. persists the new current relationship claim set;
+4. rematerializes current relationships onto existing canonicals;
+5. preserves the acquired source snapshot provenance;
+6. independently verifies the resulting persistent registry state.
+
+Success requires:
+
+```text
+status = completed
+verification.status = ok
+```
+
+If the command returns `blocked`, `write_failed` or `verification_failed`, do not rerun it blindly. Inspect the reported gate or verification errors first.
+
+## Production drift gates
+
+The approved 2026-08-21 counts are a verified baseline, not permanent expected counts. Future legitimate Wikidata changes are allowed within controlled thresholds.
+
+Current review gates are:
+
+- population change: maximum 2,000 records and 10%;
+- relationship-edge change: maximum 1,000 edges and 20%;
+- relationship claim turnover: maximum 750 additions/removals and 25%;
+- unresolved copied authority identifiers: maximum 0.
+
+The refresh is also blocked if the persisted baseline is not independently verifiable or if any canonical creation, merge, copied-identifier promotion, risk-generation or criterion-generation signal is observed.
+
+## Verified no-change preflight
+
+The production offline preflight was run against the same cached source snapshot used for the first production backfill.
+
+Observed:
+
+```text
+status: ready
+gate_passed: true
+population drift: 0
+relationship-edge drift: 0
+claim turnover: 0
+unmatched authority claims: 0
+```
+
+The source SHA-256 remained:
+
+```text
+a6c1e598b567dd89557a67f186e99bf8486cddf40615384bbe998e450a1810df
+```
+
+This proved the refresh workflow recognizes a no-change acquisition without performing a production write.
+
+## Verified changed-source simulation
+
+A deterministic read-only simulation was then run against the **real current production registry**.
+
+The simulation command has no apply mode. It fingerprints the relevant registry collections before and after the exercise, clones the cached acquisition to a temporary CSV, mutates exactly one current single-edge QID, and runs the normal refresh preflight against that temporary snapshot.
+
+Simulation mutation:
+
+```text
+QID: Q2078
+removed field: locFdd
+removed identifier: fdd000020
+```
+
+The mutation was selected from the 2,240 QIDs with exactly one governed relationship so the expected relationship delta was deterministic.
+
+Expected and observed result:
+
+```text
+Wikidata records                 15479 -> 15479
+relationship edges               2856 -> 2855
+QIDs with relationships           2519 -> 2518
+canonicals with relationships     2793 -> 2792
+matched authority claims          3266 -> 3265
+LOC matched claims                 295 -> 294
+single-target QIDs                2240 -> 2239
+no-authority QIDs                12960 -> 12961
+canonical formats                 3372 -> 3372
+```
+
+Safety results:
+
+```text
+status: ok
+errors: []
+gate_passed: true
+relationship additions: 0
+relationship removals: 1
+claim turnover: 1
+unmatched authority claims: 0
+identity_merges_performed: 0
+canonical_formats_created: 0
+canonical_identifiers_promoted: 0
+registry_writes_performed: 0
+registry_fingerprint_unchanged: true
+```
+
+This demonstrates that an upstream Wikidata authority-reference removal is detected as a governed evidence/relationship change while canonical identity remains untouched.
+
+The reproducible simulation command is:
+
+```powershell
+python -m registry_builder.wikidata_refresh_simulation `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --out-csv out/wikidata-refresh-simulated-change.csv `
+  --out out/wikidata-refresh-simulation.json
+```
+
+## Test gates completed
+
+The implemented production path has passed focused suites covering:
+
+- acquisition population policy and resumable VALUES batching;
+- production evidence-only extraction;
+- inability of Wikidata evidence rows to create/merge canonical identity;
+- relationship preview semantics and multi-target context;
+- governed relationship persistence;
+- supersession of obsolete claims;
+- materialization idempotence and orphan handling;
+- rebuild survival through unrelated source refreshes;
+- independent production verification;
+- no-change refresh preflight;
+- changed relationship refresh/apply behavior;
+- excessive-drift blocking before writes;
+- deterministic changed-source simulation with registry fingerprint protection.
+
+The final focused refresh/simulation suite passed 5/5 tests, after the broader integration suites passed 11/11, 28/28 and 20/20 at their respective gates.
 
 ## General pipeline boundary
 
-Do not add `wikidata_sparql_evidence` to the ordinary `sources.qnl.json` source loop. Wikidata acquisition and governed relationship replacement must remain one coordinated refresh transaction boundary.
+Do not add `wikidata_sparql_evidence` to the ordinary `sources.qnl.json` source loop.
 
-The evidence-only Wikidata source records already persisted by the verified backfill remain available to incremental registry rebuilding, and current `source_relationship_claims` are replayed after normal reconciliation. Therefore ordinary source refreshes can preserve the current Wikidata evidence layer without triggering a new WDQS acquisition.
+Wikidata acquisition and governed relationship replacement must remain one coordinated refresh transaction boundary. The evidence-only Wikidata source records already persisted by the verified backfill remain available to incremental registry rebuilding, and current `source_relationship_claims` are replayed after normal reconciliation.
 
-Use `wikidata_refresh` when the Wikidata source itself is intentionally refreshed.
+Therefore ordinary source refreshes preserve the current Wikidata evidence layer without triggering a new WDQS acquisition. Use `wikidata_refresh` only when the Wikidata source itself is intentionally refreshed.
 
 ## Legacy backfill and independent verification
 
@@ -234,3 +339,23 @@ python -m registry_builder.wikidata_relationship_verify `
 ```
 
 The standalone verifier must return `status: ok` before a refreshed Wikidata relationship layer is accepted.
+
+## Production decision
+
+The Wikidata implementation is now considered complete for the current registry architecture:
+
+```text
+acquisition            production-ready
+source projection      production-ready (evidence-only)
+relationship mapping   production-ready
+claim persistence      production-ready
+claim supersession     production-ready
+rebuild survival       production-ready
+refresh drift gates    production-ready
+independent verifier   production-ready
+changed-source test    production-ready
+canonical identity     deliberately NOT owned by Wikidata
+risk assessment        deliberately NOT supplied by Wikidata
+```
+
+Future work should be driven by an actual source-policy change, new authority namespace, observed drift, or a concrete operational requirement rather than by further expansion of the Wikidata identity model.
