@@ -72,11 +72,61 @@ def test_policy_approval_selects_only_authority_confirmed_bridge_candidates():
     assert rule["puid_verified"] is False
 
 
+def test_policy_excludes_broad_family_and_all_rows_in_many_to_one_puid_group():
+    verification = [
+        {
+            "source_record_id": "fdd-family:2",
+            "title": "EPUB File Format Family",
+            "fdd_id": "fdd-family",
+            "puid": "fmt/483",
+            "status": "bridge_candidate_authority_confirmed",
+        },
+        {
+            "source_record_id": "fdd-a:3",
+            "title": "Example Format A",
+            "fdd_id": "fdd-a",
+            "puid": "fmt/720",
+            "status": "bridge_candidate_authority_confirmed",
+        },
+        {
+            "source_record_id": "fdd-b:4",
+            "title": "Example Format B",
+            "fdd_id": "fdd-b",
+            "puid": "fmt/720",
+            "status": "bridge_candidate_authority_confirmed",
+        },
+        {
+            "source_record_id": "fdd-c:5",
+            "title": "Unique Exact Format",
+            "fdd_id": "fdd-c",
+            "puid": "fmt/999",
+            "status": "bridge_candidate_authority_confirmed",
+        },
+    ]
+    review = [
+        {"source_record_id": item["source_record_id"], "title": item["title"], "snapshot_sha256": "abc"}
+        for item in verification
+    ]
+
+    mapping = build_bridge_mapping(verification, review, mapping_date="20260713")
+
+    assert mapping["approved_rule_count"] == 1
+    assert mapping["rules"][0]["fdd_id"] == "fdd-c"
+    assert mapping["excluded_status_counts"] == {
+        "broad_scope_review": 1,
+        "many_to_one_scope_review": 2,
+    }
+    assert mapping["excluded_relationship_count"] == 3
+    many = [item for item in mapping["excluded_relationships"] if item["status"] == "many_to_one_scope_review"]
+    assert len(many) == 2
+    assert all(item["related_fdd_ids"] == ["fdd-a", "fdd-b"] for item in many)
+
+
 def test_approved_bridge_keeps_puid_unverified_but_reconciles_with_authorities(tmp_path):
     mapping = {
-        "mapping_version": "loc_pronom_direct_single_authority_v1-20260713",
+        "mapping_version": "loc_pronom_one_to_one_authority_v2-20260713",
         "mapping_date": "20260713",
-        "approval_policy": "loc_pronom_direct_single_authority_v1",
+        "approval_policy": "loc_pronom_one_to_one_authority_v2",
         "rules": [
             {
                 "rule_id": "bridge:fdd000001:fmt/6",
