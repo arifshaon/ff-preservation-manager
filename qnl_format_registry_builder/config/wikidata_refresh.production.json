@@ -1,0 +1,22 @@
+{
+  "storage_config": "sources.qnl.json",
+  "require_verified_baseline": true,
+  "max_unmatched_authority_claims": 0,
+  "source": {
+    "id": "wikidata_file_formats",
+    "type": "wikidata_sparql_evidence",
+    "batch_size": 200,
+    "population_page_size": 500,
+    "retries": 5,
+    "timeout_seconds": 90
+  },
+  "drift_gates": {
+    "max_population_change_absolute": 2000,
+    "max_population_change_fraction": 0.10,
+    "max_relationship_edge_change_absolute": 1000,
+    "max_relationship_edge_change_fraction": 0.20,
+    "max_claim_turnover_absolute": 750,
+    "max_claim_turnover_fraction": 0.25
+  },
+  "notes": "Controlled Wikidata refresh. Acquisition uses the production evidence-only adapter and frozen population policy. A verified current baseline is required. The refresh is blocked if copied authority identifiers become unresolved, identity/risk invariants fail, or population/relationship drift exceeds the configured review thresholds. Run without --apply for preflight; use --apply only after reviewing a ready preflight."
+}
