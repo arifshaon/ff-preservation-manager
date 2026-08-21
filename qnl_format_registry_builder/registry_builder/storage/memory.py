@@ -17,6 +17,7 @@ _COLLECTION_ATTRS = {
     "trend_observations": "trend_observations",
     "assessment_changes": "assessment_changes",
     "criterion_claims": "criterion_claims",
+    "risk_assessment_claims": "risk_assessment_claims",
 }
 
 
@@ -41,6 +42,7 @@ class MemoryRegistryStore(RegistryStore):
         self.trend_observations: list[dict[str, Any]] = []
         self.assessment_changes: list[dict[str, Any]] = []
         self.criterion_claims: list[dict[str, Any]] = []
+        self.risk_assessment_claims: list[dict[str, Any]] = []
 
     def upsert(self, collection: str, key: str | None, doc: dict[str, Any]) -> str:
         stored = deepcopy(doc)
