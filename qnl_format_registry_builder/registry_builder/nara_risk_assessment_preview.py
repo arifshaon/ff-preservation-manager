@@ -6,7 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from registry_builder.risk_synthesis import risk_assessments_from_canonical_fields
+from registry_builder.risk_synthesis import (
+    risk_assessments_from_canonical_fields,
+    synthesize_risk_assessments,
+)
 from registry_builder.storage import create_store
 from registry_builder.storage.base import RegistryStore
 
@@ -45,13 +48,7 @@ def _latest_completed_source_run_id(store: RegistryStore, source_id: str) -> str
 
 
 def _nara_source_record_ids(row: dict[str, Any]) -> list[str]:
-    """Return NARA source refs present on a canonical record.
-
-    This is retained for auditing the legacy canonical view. It is deliberately
-    not used to create v2 claims because source_records may also contain related
-    cross-reference-only records.
-    """
-
+    """Return all NARA source refs retained on a canonical for legacy audit."""
     ids: list[str] = []
     for source in row.get("source_records") or []:
         if (
@@ -65,15 +62,12 @@ def _nara_source_record_ids(row: dict[str, Any]) -> list[str]:
 
 
 def _verified_canonical_nara_ids(row: dict[str, Any]) -> list[str]:
-    """Return NARA identities that actually contribute to canonical identity.
+    """Return NARA IDs that actually contribute to canonical identity.
 
-    A NARA source record may appear under ``source_records`` only because it has
-    an explicit cross-reference to a PUID owned by another canonical. Those
-    relationship-only refs must not become exact-format NARA risk claims. The
-    canonical ``identifiers.nara`` values, backed by verified NARA identifier
-    claims, are the authoritative record of identity-contributing NARA rows.
+    Relationship-only NARA refs under source_records are deliberately excluded.
+    Unverified strong-identifier assertions never enter identifiers.nara during
+    reconciliation, so that index is the preferred identity provenance surface.
     """
-
     ids: list[str] = []
     identifiers = row.get("identifiers") or {}
     if isinstance(identifiers, dict):
@@ -81,21 +75,18 @@ def _verified_canonical_nara_ids(row: dict[str, Any]) -> list[str]:
             if value:
                 ids.append(str(value))
 
-    # Compatibility fallback for older canonical rows that retained verified
-    # identifier claims but did not yet serialize the identifiers index.
+    # Compatibility fallback for older serialized canonicals.
     for claim in row.get("identifier_claims") or []:
         if claim.get("kind") != "nara" or claim.get("verified") is False:
             continue
         value = claim.get("value") or claim.get("source_record_id")
         if value:
             ids.append(str(value))
-
     return list(dict.fromkeys(ids))
 
 
 def _normalized_nara_assessments(row: dict[str, Any]) -> list[dict[str, Any]]:
-    """Project the existing legacy canonical NARA risk view for parity audit."""
-
+    """Project the existing legacy canonical NARA risk view for comparison."""
     assessments = risk_assessments_from_canonical_fields(
         explicit_assessments=row.get("risk_assessments") or [],
         external_hazard=row.get("external_hazard") or [],
@@ -118,8 +109,7 @@ def _source_native_nara_assessments(
     *,
     canonical_name: str | None,
 ) -> list[dict[str, Any]]:
-    """Build normalized NARA assessments from one persisted NARA source row."""
-
+    """Normalize risk directly from one persisted NARA source-native row."""
     source_record_id = str(source_row.get("source_record_id") or "")
     if not source_record_id:
         return []
@@ -143,13 +133,11 @@ def _source_native_nara_assessments(
     assessments = risk_assessments_from_canonical_fields(
         explicit_assessments=explicit,
         external_hazard=hazards,
-        source_records=[
-            {
-                "source_id": NARA_SOURCE_ID,
-                "source_type": NARA_SOURCE_TYPE,
-                "source_record_id": source_record_id,
-            }
-        ],
+        source_records=[{
+            "source_id": NARA_SOURCE_ID,
+            "source_type": NARA_SOURCE_TYPE,
+            "source_record_id": source_record_id,
+        }],
         canonical_name=canonical_name,
     )
     return [
@@ -172,6 +160,10 @@ def _assessment_signature(item: dict[str, Any]) -> tuple[Any, ...]:
         item.get("semantic_level"),
         item.get("scope_type") or "exact_format",
     )
+
+
+def _headline(item_list: list[dict[str, Any]]) -> str | None:
+    return synthesize_risk_assessments(item_list).get("semantic_level")
 
 
 def _claim_from_assessment(
@@ -206,8 +198,15 @@ def _claim_from_assessment(
     }
 
 
-def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
+def build_nara_risk_projection(
+    store: RegistryStore,
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, dict[str, Any]]]:
     canonical_rows = store.get_current_registry_view()
+    canonical_by_id = {
+        str(row.get("canonical_id")): row
+        for row in canonical_rows
+        if row.get("canonical_id")
+    }
     latest_run_id = _latest_completed_source_run_id(store, NARA_SOURCE_ID)
     latest_source_rows = store.query("source_records", {"source_id": NARA_SOURCE_ID})
     if latest_run_id:
@@ -227,7 +226,11 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
     missing_latest_source_records: list[dict[str, Any]] = []
     identity_linked_without_risk: list[dict[str, Any]] = []
     parity_mismatches: list[dict[str, Any]] = []
+    signature_set_parity_mismatches: list[dict[str, Any]] = []
+    headline_parity_mismatches: list[dict[str, Any]] = []
+    deduplication_only_mismatches: list[dict[str, Any]] = []
     source_targets: dict[str, set[str]] = defaultdict(set)
+    source_claim_counts: Counter[str] = Counter()
     legacy_missing_source_record_id: list[dict[str, Any]] = []
 
     for row in canonical_rows:
@@ -265,10 +268,7 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
                 })
                 continue
 
-            assessments = _source_native_nara_assessments(
-                source_row,
-                canonical_name=canonical_name,
-            )
+            assessments = _source_native_nara_assessments(source_row, canonical_name=canonical_name)
             if not assessments:
                 identity_linked_without_risk.append({
                     "canonical_id": canonical_id,
@@ -286,35 +286,56 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
                 claims.append(claim)
                 canonical_claims.append(claim)
                 source_targets[source_record_id].add(canonical_id)
+                source_claim_counts[source_record_id] += 1
 
         if len(canonical_claims) > 1:
             levels = sorted({str(item.get("semantic_level") or "unmapped") for item in canonical_claims})
-            multiple_assessment_formats.append({
+            summary = {
                 "canonical_id": canonical_id,
                 "preferred_name": canonical_name,
                 "assessment_count": len(canonical_claims),
                 "source_record_ids": sorted(str(item["source_record_id"]) for item in canonical_claims),
                 "semantic_levels": levels,
-            })
+            }
+            multiple_assessment_formats.append(summary)
             if len(levels) > 1:
-                conflicting_level_formats.append({
-                    "canonical_id": canonical_id,
-                    "preferred_name": canonical_name,
-                    "assessment_count": len(canonical_claims),
-                    "source_record_ids": sorted(str(item["source_record_id"]) for item in canonical_claims),
-                    "semantic_levels": levels,
-                })
+                conflicting_level_formats.append(dict(summary))
 
         legacy_signatures = Counter(_assessment_signature(item) for item in legacy_assessments)
-        source_signatures = Counter(_assessment_signature(item["assessment"]) for item in canonical_claims)
+        source_assessments = [item["assessment"] for item in canonical_claims]
+        source_signatures = Counter(_assessment_signature(item) for item in source_assessments)
+        legacy_signature_set = set(legacy_signatures)
+        source_signature_set = set(source_signatures)
+        legacy_headline = _headline(legacy_assessments)
+        source_headline = _headline(source_assessments)
+
         if legacy_signatures != source_signatures:
-            parity_mismatches.append({
+            mismatch = {
                 "canonical_id": canonical_id,
                 "preferred_name": canonical_name,
                 "legacy_assessment_count": len(legacy_assessments),
                 "source_native_assessment_count": len(canonical_claims),
                 "legacy_signatures": [list(key) + [count] for key, count in sorted(legacy_signatures.items(), key=str)],
                 "source_native_signatures": [list(key) + [count] for key, count in sorted(source_signatures.items(), key=str)],
+                "legacy_headline": legacy_headline,
+                "source_native_headline": source_headline,
+            }
+            parity_mismatches.append(mismatch)
+            if legacy_signature_set == source_signature_set and legacy_headline == source_headline:
+                deduplication_only_mismatches.append(dict(mismatch))
+        if legacy_signature_set != source_signature_set:
+            signature_set_parity_mismatches.append({
+                "canonical_id": canonical_id,
+                "preferred_name": canonical_name,
+                "legacy_signatures": [list(key) for key in sorted(legacy_signature_set, key=str)],
+                "source_native_signatures": [list(key) for key in sorted(source_signature_set, key=str)],
+            })
+        if legacy_headline != source_headline:
+            headline_parity_mismatches.append({
+                "canonical_id": canonical_id,
+                "preferred_name": canonical_name,
+                "legacy_headline": legacy_headline,
+                "source_native_headline": source_headline,
             })
 
     duplicated_source_targets = [
@@ -322,6 +343,15 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
         for source_id, targets in sorted(source_targets.items())
         if len(targets) > 1
     ]
+    multiple_claim_source_records = [
+        {"source_record_id": source_id, "claim_count": count}
+        for source_id, count in sorted(source_claim_counts.items())
+        if count != 1
+    ]
+    latest_ids = set(latest_by_id)
+    projected_ids = set(source_claim_counts)
+    latest_without_projection = sorted(latest_ids - projected_ids)
+    projection_without_latest = sorted(projected_ids - latest_ids)
 
     current_persisted = [
         row for row in store.query("risk_assessment_claims", {"source_id": NARA_SOURCE_ID})
@@ -339,16 +369,41 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
         str(row["assessment"].get("native_label") or "unknown") for row in legacy_claims
     )
 
+    migration_gate_passed = all((
+        len(claims) == len(latest_source_rows),
+        len(projected_ids) == len(latest_source_rows),
+        not latest_without_projection,
+        not projection_without_latest,
+        not multiple_claim_source_records,
+        not duplicated_source_targets,
+        not missing_latest_source_records,
+        not identity_linked_without_risk,
+        not signature_set_parity_mismatches,
+        not headline_parity_mismatches,
+        all(row.get("source_record_id") for row in claims),
+    ))
+
     report = {
         "mode": "read_only_store_preview",
         "storage_write": False,
         "identity_projection": False,
         "source_id": NARA_SOURCE_ID,
         "projection_version": PROJECTION_VERSION,
+        "migration_gate_passed": migration_gate_passed,
         "current_canonical_format_count": len(canonical_rows),
         "latest_source_run_id": latest_run_id,
         "latest_nara_source_record_count": len(latest_source_rows),
+        "unique_latest_nara_source_record_count": len(latest_by_id),
         "projected_claim_count": len(claims),
+        "unique_projected_source_record_count": len(projected_ids),
+        "all_latest_source_records_projected_once": (
+            len(projected_ids) == len(latest_source_rows)
+            and not latest_without_projection
+            and not multiple_claim_source_records
+        ),
+        "latest_source_records_without_projection": len(latest_without_projection),
+        "projected_source_records_missing_from_latest_run": len(projection_without_latest),
+        "source_records_with_non_single_claim_count": len(multiple_claim_source_records),
         "canonical_formats_with_nara_assessment": len({row["canonical_id"] for row in claims}),
         "assessments_missing_source_record_id": sum(1 for row in claims if not row.get("source_record_id")),
         "legacy_projected_claim_count": len(legacy_claims),
@@ -359,6 +414,9 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
         "latest_source_records_missing_for_identity_links": len(missing_latest_source_records),
         "identity_linked_nara_records_without_risk": len(identity_linked_without_risk),
         "canonical_parity_mismatches": len(parity_mismatches),
+        "legacy_deduplication_only_mismatches": len(deduplication_only_mismatches),
+        "canonical_signature_set_parity_mismatches": len(signature_set_parity_mismatches),
+        "canonical_headline_parity_mismatches": len(headline_parity_mismatches),
         "semantic_distribution_matches_legacy": semantic_levels == legacy_semantic_levels,
         "native_label_distribution_matches_legacy": native_labels == legacy_native_labels,
         "current_persisted_nara_claims": len(current_persisted),
@@ -366,6 +424,9 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
         "native_labels": dict(sorted(native_labels.items())),
         "native_scales": dict(sorted(native_scales.items())),
         "scope_types": dict(sorted(scope_types.items())),
+        "latest_source_records_without_projection_samples": latest_without_projection[:25],
+        "projected_source_records_missing_from_latest_run_samples": projection_without_latest[:25],
+        "source_records_with_non_single_claim_count_samples": multiple_claim_source_records[:25],
         "legacy_missing_source_record_id_samples": legacy_missing_source_record_id[:25],
         "multiple_assessment_samples": multiple_assessment_formats[:25],
         "conflicting_level_samples": conflicting_level_formats[:25],
@@ -373,8 +434,20 @@ def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
         "missing_latest_source_record_samples": missing_latest_source_records[:25],
         "identity_linked_without_risk_samples": identity_linked_without_risk[:25],
         "parity_mismatch_samples": parity_mismatches[:25],
+        "deduplication_only_mismatch_samples": deduplication_only_mismatches[:25],
+        "signature_set_parity_mismatch_samples": signature_set_parity_mismatches[:25],
+        "headline_parity_mismatch_samples": headline_parity_mismatches[:25],
         "sample_claims": claims[:25],
     }
+    claims.sort(key=lambda row: (
+        str(row.get("canonical_id") or ""),
+        str(row.get("source_record_id") or ""),
+    ))
+    return claims, report, canonical_by_id
+
+
+def build_nara_risk_inventory(store: RegistryStore) -> dict[str, Any]:
+    _claims, report, _canonical_by_id = build_nara_risk_projection(store)
     return report
 
 
