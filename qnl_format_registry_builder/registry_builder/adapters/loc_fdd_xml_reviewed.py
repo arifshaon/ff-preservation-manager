@@ -39,6 +39,7 @@ _REVIEWED_SUSTAINABILITY_FACTOR_ALIASES = {
         "patentclaims",
     },
     "technical_protection_mechanisms": {
+        "techprotection",
         "technicalprotectionmechanisms",
         "technicalprotectionconsiderations",
         "technicalprotection",
@@ -102,8 +103,8 @@ def extract_reviewed_loc_sustainability_factors(root: ET.Element) -> dict[str, s
 
     factors: dict[str, str] = {}
 
-    # Direct factor elements such as <disclosure> or
-    # <technicalProtectionConsiderations>.
+    # Direct factor elements such as <disclosure> or the real LOC
+    # <techProtection> tag.
     for elem in root.iter():
         factor_key = _reviewed_factor_key(elem.tag.split("}", 1)[-1])
         if not factor_key:
