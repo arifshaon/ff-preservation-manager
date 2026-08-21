@@ -4,8 +4,9 @@ import zipfile
 from pathlib import Path
 
 from registry_builder.adapters import resolve_adapter
-from registry_builder.adapters.dpc_bit_list import DpcBitListAdapter
+from registry_builder.adapters.dpc_bit_list import DPC_2025_COMMIT, DpcBitListAdapter
 from registry_builder.models import SourceSnapshot
+from registry_builder.reconcile import reconcile
 
 
 _SAMPLE_ENTRY = """---
@@ -45,12 +46,21 @@ def _snapshot_for_zip(path: Path) -> SourceSnapshot:
         sha256="abc123",
         local_path=str(path),
         content_type="application/zip",
-        metadata={"edition": "2025", "acquisition_only": True},
+        metadata={"edition": "2025", "identity_projection": False},
     )
 
 
 def test_dpc_adapter_is_registered():
     assert resolve_adapter("dpc_bit_list") is DpcBitListAdapter
+
+
+def test_dpc_2025_defaults_to_pinned_commit(tmp_path):
+    adapter = DpcBitListAdapter(
+        {"id": "dpc_bit_list_2025", "type": "dpc_bit_list", "edition": "2025"},
+        tmp_path,
+    )
+    assert adapter._github_ref() == DPC_2025_COMMIT
+    assert DPC_2025_COMMIT in adapter._archive_url()
 
 
 def test_dpc_archive_extracts_structured_source_native_risk_entry(tmp_path):
@@ -88,7 +98,7 @@ def test_dpc_archive_extracts_structured_source_native_risk_entry(tmp_path):
     assert assessment["scope_basis"] == "dpc_entry_scope_unreconciled"
 
 
-def test_dpc_pipeline_projection_is_acquisition_only(tmp_path):
+def test_dpc_pipeline_projection_is_evidence_only_and_creates_no_canonical_format(tmp_path):
     archive_path = tmp_path / "bit-list.zip"
     with zipfile.ZipFile(archive_path, "w") as archive:
         archive.writestr("bit-list-main/content/entries/pdf/index.en.md", _SAMPLE_ENTRY)
@@ -99,5 +109,10 @@ def test_dpc_pipeline_projection_is_acquisition_only(tmp_path):
     )
     snapshot = _snapshot_for_zip(archive_path)
 
-    assert adapter.extract_entries([snapshot])
-    assert adapter.extract([snapshot]) == []
+    records = adapter.extract([snapshot])
+    assert len(records) == 1
+    record = records[0]
+    assert record.record_role == "evidence_only"
+    assert record.name == "PDF"
+    assert record.risk_assessments[0]["native_label"] == "Vulnerable"
+    assert reconcile(records) == []
