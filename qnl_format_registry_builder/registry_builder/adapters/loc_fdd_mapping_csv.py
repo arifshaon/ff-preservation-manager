@@ -26,10 +26,6 @@ def _norm_header(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
-def _all_text(row: dict[str, Any]) -> str:
-    return " | ".join(str(value or "") for value in row.values())
-
-
 def _ids(pattern: re.Pattern[str], text: str, *, upper: bool = False, lower: bool = False) -> list[str]:
     values = {match.group(0) for match in pattern.finditer(text or "")}
     if upper:
@@ -37,6 +33,24 @@ def _ids(pattern: re.Pattern[str], text: str, *, upper: bool = False, lower: boo
     if lower:
         return sorted(value.lower() for value in values)
     return sorted(values)
+
+
+def _identifier_column_text(row: dict[str, Any], kind: str) -> str:
+    values: list[str] = []
+    for key, value in row.items():
+        if value is None or not str(value).strip():
+            continue
+        header = _norm_header(key)
+        include = False
+        if kind == "fdd":
+            include = "fdd" in header and not any(token in header for token in ("title", "name", "match", "status", "note", "comment"))
+        elif kind == "puid":
+            include = ("puid" in header or header in {"pronom", "pronomid", "pronomidentifier"}) and not any(token in header for token in ("match", "status", "note", "comment"))
+        elif kind == "qid":
+            include = ("qid" in header or "wikidata" in header) and not any(token in header for token in ("match", "status", "note", "comment", "title", "name"))
+        if include:
+            values.append(str(value))
+    return " | ".join(values)
 
 
 def _row_title(row: dict[str, Any]) -> str | None:
@@ -62,10 +76,9 @@ def _mapping_context(row: dict[str, Any]) -> dict[str, str]:
 
 
 def _entry_from_row(snapshot: SourceSnapshot, row: dict[str, Any], row_number: int, mapping_date: str) -> dict[str, Any]:
-    text = _all_text(row)
-    fdd_ids = _ids(_FDD_RE, text, lower=True)
-    puids = _ids(_PUID_RE, text, lower=True)
-    qids = _ids(_QID_RE, text, upper=True)
+    fdd_ids = _ids(_FDD_RE, _identifier_column_text(row, "fdd"), lower=True)
+    puids = _ids(_PUID_RE, _identifier_column_text(row, "puid"), lower=True)
+    qids = _ids(_QID_RE, _identifier_column_text(row, "qid"), upper=True)
     primary_fdd = fdd_ids[0] if fdd_ids else None
     source_record_id = f"{primary_fdd or 'row'}:{row_number}"
     return {
