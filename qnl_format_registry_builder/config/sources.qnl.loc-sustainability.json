@@ -10,7 +10,7 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "Production LOC sustainability refresh target. Criterion mapping is intentionally gated until the v2 draft2 has been reviewed against fresh reviewed extraction output."
+    "notes": "Production LOC source refresh. Criterion mapping remains disabled in the pipeline; approved LOC criterion claims are applied in a separate source-replacing backfill stage."
   },
   "method_profiles": {
     "enabled": false
@@ -19,10 +19,10 @@
     "enabled": false,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft2.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v2.approved.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "Production application is blocked pending review/approval of LOC mapping v2 draft2. The previous v1 and first v2 draft must not be applied after the real previews exposed rule-overlap, negation, and royalty-free classification issues."
+    "notes": "Intentionally disabled here. After this source refresh succeeds, apply config/loc_fdd_sustainability_backfill.production.json so old LOC criterion claims are replaced at source scope rather than managed only by rules that happened to emit claims in this run."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
