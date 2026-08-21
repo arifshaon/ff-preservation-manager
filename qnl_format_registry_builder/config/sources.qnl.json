@@ -18,11 +18,11 @@
     "path": "method_profiles.example.json"
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]},
-    "notes": "DPC Bit List entry IDs are source-record identifiers, not canonical format identifiers."
+    "notes": "PUID ownership belongs to PRONOM; PUIDs copied by other sources remain unverified assertions. DPC Bit List entry IDs are source-record identifiers, not canonical format identifiers."
   },
   "sources": [
     {
@@ -75,11 +75,12 @@
     },
     {
       "id": "loc_fdd_xml",
-      "type": "loc_fdd_xml",
+      "type": "loc_fdd_xml_reviewed",
       "enabled": true,
       "required": false,
       "retrieval_mode": "fdd_xml_zip",
-      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+      "notes": "Reviewed LOC projection: PUID/QID strings found in FDD XML prose remain contextual; cross-registry mapping is reviewed from LOC's monthly FDD-PUID-QID crosswalk."
     },
     {
       "id": "dpc_bit_list_2025",
