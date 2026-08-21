@@ -1,6 +1,7 @@
 from preservation_risk_manager.data_access import JsonRegistryStore, RegistryReader
 from preservation_risk_manager.frameworks import RiskFramework
 from preservation_risk_manager.registry_audit import (
+    _questions_by_criterion,
     build_registry_risk_evidence_audit,
     render_registry_risk_evidence_audit_markdown,
 )
@@ -172,3 +173,44 @@ def test_registry_audit_markdown_contains_decision_sections():
     assert "Evidence contribution by source" in markdown
     assert "Draft mapping opportunities" in markdown
     assert "puid-fmt-99" in markdown
+
+
+def test_audit_question_index_honors_governed_evidence_field_compatibility():
+    framework = RiskFramework.from_dict({
+        "framework_id": "compatibility-audit-test",
+        "version": "1.0",
+        "unknown_answer_id": "unknown",
+        "questions": [
+            {
+                "id": "q_ip_constraints",
+                "evidence_fields": ["rights.ip_constraints"],
+                "answers": [
+                    {"id": "low_risk", "points": 0},
+                    {"id": "high_risk", "points": 2},
+                    {"id": "unknown", "points": 0, "abstention": True},
+                ],
+            },
+            {
+                "id": "q_tpm_drm",
+                "evidence_fields": ["rights.tpm_drm_encryption"],
+                "answers": [
+                    {"id": "low_risk", "points": 0},
+                    {"id": "high_risk", "points": 2},
+                    {"id": "unknown", "points": 0, "abstention": True},
+                ],
+            },
+        ],
+        "scale": {
+            "direction": "higher_is_risk",
+            "banding_enabled": False,
+            "min_completeness_for_band": 1.0,
+            "bands": [{"band": "Low", "min_score": 0, "max_score": 4}],
+        },
+    })
+
+    indexed = _questions_by_criterion(framework)
+
+    assert indexed["rights.ip_constraints"] == ["q_ip_constraints"]
+    assert indexed["sustainability.ip_licensing"] == ["q_ip_constraints"]
+    assert indexed["rights.tpm_drm_encryption"] == ["q_tpm_drm"]
+    assert indexed["sustainability.tpm_encryption"] == ["q_tpm_drm"]
