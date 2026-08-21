@@ -16,6 +16,7 @@ from registry_builder.method_profiles import assign_method_profiles, load_method
 from registry_builder.models import CanonicalFormat, Identifier, RawFormatRecord, SourceSnapshot, utc_now_iso
 from registry_builder.normalize import normalize_record
 from registry_builder.reconcile import reconcile
+from registry_builder.risk_claim_materialization import materialize_current_risk_claims
 from registry_builder.storage import create_store
 from registry_builder.storage.base import RegistryStore
 from registry_builder.utils import ensure_dir, write_csv, write_json, write_jsonl
@@ -743,6 +744,23 @@ def run_pipeline(
     _emit_progress(progress, "method_profiles_started", enabled=bool(config.get("method_profiles", {}).get("enabled", False)))
     registry, method_profile_version = maybe_assign_method_profiles(registry, config, config_path)
     _emit_progress(progress, "method_profiles_completed", version=method_profile_version, canonical_formats=len(registry))
+
+    _emit_progress(progress, "risk_claim_materialization_started", canonical_formats=len(registry))
+    risk_claim_materialization = materialize_current_risk_claims(
+        registry,
+        store,
+        refreshed_source_ids=current_run_source_ids,
+    )
+    _emit_progress(
+        progress,
+        "risk_claim_materialization_completed",
+        current_claims_loaded=risk_claim_materialization.get("current_claims_loaded", 0),
+        claims_materialized=risk_claim_materialization.get("claims_materialized", 0),
+        canonicals_with_materialized_claims=risk_claim_materialization.get("canonicals_with_materialized_claims", 0),
+        orphan_claims=risk_claim_materialization.get("orphan_claims", 0),
+        refreshed_claim_sources=risk_claim_materialization.get("refreshed_claim_sources", []),
+    )
+
     _emit_progress(progress, "validation_started", canonical_formats=len(registry))
     errors, warnings = validate_registry(registry)
     _emit_progress(progress, "validation_completed", errors=len(errors), warnings=len(warnings))
@@ -823,6 +841,7 @@ def run_pipeline(
         "offline": offline,
         "incremental_source_updates": incremental_source_updates,
         "criterion_mapping": criterion_mapping_report,
+        "risk_claim_materialization": risk_claim_materialization,
         "storage": {
             "type": storage_config.get("type", "memory"),
             "path": storage_config.get("path") or storage_config.get("directory") or storage_config.get("root"),
@@ -871,6 +890,7 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
     missing_loc = [r for r in institutional if not r.get("identifiers", {}).get("loc")]
     with_methods = [r for r in registry if (r.get("preservation_method") or {}).get("assigned_profile_ids")]
     criterion_mapping = report.get("criterion_mapping") or {}
+    risk_claim_materialization = report.get("risk_claim_materialization") or {}
     lines = [
         "# Registry Build Report",
         "",
@@ -896,6 +916,10 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
         f"- Average effective discriminating method profiles per format: {report.get('average_effective_discriminating_method_profiles_per_format', 0)}",
         f"- Criterion mapping enabled: {criterion_mapping.get('enabled', False)}",
         f"- Criterion claims generated: {criterion_mapping.get('claims_generated', 0)}",
+        f"- Current persisted risk claims materialized: {risk_claim_materialization.get('claims_materialized', 0)}",
+        f"- Canonical formats with materialized risk claims: {risk_claim_materialization.get('canonicals_with_materialized_claims', 0)}",
+        f"- Orphan current risk claims: {risk_claim_materialization.get('orphan_claims', 0)}",
+        f"- Risk-claim source backfill refresh recommended: {risk_claim_materialization.get('source_backfill_refresh_recommended', False)}",
         "",
         "## Source runs",
         "",
@@ -919,6 +943,14 @@ def write_coverage_report(path: str | Path, registry: list[dict[str, Any]], repo
                 f"- {src.get('source_id')}: {src.get('records_extracted')} records from {src.get('snapshots')} snapshot(s); "
                 f"{status}; changed={src.get('snapshots_changed', 0)}, unchanged={src.get('snapshots_unchanged', 0)}, cached={src.get('snapshots_from_cache', 0)}"
             )
+
+    if risk_claim_materialization.get("refreshed_claim_sources"):
+        lines.extend(["", "## Risk claim materialization", ""])
+        lines.append(
+            "- Current governed risk claims were rematerialized after reconciliation. "
+            "The following risk-evidence source(s) were also refreshed in this run and should have their reviewed risk backfill rerun:"
+        )
+        lines.extend(f"  - {source_id}" for source_id in risk_claim_materialization.get("refreshed_claim_sources", []))
 
     if criterion_mapping.get("enabled"):
         lines.extend(["", "## Criterion mapping", ""])
