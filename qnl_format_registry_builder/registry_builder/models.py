@@ -136,17 +136,47 @@ class CanonicalFormat:
         if claim not in self.identifier_claims:
             self.identifier_claims.append(claim)
 
+    @staticmethod
+    def _risk_source_key(item: dict[str, Any]) -> str:
+        return str(item.get("source_id") or item.get("source_type") or "")
+
     def refresh_risk_views(self) -> None:
-        """Populate preferred multi-source risk views without deleting legacy data."""
+        """Populate preferred multi-source risk views without deleting legacy data.
+
+        Persisted ``risk_assessment_claims`` are the governed assessment layer.
+        When a source has a materialized persisted claim, older raw/legacy
+        projections from that same source remain stored in their native fields for
+        audit but are not added a second time to the normalized risk view.
+        """
 
         from registry_builder.risk_synthesis import (
             risk_assessments_from_canonical_fields,
             synthesize_risk_assessments,
         )
 
+        persisted_sources = {
+            self._risk_source_key(item)
+            for item in self.risk_assessments
+            if item.get("persistence_layer") == "risk_assessment_claims"
+            and self._risk_source_key(item)
+        }
+        explicit_assessments = [
+            item
+            for item in self.risk_assessments
+            if (
+                item.get("persistence_layer") == "risk_assessment_claims"
+                or self._risk_source_key(item) not in persisted_sources
+            )
+        ]
+        external_hazard = [
+            item
+            for item in self.external_hazard
+            if self._risk_source_key(item) not in persisted_sources
+        ]
+
         self.risk_assessments = risk_assessments_from_canonical_fields(
-            explicit_assessments=self.risk_assessments,
-            external_hazard=self.external_hazard,
+            explicit_assessments=explicit_assessments,
+            external_hazard=external_hazard,
             institution_policy_overlays=self.institution_policy_overlays,
             source_records=self.source_records,
             canonical_name=self.preferred_name,
