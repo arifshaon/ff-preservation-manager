@@ -14,9 +14,15 @@ The primary machine-readable source is the public DPC Bit List GitHub repository
 https://github.com/Digital-Preservation-Coalition/bit-list
 ```
 
-The repository's `content/entries/*/index.en.md` files contain YAML front matter plus review prose. The DPC repository README states that `content/` is the source data/content used to build the site and the generated report.
+The repository's `content/entries/*/index.en.md` files contain YAML front matter plus review prose. The adapter snapshots one repository archive rather than scraping the rendered website or parsing the PDF.
 
-The adapter snapshots one repository archive rather than scraping the rendered website or parsing the PDF. This gives one content-addressed source snapshot and makes offline replay possible.
+For the 2025 edition, acquisition is pinned to:
+
+```text
+3ad3fef626ea7c128ef8c323d92227e5cae2efc8
+```
+
+This is the final observed 2025 repository commit and prevents a future change to `main` from silently changing a rerun labelled `edition: 2025`.
 
 ## Adapter
 
@@ -34,17 +40,17 @@ Default configuration:
   "enabled": true,
   "required": false,
   "edition": "2025",
-  "github_ref": "main"
+  "github_ref": "3ad3fef626ea7c128ef8c323d92227e5cae2efc8"
 }
 ```
 
-The adapter is intentionally **acquisition-only** in the normal registry pipeline:
+The adapter emits source records with:
 
-```python
-extract(...) -> []
+```text
+record_role = evidence_only
 ```
 
-This prevents broad entries such as `Legacy Video Files`, `3D Digital Engineering Drawings`, or `PDF` as a whole from accidentally creating or collapsing canonical file-format identity.
+`evidence_only` records are persisted for audit, criterion mapping and risk mapping, but the reconciler excludes them from canonical identity formation. This prevents broad entries such as `Legacy Video Files`, `Native Cloud Formats`, `Email`, or `PDF` as a whole from becoming canonical formats.
 
 ## Review extraction command
 
@@ -56,7 +62,9 @@ python -m registry_builder.dpc_bit_list_download `
   --workdir work
 ```
 
-This writes:
+The command uses the pinned 2025 commit unless `--github-ref` is explicitly supplied.
+
+It writes:
 
 ```text
 dpc-bit-list-2025.json
@@ -97,7 +105,7 @@ edition
 raw_front_matter
 ```
 
-A normalized `risk_assessment` object is also prepared for later mapping. It preserves the DPC classification as `native_label` and records the DPC scale as:
+A normalized `risk_assessment` object preserves the DPC classification as `native_label` and records the DPC scale as:
 
 ```text
 dpc_global_bit_list_classification
@@ -117,14 +125,14 @@ Native DPC values remain preserved regardless of the semantic projection.
 
 ## Scope
 
-Before reconciliation, DPC entry scope is deliberately coarse:
+Before reviewed mapping, DPC entry scope is deliberately coarse:
 
 ```text
 category includes Formats -> format_group
 otherwise                 -> contextual
 ```
 
-This is not the final mapping scope. The later reviewed mapping layer may assign:
+A reviewed mapping may assign:
 
 ```text
 exact_format
@@ -135,7 +143,48 @@ content_type
 contextual
 ```
 
-The mapping layer must also record its basis and review status.
+The mapping also records its rule ID, mapping version and scope basis.
+
+## Reviewed mapping v1
+
+The reviewed mapping file is:
+
+```text
+config/external_risk_mappings/dpc_bit_list_2025.v1.approved.json
+```
+
+Version 1 approves only the DPC `PDF` entry for automatic attachment. The DPC assessment remains a `format_group` assessment because DPC explicitly treats PDF versions and variants together.
+
+These entries remain contextual-only in v1:
+
+```text
+Native Cloud Formats
+Legacy Video Files
+Email
+```
+
+They are intentionally not projected to individual canonical formats because their DPC scope spans platforms, carriers, services, containers/codecs, messages, mailboxes and other broader conditions.
+
+## Mapping preview
+
+Before automatic production integration, preview the approved mapping against an actual registry export:
+
+```powershell
+python -m registry_builder.dpc_risk_mapping `
+  --registry out/registry.json `
+  --dpc-json dpc-bit-list-2025.json
+```
+
+The command prints the exact canonical IDs and preferred names matched by each approved rule. It does not modify the registry unless `--out` is supplied.
+
+To write an enriched review copy:
+
+```powershell
+python -m registry_builder.dpc_risk_mapping `
+  --registry out/registry.json `
+  --dpc-json dpc-bit-list-2025.json `
+  --out out/registry-with-dpc-risk.json
+```
 
 ## Relationship to NARA and LOC
 
@@ -145,8 +194,14 @@ DPC does not replace either source:
 - DPC provides a separate community/expert Bit List classification with imminence, preservation effort, hazards, mitigations, and trends.
 - LOC provides sustainability-factor evidence and should not be assigned an overall risk classification unless a separate approved derivation is explicitly defined.
 
-All source-native assessments should remain independently queryable. A synthesized semantic risk is an optional decision-support view and must always retain its contributing sources and declared scopes.
+All source-native assessments remain independently queryable. A synthesized semantic risk is an optional decision-support view and always retains its contributing sources and declared scopes.
 
-## Next step
+## PowerShell UTF-8 display
 
-After the review dataset is validated, create an explicit DPC-entry-to-canonical-format/family mapping layer. Do not enable direct DPC canonical projection.
+The JSON review dataset is UTF-8. Windows PowerShell can display typographic punctuation as mojibake when `Get-Content` uses a legacy default encoding. Use:
+
+```powershell
+Get-Content dpc-bit-list-2025.json -Raw -Encoding UTF8
+```
+
+This is a display issue, not source-data corruption.
