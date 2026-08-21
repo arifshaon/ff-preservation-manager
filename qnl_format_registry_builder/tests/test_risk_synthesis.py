@@ -49,8 +49,10 @@ def test_canonical_serialization_retains_nara_and_institution_risk_separately():
     assert nara["source_record_id"] == "NF00018"
     assert qnl["native_label"] == "High Risk"
     assert qnl["semantic_level"] == "high"
+    assert qnl["scope_type"] == "exact_format"
     assert data["synthesized_risk"]["semantic_level"] == "high"
     assert data["synthesized_risk"]["source_divergence"] is True
+    assert data["synthesized_risk"]["scope_divergence"] is False
     assert data["synthesized_risk"]["basis"] == "conservative_semantic_upper_bound"
     assert "not numerically averaged" in data["synthesized_risk"]["explanation"]
 
