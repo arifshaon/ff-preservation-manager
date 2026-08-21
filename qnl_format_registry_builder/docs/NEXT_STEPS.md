@@ -6,6 +6,7 @@ For the current repository architecture, see:
 
 - [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
 - [`../../preservation_risk_manager/README.md`](../../preservation_risk_manager/README.md)
+- [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) for the source-by-source clean-room production runbook
 
 ## Current completed baseline
 
@@ -15,6 +16,8 @@ The registry builder now provides, with tests/CI:
 - NARA Digital Preservation Framework adapter;
 - PRONOM registry/DROID evidence adapters;
 - LOC FDD XML evidence adapter;
+- DPC Bit List evidence-only adapter and governed mapped risk claims;
+- Wikidata policy-v3 acquisition, evidence-only projection, governed relationships, controlled refresh and independent verification;
 - institutional policy workbook adapter;
 - QNL institutional format evidence adapter;
 - generic identifier namespaces and configurable identifier rules;
@@ -26,6 +29,7 @@ The registry builder now provides, with tests/CI:
 - canonical format/source record/identifier/institutional evidence persistence;
 - declarative criterion vocabulary/mappings;
 - criterion-claim validation, audit, backfill, and supersession workflows;
+- versioned governed risk-assessment claims and source-relationship claims;
 - change detection and assessment-change records;
 - optional exports and coverage reports;
 - preservation method profiles;
@@ -49,7 +53,7 @@ Those capabilities are documented under [`../../preservation_risk_manager/docs/`
 
 ## 1. Multi-source operational QA and benchmark runs
 
-Continue validating combined NARA + PRONOM + LOC + QNL evidence runs against persistent storage.
+Continue validating combined NARA + PRONOM + LOC + DPC + Wikidata + QNL evidence runs against persistent storage.
 
 Tasks:
 
@@ -58,7 +62,7 @@ Tasks:
 - check common families such as PDF, TIFF, JPEG, WAV, MP4, XML, ZIP and major office/AV families for duplicate or weakly related canonical records;
 - verify verified PUID/FDD/NARA identifiers continue to enrich rather than incorrectly split/merge records;
 - inspect source failure/fallback behavior;
-- validate criterion-claim coverage after upstream source changes;
+- validate criterion/risk/relationship claim coverage after upstream source changes;
 - document any source rate-limit/authentication prerequisites such as GitHub token use where required.
 
 Success criterion:
@@ -128,7 +132,7 @@ Tasks:
 - validate with `mapping validate`;
 - project draft mappings before approval;
 - backfill stored evidence after mapping changes;
-- use `--replace-source-claims` where old current claims must be superseded;
+- use source-level replacement where old current claims must be superseded;
 - retain source field/value and mapping provenance for audit.
 
 Do not promote mappings merely to improve completeness percentages.
@@ -252,12 +256,17 @@ Potential sources/connectors include:
 - additional NARA retrieval modes if stable/needed;
 - PRONOM individual XML/signature updates;
 - LOC web/API enrichment beyond current FDD XML;
-- DPC Bit List or preservation action registries;
 - software-support/tool registries;
 - standards/governance metadata;
-- carefully scoped linked-data/Wikidata enrichment.
+- additional carefully scoped linked-data enrichment.
 
 New sources should answer a defined evidence need and use source-level adapters rather than creating a new source concept for every transport format.
+
+The onboarding sequence is documented in:
+
+- [`../../docs/HOW_TO_ADD_A_SOURCE.md`](../../docs/HOW_TO_ADD_A_SOURCE.md)
+- [`ADDING_AND_RUNNING_DATA_SOURCES.md`](ADDING_AND_RUNNING_DATA_SOURCES.md)
+- the "Adding a new dataset/source" section of [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md)
 
 ## 13. Documentation upkeep
 
@@ -268,3 +277,54 @@ Whenever a capability moves from planned to implemented:
 3. update data/interface docs if contracts changed;
 4. update human/system query docs if actions changed;
 5. keep historical implementation plans under `docs/history/` rather than presenting them as current guidance.
+
+## 14. TODO — generic one-source execution and clean-room reproducibility
+
+The source adapter layer is already generic, but production operation is not yet completely uniform. PRONOM/LOC/NARA/DPC source acquisition can use the common:
+
+```powershell
+python -m registry_builder run --config <source-config> --workdir work --out <out-dir>
+```
+
+However, approved follow-on processing is still source/workflow specific:
+
+```text
+LOC -> criterion-claim backfill
+NARA -> governed risk-assessment backfill
+DPC -> governed risk-assessment backfill
+Wikidata -> governed relationship backfill/controlled refresh
+```
+
+The objective is **not** one giant bootstrap command. Operators should continue to run one dataset at a time. The objective is to let each dataset use one consistent generic execution interface where the config selects:
+
+```text
+adapter
+retrieval mode / local fallback
+post-ingest processors
+mapping versions
+replacement policy
+preflight/drift gates
+verification
+```
+
+Planned work:
+
+1. Define a generic post-ingest processor contract/registry parallel to the source-adapter registry.
+2. Move criterion/risk/relationship orchestration behind source configuration without changing existing source semantics.
+3. Standardize `preflight`, `apply`, source-level replacement and independent verification behavior.
+4. Standardize local fallback configuration while still allowing source-specific structures such as NARA's two-file release.
+5. Support one shared storage configuration so the MongoDB URI/database does not have to be repeated in every production config.
+6. Add reviewed-snapshot SHA pinning when a preflight-approved artifact must be exactly the artifact applied.
+7. Add clean-room tests that create an empty store and execute the documented source order.
+8. Restore/distribute `config/external_identity_mappings/loc_fdd_pronom_20260713.policy-v2.json`, which is referenced by the approved LOC bridge config but is currently absent from `main`.
+9. Publish/distribute the approved Wikidata policy-v3 baseline CSV or an equivalent release artifact so exact baseline reconstruction does not depend on an individual operator's local cache.
+10. Keep the detailed new-dataset onboarding process generic: new source logic belongs in an adapter plus reviewed config/mappings/processors, not in ad-hoc pipeline branches.
+
+Success criterion:
+
+```text
+A new operator can start with an empty MongoDB and, for each dataset in turn,
+run one documented source procedure without rediscovering source semantics,
+while every exceptional source-specific rule remains explicit, versioned,
+tested, reviewable and reproducible.
+```
