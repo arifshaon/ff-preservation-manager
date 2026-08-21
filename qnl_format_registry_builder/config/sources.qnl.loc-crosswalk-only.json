@@ -16,7 +16,7 @@
     "enabled": false
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
