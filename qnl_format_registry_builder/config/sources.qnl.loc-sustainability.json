@@ -10,19 +10,19 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "Refresh the reviewed LOC FDD source contribution and persist approved LOC sustainability criterion claims. Existing DPC, NARA, PRONOM, LOC crosswalk, and approved LOC-PRONOM bridge contributions are reused from MongoDB."
+    "notes": "Production LOC sustainability refresh target. Criterion mapping is intentionally gated until the v2 draft has been reviewed against fresh reviewed extraction output."
   },
   "method_profiles": {
     "enabled": false
   },
   "criterion_mapping": {
-    "enabled": true,
+    "enabled": false,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings/loc_fdd_xml.v1.approved.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft.json",
     "include_drafts": false,
     "scope": "all",
-    "notes": "Apply only the approved LOC FDD mapping. LOC supplies source-native evidence for the seven sustainability factors; no overall LOC risk score is created. Documentation is retained as supporting Disclosure evidence, not an eighth top-level factor."
+    "notes": "Production application is blocked pending review/approval of LOC mapping v2. The previous v1 mapping must not be applied after the real audit exposed rule-overlap and negation issues."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
