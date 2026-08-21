@@ -76,9 +76,15 @@ def test_nara_preview_projects_native_risk_from_verified_source_provenance_witho
     assert report["storage_write"] is False
     assert report["identity_projection"] is False
     assert report["projection_version"] == "nara-native-risk-v2-source-provenance"
+    assert report["migration_gate_passed"] is True
     assert report["latest_source_run_id"] == "run-nara"
     assert report["latest_nara_source_record_count"] == 1
+    assert report["unique_latest_nara_source_record_count"] == 1
     assert report["projected_claim_count"] == 1
+    assert report["unique_projected_source_record_count"] == 1
+    assert report["all_latest_source_records_projected_once"] is True
+    assert report["latest_source_records_without_projection"] == 0
+    assert report["source_records_with_non_single_claim_count"] == 0
     assert report["canonical_formats_with_nara_assessment"] == 1
     assert report["assessments_missing_source_record_id"] == 0
     assert report["legacy_assessments_missing_source_record_id"] == 0
@@ -88,6 +94,9 @@ def test_nara_preview_projects_native_risk_from_verified_source_provenance_witho
     assert report["latest_source_records_missing_for_identity_links"] == 0
     assert report["identity_linked_nara_records_without_risk"] == 0
     assert report["canonical_parity_mismatches"] == 0
+    assert report["legacy_deduplication_only_mismatches"] == 0
+    assert report["canonical_signature_set_parity_mismatches"] == 0
+    assert report["canonical_headline_parity_mismatches"] == 0
     assert report["semantic_distribution_matches_legacy"] is True
     assert report["native_label_distribution_matches_legacy"] is True
     assert report["current_persisted_nara_claims"] == 0
@@ -123,8 +132,6 @@ def test_nara_preview_resolves_merged_conflicting_records_without_guessing_and_k
             "hazard": hazard,
         })
 
-    # Legacy hazards intentionally lack source_record_id, reproducing the old
-    # reconciliation shape that caused the v1 preview ambiguity.
     store.upsert_canonical_format({
         "canonical_id": "puid-x-fmt-8",
         "preferred_name": "dBASE Database",
@@ -137,7 +144,6 @@ def test_nara_preview_resolves_merged_conflicting_records_without_guessing_and_k
         "source_records": [
             {"source_id": NARA, "source_type": NARA, "source_record_id": "NF00152"},
             {"source_id": NARA, "source_type": NARA, "source_record_id": "NF00153"},
-            # Relationship-only cross-reference must not become a risk claim.
             {"source_id": NARA, "source_type": NARA, "source_record_id": "NF00999", "relationship": "explicit_puid_cross_reference"},
         ],
         "external_hazard": [
@@ -150,17 +156,76 @@ def test_nara_preview_resolves_merged_conflicting_records_without_guessing_and_k
 
     report = build_nara_risk_inventory(store)
 
+    assert report["migration_gate_passed"] is True
     assert report["projected_claim_count"] == 2
+    assert report["unique_projected_source_record_count"] == 2
     assert report["assessments_missing_source_record_id"] == 0
     assert report["legacy_assessments_missing_source_record_id"] == 2
     assert report["canonical_formats_with_multiple_nara_assessments"] == 1
     assert report["canonical_formats_with_conflicting_nara_levels"] == 1
     assert report["canonical_parity_mismatches"] == 0
+    assert report["canonical_signature_set_parity_mismatches"] == 0
+    assert report["canonical_headline_parity_mismatches"] == 0
     assert report["semantic_distribution_matches_legacy"] is True
     assert report["native_label_distribution_matches_legacy"] is True
     assert report["nara_source_records_targeting_multiple_canonicals"] == 0
     assert {item["source_record_id"] for item in report["sample_claims"]} == {"NF00152", "NF00153"}
     assert report["conflicting_level_samples"][0]["semantic_levels"] == ["high", "moderate"]
+
+
+def test_nara_preview_recovers_source_rows_collapsed_by_legacy_hazard_deduplication():
+    store = MemoryRegistryStore()
+    store.create_run({
+        "run_id": "run-nara",
+        "finished_at": "2026-08-21T10:00:00Z",
+        "sources": [{"source_id": NARA, "status": "completed"}],
+    })
+    minus14 = _hazard("Moderate Risk", -14.0, "Moderate", 2.0)
+    minus16 = _hazard("Moderate Risk", -16.0, "Moderate", 2.0)
+    rows = (("NF00166", minus14), ("NF00167", minus14), ("NF00168", minus16))
+    for source_record_id, hazard in rows:
+        store.save_source_record({
+            "run_id": "run-nara",
+            "source_id": NARA,
+            "source_type": NARA,
+            "source_record_id": source_record_id,
+            "name": "DVD data file and backup data file",
+            "hazard": hazard,
+        })
+
+    store.upsert_canonical_format({
+        "canonical_id": "puid-x-fmt-419",
+        "preferred_name": "DVD data file and backup data file",
+        "current": True,
+        "identifiers": {"nara": ["NF00166", "NF00167", "NF00168"]},
+        "source_records": [
+            {"source_id": NARA, "source_type": NARA, "source_record_id": source_id}
+            for source_id, _ in rows
+        ],
+        # Two identical source hazards collapse in the legacy normalized view.
+        "external_hazard": [
+            minus14 | {"source_id": NARA},
+            minus14 | {"source_id": NARA},
+            minus16 | {"source_id": NARA},
+        ],
+        "risk_assessments": [],
+        "synthesized_risk": {},
+    })
+
+    report = build_nara_risk_inventory(store)
+
+    assert report["migration_gate_passed"] is True
+    assert report["latest_nara_source_record_count"] == 3
+    assert report["projected_claim_count"] == 3
+    assert report["unique_projected_source_record_count"] == 3
+    assert report["legacy_projected_claim_count"] == 2
+    assert report["canonical_parity_mismatches"] == 1
+    assert report["legacy_deduplication_only_mismatches"] == 1
+    assert report["canonical_signature_set_parity_mismatches"] == 0
+    assert report["canonical_headline_parity_mismatches"] == 0
+    assert report["semantic_distribution_matches_legacy"] is False
+    assert report["native_label_distribution_matches_legacy"] is False
+    assert report["all_latest_source_records_projected_once"] is True
 
 
 def test_nara_only_config_keeps_puid_authority_with_pronom():
