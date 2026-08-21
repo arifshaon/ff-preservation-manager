@@ -5,6 +5,9 @@ from copy import deepcopy
 from typing import Any, Iterable
 
 from registry_builder.models import CanonicalFormat
+from registry_builder.source_relationship_claim_materialization import (
+    materialize_current_source_relationship_claims,
+)
 from registry_builder.storage.base import RegistryStore
 
 
@@ -57,17 +60,18 @@ def materialize_current_risk_claims(
     *,
     refreshed_source_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Reapply the governed current risk-claim layer after reconciliation.
+    """Reapply governed persistent claim layers after reconciliation.
 
     Canonical identity is rebuilt from source records on every pipeline run. Risk
-    claims live in a separate persistent collection and must therefore be replayed
-    after reconciliation so unrelated source refreshes cannot strip the governed
-    DPC/NARA assessment layer from canonical documents.
+    claims and source-relationship claims live in separate persistent collections
+    and must therefore be replayed after reconciliation so unrelated source
+    refreshes cannot strip governed assessment or cross-registry evidence from
+    canonical documents.
 
-    A source refresh does *not* itself supersede a risk claim. Current claims stay
-    materialized until the source-specific reviewed backfill replaces them. When a
-    claim source is refreshed in the same pipeline run, the report flags that
-    source so operators know its assessment backfill should be rerun.
+    A source refresh does *not* itself supersede a governed claim. Current claims
+    stay materialized until the source-specific reviewed backfill replaces them.
+    When a claim source is refreshed in the same pipeline run, the report flags
+    that source so operators know its reviewed backfill should be rerun.
     """
 
     registry_list = list(registry)
@@ -133,6 +137,17 @@ def materialize_current_risk_claims(
     }
     refreshed_claim_sources = sorted(current_claim_sources & refreshed_source_ids)
 
+    # The normal pipeline already calls this function after reconciliation. Reuse
+    # that governed-claim lifecycle hook for source relationship claims as well so
+    # a canonical rebuild cannot strip persisted Wikidata/other cross-registry
+    # evidence. Relationship replay mutates source_records/provenance only; it does
+    # not create identities or promote copied identifiers.
+    source_relationship_materialization = materialize_current_source_relationship_claims(
+        registry_list,
+        store,
+        refreshed_source_ids=refreshed_source_ids,
+    )
+
     return {
         "enabled": True,
         "persistence_layer": PERSISTENCE_LAYER,
@@ -145,6 +160,7 @@ def materialize_current_risk_claims(
         "invalid_claims": len(invalid_claims),
         "refreshed_claim_sources": refreshed_claim_sources,
         "source_backfill_refresh_recommended": bool(refreshed_claim_sources),
+        "source_relationship_materialization": source_relationship_materialization,
         "orphan_claim_samples": [
             {
                 "canonical_id": row.get("canonical_id") or row.get("format_id"),
