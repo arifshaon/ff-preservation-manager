@@ -1,0 +1,35 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "First-ingest validation writes to MongoDB only. Enable file exports after the integrated canonical registry is established."
+  },
+  "method_profiles": {
+    "enabled": false
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "dpc_bit_list_2025",
+      "type": "dpc_bit_list",
+      "enabled": true,
+      "required": true,
+      "edition": "2025",
+      "github_ref": "3ad3fef626ea7c128ef8c323d92227e5cae2efc8",
+      "notes": "First persistent integration source. All DPC entries are evidence_only and therefore cannot create canonical format identities."
+    }
+  ]
+}
