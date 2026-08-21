@@ -16,7 +16,7 @@
     "enabled": false
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
@@ -27,7 +27,7 @@
       "type": "pronom_registry",
       "enabled": true,
       "required": true,
-      "notes": "Authoritative PRONOM registry source. PRONOM and DROID XML are the only sources allowed to verify PUID identity."
+      "notes": "Authoritative PRONOM registry source."
     }
   ]
 }
