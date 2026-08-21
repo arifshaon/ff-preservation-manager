@@ -81,9 +81,18 @@ def test_reviewed_dpc_pdf_mapping_retains_source_native_assessment_and_scope():
     assert dpc["scope_basis"] == "reviewed_external_risk_mapping"
     assert dpc["mapping_rule_id"] == "dpc-2025-pdf-family"
     assert dpc["mapped_target_canonical_id"] == "puid-fmt-18"
-    assert fmt.synthesized_risk["semantic_level"] == "moderate"
-    assert fmt.synthesized_risk["source_divergence"] is True
+
+    # The reviewed DPC group assessment remains attached, but a broader PDF-group
+    # statement must not override the exact-format NARA headline assessment.
+    assert fmt.synthesized_risk["semantic_level"] == "low"
+    assert fmt.synthesized_risk["source_divergence"] is False
     assert fmt.synthesized_risk["scope_divergence"] is True
+    assert fmt.synthesized_risk["cross_scope_level_divergence"] is True
+    assert fmt.synthesized_risk["selected_scope_tier"] == "exact_or_version"
+    assert len(fmt.synthesized_risk["contributors"]) == 1
+    assert fmt.synthesized_risk["contributors"][0]["source_id"] == "nara"
+    assert len(fmt.synthesized_risk["contextual_contributors"]) == 1
+    assert fmt.synthesized_risk["contextual_contributors"][0]["source_id"] == "dpc_bit_list_2025"
 
 
 def test_pdf_mapping_requires_both_pdf_extension_and_pdf_name():
