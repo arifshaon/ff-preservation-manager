@@ -15,6 +15,11 @@ fdd000022,TIFF 6,fmt/353,Q27231633,Not exact,Exact,PRONOM does not distinguish T
 fdd000030,PDF Family,,,No match,,Family-level FDD
 """
 
+_REAL_SCHEMA_SAMPLE = """Filename,LC_Unique_ID,LC_Short_Name,LC_Long_Name,PRONOM_PUID,PRONOM_Note,Wikidata_Title_ID,Wikidata_Note
+/processing/gdc/formats/PUID-Accessibility-reports/fddXML/fdd000001.xml,fdd000001,WAVE,WAVE Audio File Format,fmt/6,See https://www.nationalarchives.gov.uk/PRONOM/fmt/6.,Q217570,See https://www.wikidata.org/wiki/Q217570.
+/processing/gdc/formats/PUID-Accessibility-reports/fddXML/fdd000002.xml,fdd000002,WAVE_LPCM,WAVE Audio File Format with LPCM audio,See note,Pronom's fmt/141 covers PCMWAVFORMAT but this is not precisely the same as LPCM WAV,See related format.,See WAVE and LPCM
+"""
+
 
 def _snapshot(path: Path) -> SourceSnapshot:
     return SourceSnapshot(
@@ -51,6 +56,30 @@ def test_crosswalk_extracts_ids_and_preserves_match_context(tmp_path):
     assert entries[0]["mapping_context"]["PUID Match"] == "Exact"
     assert entries[1]["mapping_context"]["PUID Match"] == "Not exact"
     assert entries[1]["mapping_context"]["Notes"] == "PRONOM does not distinguish TIFF versions"
+
+
+def test_crosswalk_parses_actual_july_2026_loc_column_names(tmp_path):
+    path = tmp_path / "mapping.csv"
+    path.write_text(_REAL_SCHEMA_SAMPLE, encoding="utf-8")
+    adapter = LocFddMappingCsvAdapter(
+        {"id": "loc_fdd_mapping_20260713", "type": "loc_fdd_mapping_csv", "mapping_date": "20260713"},
+        tmp_path,
+    )
+    entries = adapter.extract_entries([_snapshot(path)])
+
+    assert entries[0]["source_record_id"] == "fdd000001:2"
+    assert entries[0]["fdd_ids"] == ["fdd000001"]
+    assert entries[0]["puids"] == ["fmt/6"]
+    assert entries[0]["wikidata_qids"] == ["Q217570"]
+    assert entries[0]["title"] == "WAVE Audio File Format"
+
+    # Identifiers mentioned only in notes are explanatory context, not asserted mappings.
+    assert entries[1]["source_record_id"] == "fdd000002:3"
+    assert entries[1]["fdd_ids"] == ["fdd000002"]
+    assert entries[1]["puids"] == []
+    assert entries[1]["wikidata_qids"] == []
+    assert entries[1]["title"] == "WAVE Audio File Format with LPCM audio"
+    assert "fmt/141" in entries[1]["mapping_context"]["PRONOM_Note"]
 
 
 def test_crosswalk_records_are_evidence_only_and_identifier_ownership_is_preserved(tmp_path):
