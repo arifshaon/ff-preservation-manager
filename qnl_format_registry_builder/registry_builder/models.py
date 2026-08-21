@@ -150,7 +150,28 @@ class CanonicalFormat:
         if claim not in self.identifier_claims:
             self.identifier_claims.append(claim)
 
+    def refresh_risk_views(self) -> None:
+        """Populate preferred multi-source risk views without deleting legacy data."""
+
+        from registry_builder.risk_synthesis import (
+            risk_assessments_from_canonical_fields,
+            synthesize_risk_assessments,
+        )
+
+        self.risk_assessments = risk_assessments_from_canonical_fields(
+            explicit_assessments=self.risk_assessments,
+            external_hazard=self.external_hazard,
+            institution_policy_overlays=self.institution_policy_overlays,
+            source_records=self.source_records,
+            canonical_name=self.preferred_name,
+        )
+        self.synthesized_risk = synthesize_risk_assessments(self.risk_assessments)
+
     def to_dict(self) -> dict[str, Any]:
+        # Persistence/export is the compatibility boundary: old reconciler
+        # outputs are projected into the new multi-source view here, while the
+        # original external_hazard/hazard_assessment fields remain untouched.
+        self.refresh_risk_views()
         data = asdict(self)
         for key, values in data.get("identifiers", {}).items():
             data["identifiers"][key] = sorted(values)
