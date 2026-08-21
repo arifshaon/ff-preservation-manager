@@ -14,6 +14,7 @@ from registry_builder.adapters.qnl_policy_xlsx import QnlPolicyXlsxAdapter
 from registry_builder.adapters.nara_digital_preservation_framework import NaraDigitalPreservationFrameworkAdapter
 from registry_builder.adapters.nara_preservation_csv import NaraPreservationCsvAdapter
 from registry_builder.adapters.wikidata_sparql import WikidataSparqlAdapter
+from registry_builder.adapters.wikidata_sparql_evidence import WikidataSparqlEvidenceAdapter
 from registry_builder.adapters.dpc_bit_list import DpcBitListAdapter
 from registry_builder.plugins import build_registry, resolve_plugin
 
@@ -30,6 +31,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = build_registry(
         QnlInstitutionFormatEvidenceAdapter,
         NaraDigitalPreservationFrameworkAdapter,
         WikidataSparqlAdapter,
+        WikidataSparqlEvidenceAdapter,
         DpcBitListAdapter,
         # Deprecated compatibility aliases. Prefer source-level adapter names.
         NaraPreservationCsvAdapter,
