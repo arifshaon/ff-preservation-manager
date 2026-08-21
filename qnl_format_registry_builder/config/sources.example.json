@@ -100,8 +100,8 @@
       "enabled": true,
       "required": false,
       "edition": "2025",
-      "github_ref": "main",
-      "notes": "Preservation-risk evidence source. The adapter snapshots the DPC Bit List source repository, whose content/entries Markdown files are the source data for the website/report. It is acquisition-only until explicit DPC-entry-to-format/family mappings are reviewed, so it cannot create canonical format records."
+      "github_ref": "3ad3fef626ea7c128ef8c323d92227e5cae2efc8",
+      "notes": "Preservation-risk evidence source. The 2025 edition is pinned to the final observed 2025 DPC repository commit for reproducible acquisition. DPC entries are persisted as evidence_only source records and cannot create canonical format identities; reviewed mappings attach selected risk assessments to existing canonical formats/families."
     },
     {
       "id": "example_curated_source",
