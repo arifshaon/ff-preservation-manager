@@ -10,6 +10,7 @@ def _framework():
         "version": "1",
         "scale": {
             "direction": "higher_is_risk",
+            "min_completeness_for_band": 1.0,
             "bands": [{"band": "Low", "min_score": 0, "max_score": 2}],
         },
         "questions": [
