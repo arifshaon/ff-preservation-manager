@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,12 @@ from registry_builder.storage import create_store
 
 _LOC_AUTHORITY_SOURCES = {"loc_fdd_xml"}
 _PRONOM_AUTHORITY_SOURCES = {"pronom_registry", "pronom_droid_xml"}
+_BROAD_FORMAT_MARKERS = ("family", "generic", "unspecified", "all versions", "multiple versions")
+
+
+def _is_broad_format_name(name: str | None) -> bool:
+    text = str(name or "").strip().lower()
+    return any(marker in text for marker in _BROAD_FORMAT_MARKERS)
 
 
 def _has_verified_claim(
@@ -93,11 +99,13 @@ def verify_pronom_candidate(entry: dict[str, Any], store) -> dict[str, Any] | No
         result["status"] = "authority_claim_missing"
         return result
 
-    if loc_record.get("canonical_id") == pronom_record.get("canonical_id"):
-        result["status"] = "already_reconciled_authoritatively"
+    loc_name = str(entry.get("title") or loc_record.get("preferred_name") or "")
+    if _is_broad_format_name(loc_name):
+        result["status"] = "broad_scope_review"
+        result["scope_reason"] = "LOC description is explicitly family/generic/broad and is not eligible for automatic exact-identity projection."
         return result
 
-    loc_tokens = version_tokens(str(entry.get("title") or loc_record.get("preferred_name") or ""))
+    loc_tokens = version_tokens(loc_name)
     pronom_tokens = version_tokens(str(pronom_record.get("preferred_name") or ""))
     result["loc_version_tokens"] = sorted(loc_tokens)
     result["pronom_version_tokens"] = sorted(pronom_tokens)
@@ -107,6 +115,10 @@ def verify_pronom_candidate(entry: dict[str, Any], store) -> dict[str, Any] | No
         return result
     if bool(loc_tokens) != bool(pronom_tokens):
         result["status"] = "version_scope_review"
+        return result
+
+    if loc_record.get("canonical_id") == pronom_record.get("canonical_id"):
+        result["status"] = "already_reconciled_authoritatively"
         return result
 
     result["status"] = "bridge_candidate_authority_confirmed"
@@ -119,12 +131,32 @@ def verify_review_entries(entries: list[dict[str, Any]], store) -> tuple[list[di
         for entry in entries
         if (result := verify_pronom_candidate(entry, store)) is not None
     ]
+
+    one_to_one_eligible_statuses = {
+        "bridge_candidate_authority_confirmed",
+        "already_reconciled_authoritatively",
+    }
+    by_puid: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for result in results:
+        if result.get("status") in one_to_one_eligible_statuses and result.get("puid"):
+            by_puid[str(result["puid"])].append(result)
+
+    for puid, rows in by_puid.items():
+        if len(rows) <= 1:
+            continue
+        related_fdd_ids = sorted(str(row.get("fdd_id") or "") for row in rows if row.get("fdd_id"))
+        for row in rows:
+            row["pre_scope_status"] = row.get("status")
+            row["status"] = "many_to_one_scope_review"
+            row["related_fdd_ids"] = related_fdd_ids
+            row["scope_reason"] = "More than one non-broad LOC FDD row maps to the same PRONOM PUID; granularity must be reviewed before exact-identity projection."
+
     counts = Counter(str(result.get("status") or "unknown") for result in results)
     summary = {
         "candidate_count": len(results),
         "status_counts": dict(sorted(counts.items())),
         "identity_bridges_approved": 0,
-        "verification_policy": "read_only_authority_confirmation_no_identity_projection",
+        "verification_policy": "read_only_authority_and_scope_confirmation_no_identity_projection",
     }
     return results, summary
 
