@@ -47,6 +47,10 @@ class RawFormatRecord:
     source_id: str
     source_type: str
     source_record_id: str | None = None
+    # `format_identity` records participate in canonical reconciliation.
+    # `evidence_only` records are persisted and may be mapped onto canonical
+    # formats, but must never create canonical identity records themselves.
+    record_role: str = "format_identity"
     name: str | None = None
     category: str | None = None
     description: str | None = None
@@ -59,26 +63,15 @@ class RawFormatRecord:
     identifiers: list[Identifier] = field(default_factory=list)
     urls: dict[str, str] = field(default_factory=dict)
     institution_policy: dict[str, Any] = field(default_factory=dict)
-    # Criterion-level institutional evidence used by preservation-risk analysis.
-    # Unlike institution_policy, this is evidence/context rather than a decision.
     institution_evidence: list[dict[str, Any]] = field(default_factory=list)
-    # Backwards-compatible input alias. New adapters should use institution_policy.
     qnl: dict[str, Any] = field(default_factory=dict)
-    # Source-native risk assessments. New risk-bearing adapters should prefer
-    # this collection and retain the source's own vocabulary/scale. The legacy
-    # `hazard` dict remains supported for existing adapters such as NARA.
     risk_assessments: list[dict[str, Any]] = field(default_factory=list)
     hazard: dict[str, Any] = field(default_factory=dict)
     readiness: dict[str, Any] = field(default_factory=dict)
     trend: dict[str, Any] = field(default_factory=dict)
     evidence: list[dict[str, Any]] = field(default_factory=list)
-    # Source-native fields retained for declarative criterion mappings. Adapters
-    # should put upstream vocabulary here and keep criterion IDs out of adapter code.
     native_fields: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
-    # Source-declared version/profile discriminator. This is identity metadata,
-    # not a risk criterion. It is intentionally optional because some sources
-    # encode versions in the name while others expose a dedicated field.
     version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -99,21 +92,14 @@ class CanonicalFormat:
     source_records: list[dict[str, Any]] = field(default_factory=list)
     institution_policy_overlays: list[dict[str, Any]] = field(default_factory=list)
     institution_evidence_claims: list[dict[str, Any]] = field(default_factory=list)
-    # Every source-native risk assessment is retained independently. This is the
-    # preferred query surface for questions such as "what do NARA and DPC say?".
     risk_assessments: list[dict[str, Any]] = field(default_factory=list)
-    # Optional decision-support view derived from risk_assessments. It never
-    # replaces or rewrites the source-native assessments above.
     synthesized_risk: dict[str, Any] = field(default_factory=dict)
-    # Backwards-compatible hazard fields retained while existing consumers
-    # migrate to risk_assessments/synthesized_risk.
     external_hazard: list[dict[str, Any]] = field(default_factory=list)
     hazard_assessment: dict[str, Any] = field(default_factory=dict)
     readiness: list[dict[str, Any]] = field(default_factory=list)
     trend: list[dict[str, Any]] = field(default_factory=list)
     preservation_method: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
-    # Canonical version/profile when source evidence supplies one consistently.
     version: str | None = None
 
     def add_identifier(
@@ -165,18 +151,12 @@ class CanonicalFormat:
             source_records=self.source_records,
             canonical_name=self.preferred_name,
         )
-        # Institutional assessments are local views of the same format entity,
-        # not a different scope class. Keep provenance in scope_basis/role while
-        # comparing scope only at the format/family/group/content level.
         for assessment in self.risk_assessments:
             if assessment.get("scope_type") == "institutional_format":
                 assessment["scope_type"] = "exact_format"
         self.synthesized_risk = synthesize_risk_assessments(self.risk_assessments)
 
     def to_dict(self) -> dict[str, Any]:
-        # Persistence/export is the compatibility boundary: old reconciler
-        # outputs are projected into the new multi-source view here, while the
-        # original external_hazard/hazard_assessment fields remain untouched.
         self.refresh_risk_views()
         data = asdict(self)
         for key, values in data.get("identifiers", {}).items():
