@@ -36,9 +36,11 @@ def _ids(pattern: re.Pattern[str], text: str, *, upper: bool = False, lower: boo
 
 
 def _first_value_for_headers(row: dict[str, Any], headers: tuple[str, ...]) -> str | None:
-    wanted = {_norm_header(header) for header in headers}
-    for key, value in row.items():
-        if _norm_header(key) not in wanted or value is None:
+    """Return the first non-empty value using the caller's header priority order."""
+    normalized_row = {_norm_header(key): value for key, value in row.items()}
+    for header in headers:
+        value = normalized_row.get(_norm_header(header))
+        if value is None:
             continue
         text = str(value).strip()
         if text:
@@ -101,7 +103,8 @@ def _identifier_column_text(row: dict[str, Any], kind: str) -> str:
 
 def _row_title(row: dict[str, Any]) -> str | None:
     # Prefer the actual LOC crosswalk schema. `Filename` must never win merely
-    # because it contains the substring "name".
+    # because it contains the substring "name". Long name is the preferred
+    # human-readable label; short name is retained only as a fallback.
     preferred = _first_value_for_headers(
         row,
         (
