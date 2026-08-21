@@ -6,7 +6,7 @@
   },
   "exports": {
     "enabled": true,
-    "notes": "Read-only local preview. No MongoDB writes. Exports reviewed LOC source records and draft v2 criterion claims for inspection before production approval."
+    "notes": "Read-only local preview. No MongoDB writes. Exports reviewed LOC source records and second v2 draft criterion claims for inspection before production approval."
   },
   "method_profiles": {
     "enabled": false
@@ -15,10 +15,10 @@
     "enabled": true,
     "mode": "apply",
     "criteria": "criteria/v1.json",
-    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft2.json",
     "include_drafts": true,
     "scope": "all",
-    "notes": "Preview the unreviewed LOC mapping v2 against freshly extracted reviewed LOC XML. Draft claims are exported for inspection but are not persisted to the production registry."
+    "notes": "Preview the unreviewed LOC mapping v2 draft2 against freshly extracted reviewed LOC XML. Draft claims are exported for inspection but are not persisted to the production registry."
   },
   "identifier_kinds": {
     "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
