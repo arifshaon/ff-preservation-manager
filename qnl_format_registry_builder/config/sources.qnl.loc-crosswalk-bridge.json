@@ -1,0 +1,43 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "Persist the full LOC crosswalk as evidence_only plus only the policy-approved LOC-to-PRONOM bridge assertions. Existing DPC, NARA, PRONOM, and reviewed LOC contributions are reused from MongoDB."
+  },
+  "method_profiles": {
+    "enabled": false
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "loc_fdd_mapping_20260713",
+      "type": "loc_fdd_mapping_csv",
+      "enabled": true,
+      "required": true,
+      "mapping_date": "20260713",
+      "mapping_url": "https://www.loc.gov/preservation/digital/formats/mappings/fdd-puid-qid-20260713.csv",
+      "notes": "Full official LOC monthly crosswalk retained as evidence_only. It cannot create canonical identities."
+    },
+    {
+      "id": "loc_fdd_pronom_bridge_20260713",
+      "type": "loc_fdd_pronom_bridge",
+      "enabled": true,
+      "required": true,
+      "local_file": "config/external_identity_mappings/loc_fdd_pronom_20260713.policy-v1.json",
+      "notes": "Policy-approved subset generated from the read-only authority verifier. LOC FDD ID is authoritative from LOC; copied PUID remains verified=false and only bridges to the unique verified PRONOM authority record. Version-scope cases are excluded."
+    }
+  ]
+}
