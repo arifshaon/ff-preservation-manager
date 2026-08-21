@@ -14,6 +14,7 @@ from preservation_risk_manager.evidence_remediation import (
 from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import RiskFramework
 from preservation_risk_manager.question_assessment import assess_format_questions, list_question_catalog
+from preservation_risk_manager.risk_context import build_external_risk_context
 from preservation_risk_manager.scoring import score_answers
 
 
@@ -367,6 +368,7 @@ def _assessment_for_doc(
         "questions": analysis.get("question_results", []),
         "criterion_claims_used": len(claims),
         "evidence_hash": evidence_hash(pack),
+        "external_risk_context": build_external_risk_context(reader, format_doc),
     }
 
 
@@ -416,6 +418,7 @@ def _compact_unbanded(row: dict[str, Any]) -> dict[str, Any]:
         "abstention_count": row.get("abstention_count"),
         "criterion_claims_used": row.get("criterion_claims_used"),
         "evidence_hash": row.get("evidence_hash"),
+        "external_risk_context": deepcopy(row.get("external_risk_context") or {}),
     }
 
 
@@ -435,13 +438,21 @@ def _base_response(request: dict[str, Any], framework: RiskFramework) -> dict[st
 
 
 def _resolution_failure(result: dict[str, Any], resolution: Any) -> dict[str, Any]:
+    total = int(getattr(resolution, "total_match_count", 0) or len(resolution.matches))
     result["status"] = resolution.status
     result["resolution"] = {
         "query": resolution.query,
         "status": resolution.status,
         "match_type": resolution.match_type,
+        "match_count": total,
+        "matches_returned": len(resolution.matches),
         "matches": [_format_identity(row) for row in resolution.matches],
     }
+    if resolution.status == "ambiguous":
+        result["resolution"]["message"] = (
+            f"'{resolution.query}' matches {total} formats; showing {len(resolution.matches)}. "
+            "Specify a canonical ID or authority identifier to assess one format."
+        )
     return result
 
 
@@ -485,7 +496,7 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
         if action == "assess_format":
             result["result"] = _assessment_for_doc(reader, framework, resolution.format_doc, institution_id=institution_id)
         elif action == "assess_format_questions":
-            result["result"] = assess_format_questions(
+            question_result = assess_format_questions(
                 reader,
                 framework,
                 resolution.format_doc,
@@ -494,6 +505,9 @@ def execute_request(reader: RegistryReader, framework: RiskFramework, request: d
                 content_type=filters.get("content_type"),
                 institution_id=institution_id,
             )
+            if isinstance(question_result, dict):
+                question_result["external_risk_context"] = build_external_risk_context(reader, resolution.format_doc)
+            result["result"] = question_result
         else:
             diagnostic = diagnose_format_evidence_gaps(
                 reader,
