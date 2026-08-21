@@ -15,7 +15,7 @@ This matters because sources do not necessarily use the same vocabulary, scale, 
 
 ## Canonical record fields
 
-Canonical records now have two preferred risk views:
+Canonical records have two preferred risk views:
 
 ```text
 risk_assessments[]
@@ -88,10 +88,10 @@ NARA: PDF/A-3 = Low
 scope: exact_format
 
 DPC: PDF = Vulnerable
-scope: format_family
+scope: format_group
 ```
 
-Those statements are not necessarily contradictory. The synthesized result therefore reports scope divergence and retains both source assessments.
+Those statements are not necessarily contradictory. A broad statement about PDF as a group must not silently override a more specific assessment of PDF/A-3.
 
 ## Shared semantic scale
 
@@ -109,72 +109,128 @@ Source-specific mappings into this scale must be explicit and reviewable. A sour
 
 The current pipeline can project its existing normalized Low/Moderate/High NARA and institutional bands directly to low/moderate/high semantic levels.
 
-DPC terminology should be mapped by an approved DPC mapping configuration when the DPC adapter is enabled. Do not infer DPC semantics from title matching or numerical averaging.
+DPC terminology is mapped by an approved DPC mapping configuration. Do not infer DPC semantics from title matching or numerical averaging.
 
-LOC FDD sustainability factors should remain criterion evidence unless an explicit, reviewed method is introduced to derive an overall semantic risk from those factors. The system must not invent a LOC overall risk label.
+LOC FDD sustainability factors remain criterion evidence unless an explicit, reviewed method is introduced to derive an overall semantic risk from those factors. The system must not invent a LOC overall risk label.
 
-## Synthesis method v1
+## Synthesis method v2: scope-aware conservative upper bound
 
-`semantic_risk_synthesis_v1` is intentionally simple and transparent.
+`semantic_risk_synthesis_v2_scope_aware` replaces the original scope-blind v1 headline calculation.
 
-It:
+The method first identifies the most specific available assessment tier:
 
-1. retains every contributing assessment individually;
+```text
+Tier 0  exact_format / format_version / institutional_format
+Tier 1  format_family
+Tier 2  format_group
+Tier 3  content_type
+Tier 4  contextual
+Tier 5  unspecified
+```
+
+It then:
+
+1. retains every source-native assessment independently;
 2. uses only assessments that have an explicit semantic mapping;
-3. does not average native scores;
-4. selects the highest mapped semantic concern as a conservative upper bound;
-5. reports source divergence when mapped levels differ;
-6. reports scope divergence when contributing assessments have different scopes;
-7. lowers confidence when the semantic spread between sources is large;
-8. lists the contributing source assessments in the synthesized result.
+3. selects the most specific available scope tier for the headline result;
+4. within that tier, selects the highest semantic concern as a conservative upper bound;
+5. never numerically averages native source scores;
+6. retains broader-scope assessments as `contextual_contributors`;
+7. reports `scope_divergence` when multiple declared scopes are present;
+8. reports `source_divergence` only when assessments within the selected headline tier disagree semantically;
+9. reports `cross_scope_level_divergence` when broader contextual assessments carry a different semantic level;
+10. exposes the selected scope tier and scope types for audit.
+
+This prevents a broad group-level assessment from changing a more specific headline risk merely because it has a higher semantic concern.
 
 Example:
 
 ```yaml
 risk_assessments:
   - source_label: NARA
-    native_label: High
-    semantic_level: high
+    native_label: Low Risk
+    semantic_level: low
     scope_type: exact_format
+    scope_name: PDF/A-3
 
   - source_label: DPC Global Bit List 2025
     native_label: Vulnerable
     semantic_level: moderate
-    scope_type: format_family
+    scope_type: format_group
+    scope_name: PDF
 
 synthesized_risk:
-  semantic_level: high
-  semantic_label: High concern
-  method: semantic_risk_synthesis_v1
-  basis: conservative_semantic_upper_bound
-  source_divergence: true
+  semantic_level: low
+  semantic_label: Low concern
+  method: semantic_risk_synthesis_v2_scope_aware
+  basis: scope_aware_conservative_semantic_upper_bound
+  selected_scope_tier: exact_or_version
+  selected_scope_types:
+    - exact_format
+  source_divergence: false
   scope_divergence: true
-  explanation: >
-    High concern selected as a conservative semantic upper bound from retained
-    source assessments. Native assessments are not numerically averaged.
+  cross_scope_level_divergence: true
+  contributors:
+    - source_label: NARA
+      native_label: Low Risk
+      scope_type: exact_format
+  contextual_contributors:
+    - source_label: DPC Global Bit List 2025
+      native_label: Vulnerable
+      scope_type: format_group
 ```
 
-The conservative upper bound is a decision-support convention, not a claim that the source scales are mathematically equivalent.
+The DPC assessment remains visible and queryable. It is not discarded; it simply does not override the more specific exact-format assessment.
+
+## When broader evidence supplies the headline
+
+If no more specific mapped assessment exists, the best available broader scope becomes the selected headline tier.
+
+For example, if a PRONOM PDF/A record has no exact-format NARA or institutional assessment but is covered by the reviewed DPC PDF group mapping, the DPC `format_group` assessment may supply the current semantic headline. The result records:
+
+```text
+selected_scope_tier = format_group
+```
+
+This is preferable to reporting no semantic assessment at all, while still making the scope explicit.
+
+## Relationship to synthesis method v1
+
+The former `semantic_risk_synthesis_v1` selected the highest concern across every mapped assessment regardless of scope. That was intentionally conservative but could produce misleading headlines when broad and exact assessments differed.
+
+For example:
+
+```text
+NARA exact PDF/A = Low
+DPC PDF group = Vulnerable -> Moderate
+```
+
+v1 produced `Moderate` with `scope_divergence=true`.
+
+v2 produces `Low` as the exact-format headline and retains DPC `Moderate` as broader contextual evidence.
+
+The source-native records and mappings do not change; only the synthesized decision-support interpretation changes.
 
 ## Query behavior
 
-A query such as "what is the preservation risk of PDF?" should prefer the source-native view first:
+A query such as "what is the preservation risk of PDF/A-3?" should prefer the source-native view first:
 
 ```text
-NARA: Moderate
-DPC Global Bit List 2025: Vulnerable
+NARA: Low Risk — exact format
+DPC Global Bit List 2025: Vulnerable — broader PDF group
 LOC FDD: sustainability evidence available; no native overall risk classification
-QNL: Low
+QNL: <institutional assessment if available>
 ```
 
 If requested, the system can then show:
 
 ```text
-Synthesized semantic risk: Moderate/High/etc.
-Method: semantic_risk_synthesis_v1
-Based on: <explicit contributor list>
-Source divergence: yes/no
-Scope divergence: yes/no
+Synthesized semantic risk: Low
+Method: semantic_risk_synthesis_v2_scope_aware
+Selected scope: exact/version
+Broader contextual concern: DPC PDF = Moderate
+Source divergence at selected scope: no
+Scope divergence: yes
 ```
 
 This keeps source truth auditable while still giving users a useful decision-support summary.
