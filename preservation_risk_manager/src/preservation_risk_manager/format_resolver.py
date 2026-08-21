@@ -7,6 +7,7 @@ from preservation_risk_manager.data_access import RegistryReader
 
 
 AUTHORITY_IDENTIFIER_KINDS = {"puid", "loc", "nara", "wikidata"}
+AMBIGUOUS_MATCH_LIMIT = 10
 
 
 @dataclass(frozen=True)
@@ -16,6 +17,7 @@ class FormatResolution:
     match_type: str | None = None
     format_doc: dict[str, Any] | None = None
     matches: tuple[dict[str, Any], ...] = ()
+    total_match_count: int = 0
 
     @property
     def resolved(self) -> bool:
@@ -151,13 +153,26 @@ def _candidate_match(format_doc: dict[str, Any], query: str) -> tuple[int, str] 
     return None
 
 
+def _human_relevance(format_doc: dict[str, Any], query: str) -> int:
+    """Prefer ambiguous candidates whose human-readable names contain the token."""
+    normalized = _normalize(query).lstrip(".")
+    if not normalized:
+        return 0
+    values = _field_values(
+        format_doc,
+        ("name", "preferred_name", "label", "short_name", "display_name", "aliases", "alternative_names"),
+    )
+    return 1 if any(normalized in value for value in values) else 0
+
+
 def resolve_format(query: str, format_docs: Iterable[dict[str, Any]]) -> FormatResolution:
     """Resolve a user-supplied format token against canonical format documents.
 
     Resolution is strict by design: exact IDs and verified authority identifiers
     have highest precedence; copied/unverified strong authority identifiers are
     weaker evidence; exact human names outrank generic MIME/extension matches.
-    Ambiguity is reported instead of guessed.
+    Ambiguity is reported instead of guessed. Ambiguous responses return at most
+    ten choices while preserving the total match count for the caller.
     """
     candidates: list[tuple[int, str, dict[str, Any]]] = []
     for format_doc in format_docs:
@@ -167,20 +182,33 @@ def resolve_format(query: str, format_docs: Iterable[dict[str, Any]]) -> FormatR
             candidates.append((priority, match_type, format_doc))
 
     if not candidates:
-        return FormatResolution(query=query, status="not_found")
+        return FormatResolution(query=query, status="not_found", total_match_count=0)
 
     highest_priority = max(priority for priority, _, _ in candidates)
     top = [(match_type, format_doc) for priority, match_type, format_doc in candidates if priority == highest_priority]
     match_type = top[0][0]
-    matches = tuple(format_doc for _, format_doc in top)
+    matches = [format_doc for _, format_doc in top]
     if len(matches) > 1:
-        return FormatResolution(query=query, status="ambiguous", match_type=match_type, matches=matches)
+        # Keep source order within the same relevance tier. This makes a generic
+        # token such as PDF show actual PDF-labelled records ahead of unrelated
+        # formats that merely share the .pdf extension, without guessing one.
+        matches.sort(key=lambda row: -_human_relevance(row, query))
+        total_match_count = len(matches)
+        shown = tuple(matches[:AMBIGUOUS_MATCH_LIMIT])
+        return FormatResolution(
+            query=query,
+            status="ambiguous",
+            match_type=match_type,
+            matches=shown,
+            total_match_count=total_match_count,
+        )
     return FormatResolution(
         query=query,
         status="resolved",
         match_type=match_type,
         format_doc=matches[0],
-        matches=matches,
+        matches=(matches[0],),
+        total_match_count=1,
     )
 
 
