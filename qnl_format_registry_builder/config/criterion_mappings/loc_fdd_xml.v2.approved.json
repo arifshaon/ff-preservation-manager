@@ -1,0 +1,149 @@
+{
+  "source_type": "loc_fdd_xml",
+  "mapping_version": "2026-08-21-v2-approved",
+  "criteria_version": "v1",
+  "native_vocabulary": "loc_fdd_xml",
+  "mapping_mode": "manual_approved",
+  "review_status": "approved",
+  "claim_review_status": "approved",
+  "decided_by": "QNL DCPA",
+  "decided_at": "2026-08-21",
+  "notes": "Approved after fresh reviewed extraction of all 598 LOC FDD records, seven-factor coverage review, regression testing, and manual inspection of high-impact IP/licensing classifications. Precision is preferred over recall: relational, historical, mixed, or otherwise ambiguous LOC prose remains unmapped rather than being forced into a normalized criterion value. This mapping does not create an overall LOC risk score.",
+  "excluded_from_criteria": [
+    {"field": "urls.loc", "reason": "LOC URL is registry-location evidence, not sustainability criterion evidence."},
+    {"field": "loc_ids", "reason": "LOC FDD identifier is identity evidence, not preservation-risk criterion evidence."},
+    {"field": "puids", "reason": "PUIDs found in LOC FDD text are identity cross-references, not sustainability criterion evidence."},
+    {"field": "wikidata_ids", "reason": "Wikidata IDs found in LOC FDD text are identity cross-references, not sustainability criterion evidence."}
+  ],
+  "maps": [
+    {
+      "id": "loc.disclosure.from_sustainability_factor.v2",
+      "criterion": "sustainability.disclosure",
+      "from_field": "native_fields.sustainability_factors.disclosure",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"Full": "public_specification", "Partial": "partial_specification", "Minimal": "proprietary_documented", "No": "undocumented", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "undocumented", "contains_any": ["not documented", "undocumented", "no specification", "little documentation"]},
+        {"value": "public_specification", "contains_any": ["fully disclosed", "fully documented", "open standard", "publicly available specification", "published specification", "complete documentation", "specification is available"]},
+        {"value": "proprietary_documented", "contains_any": ["proprietary format", "documentation requires purchase", "specification requires purchase", "documentation is available for purchase"]},
+        {"value": "partial_specification", "contains_any": ["partially disclosed", "limited documentation", "some documentation", "documentation is available"]}
+      ],
+      "rationale": "LOC Disclosure prose is source evidence about technical information and documentation availability. Text rules remain conservative and transparent."
+    },
+    {
+      "id": "loc.adoption.from_sustainability_factor.v2",
+      "criterion": "sustainability.adoption",
+      "from_field": "native_fields.sustainability_factors.adoption",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"Very High": "very_high", "High": "high", "Moderate": "moderate", "Low": "low", "Negligible": "negligible", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "low", "contains_any": ["limited adoption", "little adoption", "not widely adopted", "rarely used"]},
+        {"value": "very_high", "contains_any": ["very widely adopted", "ubiquitous", "de facto standard"]},
+        {"value": "high", "contains_any": ["widely adopted", "widely used", "broadly used", "commonly used", "well established"]},
+        {"value": "moderate", "contains_any": ["some adoption", "moderate adoption", "moderate levels of adoption", "used in some", "niche adoption"]}
+      ],
+      "rationale": "LOC Adoption prose describes implementation and use. Claims are derived only when common phrases give a clear adoption signal."
+    },
+    {
+      "id": "loc.transparency.from_sustainability_factor.v2",
+      "criterion": "sustainability.transparency_readability",
+      "from_field": "native_fields.sustainability_factors.transparency",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"Transparent": "transparent", "Partially Transparent": "partially_transparent", "Opaque": "opaque", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "opaque", "contains_any": ["opaque", "binary encoding", "not transparent"]},
+        {"value": "partially_transparent", "contains_any": ["partially transparent", "partly transparent", "depends on", "requires software"]},
+        {"value": "transparent", "contains_any": ["human-readable", "plain text", "simple text", "can be read with simple tools", "transparent"]}
+      ],
+      "rationale": "Specific partial-transparency phrases are evaluated before the broader transparent token so rule ordering cannot promote a partial statement to transparent."
+    },
+    {
+      "id": "loc.self_documentation.from_sustainability_factor.v2",
+      "criterion": "sustainability.self_documentation",
+      "from_field": "native_fields.sustainability_factors.self_documentation",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"Self-documenting": "self_describing", "Partial": "partially_self_describing", "External": "externally_documented", "None": "not_self_describing", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "not_self_describing", "contains_any": ["not self-documenting", "does not support embedded metadata", "no embedded metadata"]},
+        {"value": "self_describing", "contains_any": ["self-documenting", "self describing", "embedded metadata", "includes metadata"]},
+        {"value": "partially_self_describing", "contains_any": ["limited metadata", "some metadata", "partial metadata"]},
+        {"value": "externally_documented", "contains_any": ["external metadata", "metadata is external"]}
+      ],
+      "rationale": "LOC Self-documentation prose describes support for descriptive, administrative, structural, or accessibility metadata."
+    },
+    {
+      "id": "loc.external_dependencies.from_sustainability_factor.v2",
+      "criterion": "sustainability.external_dependencies",
+      "from_field": "native_fields.sustainability_factors.external_dependencies",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"None": "none", "None.": "none", "Low": "low", "Moderate": "moderate", "High": "high", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "none", "equals_any": ["None", "None."]},
+        {"value": "high", "contains_any": ["requires specific hardware", "requires proprietary software", "depends on proprietary", "requires external software"]},
+        {"value": "moderate", "contains_any": ["requires software", "specialized software", "specific software"]},
+        {"value": "low", "contains_any": ["some dependency", "minor dependency", "limited dependency", "fonts be embedded", "fonts are embedded", "font embedding"]}
+      ],
+      "rationale": "LOC External dependencies prose describes need for external software or hardware. Embedded-font dependencies remain low because the dependency can be internalized in the file/profile."
+    },
+    {
+      "id": "loc.patents.from_sustainability_factor.v2",
+      "criterion": "sustainability.ip_licensing",
+      "from_field": "native_fields.sustainability_factors.impact_of_patents",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"None": "no_known_barrier", "None.": "no_known_barrier", "Low": "limited_or_unclear", "Moderate": "limited_or_unclear", "High": "known_constraint", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "no_known_barrier", "equals_any": ["None", "None."]},
+        {
+          "value": "no_known_barrier",
+          "contains_any": ["no known patent", "no known licensing", "no known intellectual property", "no patent restrictions", "no patent restriction", "no licensing restrictions", "no licensing restriction", "no licensing or patent", "no licensing and patent", "no licensing concerns", "no patent concerns", "no concerns", "no issues", "patent-free", "patent free", "without restriction"]
+        },
+        {
+          "value": "no_known_barrier",
+          "contains_any": ["royalty-free", "royalty free", "royalty and license-fee free", "royalty and license fee free", "free of royalties"],
+          "not_contains_any": ["not a formal guarantee", "unable to identify", "heavily encumbered", "royalties may be required", "royalty may be required", "license and royalties may be required", "patent pool license", "licensing rates", "license programs", "bilateral licenses", "under license from", "only under license", "must become adopters"]
+        },
+        {
+          "value": "known_constraint",
+          "contains_any": ["patent encumbrance", "patent encumbered", "heavily encumbered with patents", "royalties may be required", "royalty may be required", "license and royalties may be required", "royalty payments", "royalty fees", "patent license required", "patent license is required", "patent pool license", "licensing rates"]
+        },
+        {"value": "limited_or_unclear", "contains_any": ["patent", "licensing", "license"]}
+      ],
+      "rationale": "Explicit no-barrier and royalty-free statements are recognized before generic patent/licensing tokens. Royalty-free text is blocked from no-barrier classification when the same LOC prose also contains a concrete licensing caveat. Known constraint is reserved for strong evidence such as patent encumbrance, required royalties, patent-pool licensing, or licensing rates; mixed or generic licensing prose remains limited_or_unclear."
+    },
+    {
+      "id": "loc.technical_protection.from_sustainability_factor.v2",
+      "criterion": "sustainability.tpm_encryption",
+      "from_field": "native_fields.sustainability_factors.technical_protection_mechanisms",
+      "directness": "derived",
+      "covers": "partial",
+      "source_independence": "independent",
+      "mapping_status": "accepted",
+      "values": {"None": "none_or_not_applicable", "None.": "none_or_not_applicable", "Low": "possible", "Moderate": "possible", "High": "known_constraint", "Unknown": "unknown"},
+      "text_rules": [
+        {"value": "none_or_not_applicable", "equals_any": ["None", "None."]},
+        {"value": "none_or_not_applicable", "contains_any": ["no technical protection", "no drm", "no encryption"]},
+        {"value": "known_constraint", "contains_any": ["requires acquisition of a license", "requires a license", "license containing a key", "password required", "must be decrypted", "cannot be played"]},
+        {"value": "possible", "contains_any": ["digital rights management", "drm", "encryption", "encrypted", "password protection", "technical protection", "obfuscation"]}
+      ],
+      "rationale": "Support for encryption or DRM is evidence that protection is possible, not automatically a standing preservation constraint. Known constraint is reserved for text that explicitly describes a required key, license, password, or equivalent access barrier."
+    }
+  ]
+}
