@@ -53,11 +53,13 @@ def test_canonical_serialization_retains_nara_and_institution_risk_separately():
     assert data["synthesized_risk"]["semantic_level"] == "high"
     assert data["synthesized_risk"]["source_divergence"] is True
     assert data["synthesized_risk"]["scope_divergence"] is False
-    assert data["synthesized_risk"]["basis"] == "conservative_semantic_upper_bound"
+    assert data["synthesized_risk"]["basis"] == "scope_aware_conservative_semantic_upper_bound"
+    assert data["synthesized_risk"]["selected_scope_tier"] == "exact_or_version"
+    assert data["synthesized_risk"]["contextual_contributors"] == []
     assert "not numerically averaged" in data["synthesized_risk"]["explanation"]
 
 
-def test_dpc_style_family_assessment_can_coexist_with_exact_format_assessment():
+def test_dpc_style_family_assessment_is_context_when_exact_format_assessment_exists():
     assessments = [
         {
             "assessment_role": "external",
@@ -85,11 +87,44 @@ def test_dpc_style_family_assessment_can_coexist_with_exact_format_assessment():
 
     result = synthesize_risk_assessments(assessments)
 
-    assert result["semantic_level"] == "moderate"
-    assert result["source_divergence"] is True
+    assert result["semantic_level"] == "low"
+    assert result["source_divergence"] is False
     assert result["scope_divergence"] is True
-    assert len(result["contributors"]) == 2
+    assert result["cross_scope_level_divergence"] is True
+    assert result["selected_scope_tier"] == "exact_or_version"
+    assert result["contributing_levels"] == ["low"]
+    assert result["contextual_levels"] == ["moderate"]
+    assert len(result["contributors"]) == 1
+    assert result["contributors"][0]["source_id"] == "nara"
+    assert len(result["contextual_contributors"]) == 1
+    assert result["contextual_contributors"][0]["source_id"] == "dpc_bit_list_2025"
     assert "DPC Global Bit List 2025: Vulnerable -> Moderate concern" in result["explanation"]
+    assert "do not override the headline result" in result["explanation"]
+
+
+def test_broad_assessment_supplies_headline_when_no_more_specific_assessment_exists():
+    assessments = [
+        {
+            "assessment_role": "external",
+            "source_id": "dpc_bit_list_2025",
+            "source_type": "dpc_bit_list",
+            "source_record_id": "PDF",
+            "source_label": "DPC Global Bit List 2025",
+            "native_label": "Vulnerable",
+            "semantic_level": "moderate",
+            "scope_type": "format_group",
+            "scope_name": "PDF",
+        }
+    ]
+
+    result = synthesize_risk_assessments(assessments)
+
+    assert result["semantic_level"] == "moderate"
+    assert result["selected_scope_tier"] == "format_group"
+    assert result["selected_scope_types"] == ["format_group"]
+    assert len(result["contributors"]) == 1
+    assert result["contextual_contributors"] == []
+    assert result["scope_divergence"] is False
 
 
 def test_loc_sustainability_source_does_not_create_overall_risk_assessment():
