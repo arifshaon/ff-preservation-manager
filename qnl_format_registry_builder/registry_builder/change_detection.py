@@ -116,6 +116,35 @@ def _canonical_transition_map(
     return transitions
 
 
+def _canonical_split_map(
+    previous_by_id: dict[str, dict[str, Any]],
+    current_by_id: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, set[tuple[str, str]]]]:
+    """Find prior canonicals whose exact source provenance is now distributed.
+
+    A split is inferred only from source-record keys that have exactly one
+    current owner. Ambiguous/duplicated provenance is ignored rather than used
+    to manufacture a split.
+    """
+    current_index: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for canonical_id, record in current_by_id.items():
+        for key in _source_record_keys(record):
+            current_index[key].add(canonical_id)
+
+    splits: dict[str, dict[str, set[tuple[str, str]]]] = {}
+    for previous_id, previous_record in previous_by_id.items():
+        owners: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        for key in _source_record_keys(previous_record):
+            candidates = current_index.get(key, set())
+            if len(candidates) != 1:
+                continue
+            owner = next(iter(candidates))
+            owners[owner].add(key)
+        if len(owners) > 1:
+            splits[previous_id] = dict(owners)
+    return splits
+
+
 def _summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
     if not record:
         return None
@@ -140,6 +169,7 @@ def _action(change_type: str) -> str:
         "record_removed": "Confirm whether the upstream source intentionally removed the format or whether the source adapter/configuration changed.",
         "canonical_rekeyed": "Confirm the canonical identity transition is expected; the same source record is retained under a stronger or otherwise preferred canonical key.",
         "canonical_merged": "Review the canonical merge and confirm that the contributing source records genuinely describe the same format identity.",
+        "canonical_split": "Review the canonical split and confirm that previously combined source records should now remain as separate format identities.",
         "preferred_name_changed": "Review the naming change and update local documentation or aliases if needed.",
         "category_changed": "Review whether the category change affects method profiles, readiness, or policy grouping.",
         "identifiers_changed": "Review identifier changes before using them for automated matching or policy decisions.",
@@ -270,8 +300,7 @@ def detect_registry_changes(
     The first run against an empty store establishes a baseline and intentionally
     does not generate one `record_added` event per format. Subsequent runs compare
     deterministic canonical IDs and selected evidence fields. Provenance is used
-    to distinguish a true source removal from a canonical re-key/merge caused by
-    stronger reconciliation evidence.
+    to distinguish true source changes from canonical re-key/merge/split changes.
     """
     previous_by_id = _by_id(previous_registry)
     current_by_id = _by_id(current_registry)
@@ -330,7 +359,34 @@ def detect_registry_changes(
         event["shared_source_records"] = _serialized_source_record_keys(shared_keys)
         changes.append(event)
 
-    for canonical_id in sorted((current_ids - previous_ids) - transition_targets):
+    splits = _canonical_split_map(previous_by_id, current_by_id)
+    split_previous_ids = set(splits)
+    split_new_targets: set[str] = set()
+    for previous_id in sorted(splits):
+        owners = splits[previous_id]
+        current_owner_ids = sorted(owners)
+        split_new_targets.update(set(current_owner_ids) - previous_ids)
+        event = _event(
+            run_id=run_id,
+            created_at=created_at,
+            change_type="canonical_split",
+            canonical_id=previous_id,
+            previous=_summary(previous_by_id[previous_id]),
+            current=[_summary(current_by_id[current_id]) for current_id in current_owner_ids],
+            severity="review",
+        )
+        event["previous_canonical_id"] = previous_id
+        event["current_canonical_ids"] = current_owner_ids
+        event["redistributed_source_records"] = [
+            {
+                "current_canonical_id": current_id,
+                "source_records": _serialized_source_record_keys(owners[current_id]),
+            }
+            for current_id in current_owner_ids
+        ]
+        changes.append(event)
+
+    for canonical_id in sorted((current_ids - previous_ids) - transition_targets - split_new_targets):
         changes.append(_event(
             run_id=run_id,
             created_at=created_at,
@@ -340,7 +396,7 @@ def detect_registry_changes(
             severity="review",
         ))
 
-    for canonical_id in sorted((previous_ids - current_ids) - transitioned_previous_ids):
+    for canonical_id in sorted((previous_ids - current_ids) - transitioned_previous_ids - split_previous_ids):
         changes.append(_event(
             run_id=run_id,
             created_at=created_at,
