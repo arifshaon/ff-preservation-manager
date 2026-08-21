@@ -6,10 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from registry_builder.adapters.dpc_bit_list import (
-    DEFAULT_DPC_GITHUB_REF,
-    DpcBitListAdapter,
-)
+from registry_builder.adapters.dpc_bit_list import DpcBitListAdapter
 
 
 def _csv_value(value: Any) -> str:
@@ -58,14 +55,17 @@ def main() -> None:
         prog="python -m registry_builder.dpc_bit_list_download",
         description=(
             "Acquire the DPC Global Bit List source repository and write a "
-            "structured review dataset without creating registry records."
+            "structured review dataset without creating canonical registry records."
         ),
     )
     parser.add_argument("--out", default="dpc-bit-list-2025.json", help="JSON review dataset")
     parser.add_argument("--csv", help="Optional CSV review dataset; defaults to the JSON stem with .csv")
     parser.add_argument("--workdir", default="work", help="Snapshot/cache work directory")
     parser.add_argument("--edition", default="2025")
-    parser.add_argument("--github-ref", default=DEFAULT_DPC_GITHUB_REF)
+    parser.add_argument(
+        "--github-ref",
+        help="Override the edition's pinned DPC Git commit/ref; omit for the reproducible edition default",
+    )
     parser.add_argument("--archive-url", help="Override the DPC GitHub archive URL")
     parser.add_argument("--local-archive", help="Use a local DPC repository ZIP as source material")
     parser.add_argument("--offline", action="store_true", help="Reuse a previously cached archive snapshot")
@@ -75,9 +75,10 @@ def main() -> None:
         "id": f"dpc_bit_list_{args.edition}",
         "type": "dpc_bit_list",
         "edition": args.edition,
-        "github_ref": args.github_ref,
         "offline": args.offline,
     }
+    if args.github_ref:
+        source_config["github_ref"] = args.github_ref
     if args.archive_url:
         source_config["archive_url"] = args.archive_url
     if args.local_archive:
@@ -108,7 +109,7 @@ def main() -> None:
         "source_id": source_config["id"],
         "source_type": "dpc_bit_list",
         "edition": args.edition,
-        "github_ref": args.github_ref,
+        "github_ref": adapter._github_ref(),
         "output_file": str(out_path),
         "csv_file": str(csv_path),
         "snapshot_file": snapshot.local_path if snapshot else None,
@@ -118,8 +119,8 @@ def main() -> None:
         "entry_count": len(entries),
         "classification_counts": dict(sorted(classification_counts.items())),
         "scope_counts": dict(sorted(scope_counts.items())),
-        "acquisition_only": True,
-        "registry_records_created": 0,
+        "identity_projection": False,
+        "canonical_registry_records_created": 0,
     }
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
