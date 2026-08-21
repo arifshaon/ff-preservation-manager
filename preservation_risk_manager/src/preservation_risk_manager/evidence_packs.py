@@ -5,6 +5,9 @@ import hashlib
 import json
 from typing import Any
 
+from preservation_risk_manager.identity_evidence import derive_registry_identity_evidence
+
+
 GLOBAL_EVIDENCE_KEYS = (
     "global_evidence",
     "risk_evidence",
@@ -196,7 +199,8 @@ def build_evidence_pack(
     The registry remains the evidence source. Global packs contain only global
     evidence and authority-asserted migration pathways. Institution packs add
     institution-scoped evidence and local migration readiness for the requested
-    institution only.
+    institution only. Verified canonical PUID claims are projected into a narrow
+    registry-recognition evidence item; copied/unverified identifiers are ignored.
     """
     global_criterion_claims, institution_criterion_claims = _split_criterion_claims(
         criterion_claims or [],
@@ -207,11 +211,12 @@ def build_evidence_pack(
         _collect(format_record, GLOBAL_EVIDENCE_KEYS),
         global_criterion_claims,
     )
+    registry_identity_evidence = derive_registry_identity_evidence(format_record)
     pack: dict[str, Any] = {
         "scope": "institution" if institution_id else "global",
         "format": format_identity(format_record),
         "global_evidence": _usable_items(
-            global_legacy_evidence + global_criterion_claims,
+            global_legacy_evidence + global_criterion_claims + registry_identity_evidence,
             include_unapproved=include_unapproved,
         ),
         "migration_pathway_evidence": _usable_items(
