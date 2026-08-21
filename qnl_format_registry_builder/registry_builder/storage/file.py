@@ -22,6 +22,7 @@ _COLLECTIONS = (
     "assessment_changes",
     "criterion_claims",
     "risk_assessment_claims",
+    "source_relationship_claims",
 )
 
 
