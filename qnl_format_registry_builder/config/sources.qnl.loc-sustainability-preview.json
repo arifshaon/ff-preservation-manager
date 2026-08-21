@@ -1,0 +1,40 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": false,
+  "storage": {
+    "type": "memory"
+  },
+  "exports": {
+    "enabled": true,
+    "notes": "Read-only local preview. No MongoDB writes. Exports reviewed LOC source records and draft v2 criterion claims for inspection before production approval."
+  },
+  "method_profiles": {
+    "enabled": false
+  },
+  "criterion_mapping": {
+    "enabled": true,
+    "mode": "apply",
+    "criteria": "criteria/v1.json",
+    "mappings": "criterion_mappings/loc_fdd_xml.v2.draft.json",
+    "include_drafts": true,
+    "scope": "all",
+    "notes": "Preview the unreviewed LOC mapping v2 against freshly extracted reviewed LOC XML. Draft claims are exported for inspection but are not persisted to the production registry."
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml_reviewed",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "fdd_xml_zip",
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+      "notes": "Fresh reviewed extraction only. Exact factor labels are required; arbitrary prose mentioning factor names cannot create sustainability fields. Documentation is retained as supporting Disclosure evidence rather than an eighth factor."
+    }
+  ]
+}
