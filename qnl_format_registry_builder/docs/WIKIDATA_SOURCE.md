@@ -1,41 +1,76 @@
-# Wikidata file-format acquisition
+# Wikidata file-format source
 
-The `wikidata_sparql` source adapter is currently **acquisition-only**. It downloads file-format metadata from the Wikidata Query Service and stores a review CSV plus immutable source snapshots.
+Status: **production-ready through the controlled Wikidata evidence/relationship refresh workflow** as of 2026-08-21.
 
-It does **not** normalize Wikidata rows into `RawFormatRecord`, reconcile QIDs/PUIDs, create criterion claims, alter canonical formats, or write Wikidata-derived data to MongoDB.
+Wikidata is used by the QNL registry as a source-native technical/context source and as a cross-registry linking source. It is **not** a canonical identity authority and is **not** a preservation-risk authority.
+
+The supported production model is:
+
+```text
+Wikidata QID
+    -> evidence-only source record
+    -> semantic classification/context/technical evidence
+    -> copied PRONOM / LOC / NARA identifiers (unverified)
+    -> governed source_relationship_claim(s) to existing canonicals
+```
+
+For the complete production decision record, baseline counts and operational workflow, see [`WIKIDATA_PRODUCTION_INTEGRATION.md`](WIKIDATA_PRODUCTION_INTEGRATION.md).
+
+## Adapters and responsibility boundary
+
+Two adapter types deliberately have different responsibilities.
+
+### `wikidata_sparql`
+
+This is the low-level acquisition/review adapter. It downloads file-format metadata from the Wikidata Query Service, stores immutable content-addressed snapshots and produces the merged review CSV. Its `extract()` method intentionally returns no `RawFormatRecord` objects.
+
+Use it for acquisition diagnostics, population-policy comparison and source review.
+
+### `wikidata_sparql_evidence`
+
+This is the production extraction adapter. It inherits the same frozen acquisition behavior, then projects the acquired CSV into source-native `RawFormatRecord` objects with a hard identity boundary:
+
+```text
+record_role = evidence_only
+identity_projection = false
+identifier_promotion = false
+```
+
+The semantic Wikidata role is retained independently, for example `format`, `format_family`, `format_subclass`, `container`, `codec_or_encoding`, `authority_linked_unclassified` or `other_format_concept`.
+
+A QID is a verified **Wikidata source identity**. PRONOM, LOC and NARA identifiers copied from Wikidata remain unverified assertions and are never promoted to authority-owned canonical identifiers.
+
+## Frozen production safety contract
+
+Wikidata must never, by itself:
+
+- create a canonical format;
+- merge canonical formats;
+- promote a copied PRONOM/LOC/NARA identifier to verified identity;
+- use a label as canonical identity;
+- generate preservation-risk assessments;
+- generate criterion claims;
+- assume one QID corresponds to one external authority identity.
+
+A broad Wikidata concept may legitimately carry several external authority identifiers. Such a QID can therefore relate to several existing canonicals. Those links are preserved as source context, not collapsed into identity equivalence.
 
 ## Why population policy is explicit
 
-The default acquisition no longer uses unrestricted transitive `P31/P279* -> Q235557` discovery. The completed broad acquisition contained 85,269 QIDs and pulled in large unrelated ontology branches such as Wikimedia modules, templates and map-data modules.
+The original unrestricted transitive discovery route:
 
-The replacement policy is explicit, versioned, evidence-based and deliberately conservative. `P279` is still harvested as source context, but never determines population membership transitively.
+```text
+P31/P279* -> Q235557
+```
 
-## Validation history
+produced 85,269 QIDs and pulled in large unrelated ontology branches such as Wikimedia modules, templates and map-data modules.
 
-### Policy v1
+The production acquisition policy is explicit, versioned and evidence-gated. `P279` is still harvested as source context but never determines population membership transitively.
 
-Policy v1 reduced the population from 85,269 QIDs to 15,233. The repeatable comparison command reproduced the previously identified 595 useful non-direct records exactly:
+Current population policy:
 
-- 391 / 595 retained;
-- 204 / 595 missing.
-
-The missing-class census was reviewed to define policy v2.
-
-### Policy v2
-
-Policy v2 expanded the reviewed specialist-class allowlist and added an evidence-gated XML route.
-
-The resulting acquisition contained 15,421 QIDs:
-
-- 539 / 595 useful non-direct records retained;
-- 56 / 595 still missing;
-- 90.6% retention of the old useful non-direct diagnostic set;
-- only 188 QIDs added compared with v1;
-- no v1 QIDs removed.
-
-The remaining 56 records were reviewed individually. Most were preservation-relevant versions or variants whose Wikidata `P31` points to a specific parent format/family/product rather than a reusable format class. Examples included Word Binary versions, SWF versions, PDF/VT variants, STATISTICA file types, Softdisk Family Tree file types, Parchive versions, Python bytecode and WebP Extended.
-
-That review defines policy v3.
+```text
+2026-08-20-v3
+```
 
 ## Policy v3 population union
 
@@ -56,7 +91,7 @@ The authority-linked routes remain independent of Wikidata classification.
 
 ## Reviewed specialist file-format classes
 
-These direct `P31` classes are treated as format classes for acquisition:
+The direct `P31` specialist classes approved for population discovery are:
 
 - image file format (`Q1572121`);
 - archive file format (`Q1351368`);
@@ -78,11 +113,11 @@ These direct `P31` classes are treated as format classes for acquisition:
 - e-book file format (`Q81986407`);
 - exe-extension-associated executable file format (`Q17560541`).
 
-A record can carry additional `P31` values. Those remain source-native context and do not erase the approved format-class evidence.
+A record may carry additional `P31` values. They remain source-native context and do not erase approved population evidence.
 
 ## Evidence-gated routes
 
-The conditional routes require at least one of:
+Conditional routes require at least one of:
 
 - PRONOM ID (`P2748`);
 - LOC FDD ID (`P3266`);
@@ -97,7 +132,7 @@ The conditional routes require at least one of:
 
 ### Reviewed format parents
 
-Some version/variant records are modeled as direct instances of a particular parent concept. These parents are acquisition selectors only; they are **not** promoted to reusable file-format classes:
+Some preservation-relevant versions/variants are modeled as direct instances of a particular parent rather than a reusable format class. The following parents are acquisition selectors only; they are not promoted to general canonical format classes:
 
 - Renoise Song (`Q2597575`);
 - Parchive (`Q497118`);
@@ -111,11 +146,9 @@ Some version/variant records are modeled as direct instances of a particular par
 - Python bytecode (`Q28009469`);
 - WebP Extended (`Q45989477`).
 
-This distinction is deliberate: a product or specific parent concept can be useful for discovering its preservation-relevant child versions without asserting that the parent itself is a general file-format class.
-
 ### Context classes
 
-`video compression format` (`Q7927899`) is acquired conditionally as preservation context. These records are expected to receive a later role such as `codec_or_encoding`, not automatic canonical file-format status.
+`video compression format` (`Q7927899`) is acquired conditionally as preservation context. Its records can be classified semantically as `codec_or_encoding` but remain evidence-only for canonical identity purposes.
 
 ### Open file format
 
@@ -124,95 +157,67 @@ This distinction is deliberate: a product or specific parent concept can be usef
 - domain application protocol (`Q16937237`);
 - de facto standard (`Q385853`).
 
-This keeps useful format-like records while avoiding known ambiguous protocol/standard cases.
+## Deliberate exclusions
 
-## Deliberate exclusions from the final 56 review
+Policy v3 does not try mechanically to recover every record reached by the former transitive crawl. Concepts deliberately left outside the acquisition boundary include protocol/language/pathological-file cases such as oEmbed in protocol classifications, Biological Expression Language, 42.zip, HTTP Cache, and broad programming-language/protocol/standard classes.
 
-Policy v3 does not aim mechanically for 595 / 595 recovery. The remaining review included concepts that should stay outside the file-format acquisition boundary, such as protocol/language/pathological-file examples.
+The goal is a defensible and reproducible preservation-format population, not reproduction of accidental ontology reachability.
 
-Examples deliberately not promoted by class include:
+## Policy validation history
 
-- oEmbed where classified as a domain application protocol;
-- Biological Expression Language where classified as a domain-specific/programming language;
-- 42.zip as a zip-bomb/computer-file example;
-- HTTP Cache where modeled as a de facto standard;
-- broad programming-language, protocol, standard and generic computer-file classes.
+The broad acquisition contained **85,269** QIDs.
 
-The target is a defensible acquisition boundary, not perfect reproduction of everything the old transitive crawl happened to find.
+Policy v1 reduced that population to **15,233** and retained 391 of a reviewed 595-record useful non-direct diagnostic set.
 
-## Policy identity and reproducibility
+Policy v2 increased the population to **15,421** and retained 539 / 595 useful non-direct records.
 
-The current population-policy version is `2026-08-20-v3`.
+Policy v3 added the reviewed parent/context routes and produced the approved production population of **15,479** QIDs. It retained 590 / 595 useful non-direct records while reducing the broad population by about 81.9%. The remaining five reviewed cases were intentionally excluded rather than forced into scope.
+
+## Acquisition reproducibility
 
 The query-set hash includes:
 
-- all population-query templates;
-- policy version;
+- every population-query template;
+- population-policy version;
 - reviewed specialist-class QIDs;
 - conditional XML class;
 - reviewed format-parent QIDs;
 - contextual class QIDs;
 - open-format class and exclusions;
-- batch query templates;
+- property-batch query templates;
 - output columns.
 
-The same policy metadata is written into the population snapshot, acquisition session manifest and final acquisition metadata. A policy change therefore cannot silently reuse a snapshot created under an older rule.
+Population discovery and property harvesting are separate. QIDs are deduplicated and frozen for one acquisition session. Population queries use keyset pagination by entity URI; property queries use bounded `VALUES ?format { ... }` batches over the frozen population.
 
-Population discovery is separate from property harvesting. Discovered QIDs are deduplicated and frozen for one acquisition session.
-
-Population queries are keyset-paginated by Wikidata entity URI. The default page size is 500.
-
-## Default fields
-
-The review CSV is one row per Wikidata QID and includes:
-
-- QID, English label, description and aliases;
-- instance-of and subclass-of relationships;
-- PRONOM file format ID (`P2748`);
-- Library of Congress FDD ID (`P3266`);
-- NARA File Format Preservation Plan ID (`P11167`);
-- file extension (`P1195`);
-- MIME type (`P1163`);
-- version (`P348`);
-- identification pattern / magic number (`P4152`);
-- developer (`P178`);
-- publication date (`P577`);
-- inception date (`P571`);
-- part-of (`P361`);
-- based-on (`P144`);
-- replaces / replaced-by (`P1365` / `P1366`);
-- described-by-source (`P1343`);
-- official website (`P856`).
-
-Multi-valued properties are pipe-delimited. Paired relationship QIDs and labels remain aligned.
-
-## Staged VALUES batching
-
-The adapter does **not** repeat population-selection logic for every property query.
-
-Instead it:
-
-1. discovers and freezes the QID population;
-2. splits QIDs into bounded batches (default 200);
-3. uses `VALUES ?format { ... }` for each property query;
-4. stores each completed batch as a source snapshot;
-5. merges all batches locally into the final CSV.
-
-This keeps individual WDQS responses small and bounded.
-
-## Resume after interruption
-
-An incomplete acquisition session is recorded at:
+An interrupted acquisition records its session under:
 
 ```text
 work/snapshots/wikidata_file_formats/.wikidata_acquisition_session.json
 ```
 
-Each completed property batch is cached separately. Rerunning the same command resumes the frozen population and reuses completed batches. It does not repeat population discovery or completed batches.
+Completed batches are cached individually so rerunning can resume without repeating population discovery or completed property requests. Use `--restart` only when a deliberately fresh population discovery is required.
 
-Use `--restart` to deliberately abandon an incomplete session and discover a fresh population.
+## Acquired fields
 
-## Download
+The merged CSV contains one row per QID and can include:
+
+- English label, description and aliases;
+- direct instance-of and subclass-of context;
+- PRONOM file format ID (`P2748`);
+- LOC FDD ID (`P3266`);
+- NARA format-plan ID (`P11167`);
+- extension (`P1195`);
+- MIME type (`P1163`);
+- version (`P348`);
+- identification pattern (`P4152`);
+- developer (`P178`);
+- publication and inception dates (`P577`, `P571`);
+- part-of, based-on, replaces/replaced-by and described-by relationships;
+- official website (`P856`).
+
+Multi-valued properties are pipe-delimited. Paired relationship QIDs and labels remain aligned.
+
+## Standalone acquisition/review command
 
 From `qnl_format_registry_builder`:
 
@@ -222,7 +227,7 @@ python -m registry_builder.wikidata_download `
   --workdir work
 ```
 
-Useful controls:
+Useful controls include:
 
 ```powershell
 python -m registry_builder.wikidata_download `
@@ -233,52 +238,7 @@ python -m registry_builder.wikidata_download `
   --transport-retries 5
 ```
 
-The default endpoint is:
-
-```text
-https://query.wikidata.org/sparql
-```
-
-HTTP 429 and transient 5xx responses are retried with bounded backoff. The CLI also retries interrupted or partial HTTP transfers.
-
-## Compare acquisition policies
-
-The comparison command compares two acquisition CSVs by QID and identifies useful non-direct records lost by a policy change:
-
-```powershell
-python -m registry_builder.wikidata_population_compare `
-  --old old-wikidata.csv `
-  --new new-wikidata.csv `
-  --out-dir wikidata-population-comparison `
-  --prefix policy-comparison
-```
-
-For this diagnostic, a **useful non-direct** record is a QID that is not a direct `P31 = Q235557` instance but has at least one PRONOM/LOC/NARA identifier, extension, MIME type or identification pattern.
-
-The command writes:
-
-- JSON summary;
-- added QIDs;
-- removed QIDs;
-- old useful non-direct QIDs retained by the new policy;
-- old useful non-direct QIDs missing from the new policy;
-- direct `P31` class census for those missing records.
-
-## Custom query
-
-A reviewed custom SPARQL query can still be supplied:
-
-```powershell
-python -m registry_builder.wikidata_download `
-  --query-file .\config\wikidata-file-formats.sparql `
-  --out wikidata-file-formats.csv
-```
-
-Custom-query mode is executed as one request and must return at least `format` and `qid`.
-
-## Offline replay
-
-After a complete acquisition:
+Offline replay after a completed acquisition:
 
 ```powershell
 python -m registry_builder.wikidata_download `
@@ -287,10 +247,154 @@ python -m registry_builder.wikidata_download `
   --offline
 ```
 
-Offline mode uses the cached final snapshot and does not contact Wikidata.
+## Controlled production refresh
 
-## Deliberate current boundary
+Do **not** add `wikidata_sparql_evidence` to the ordinary `sources.qnl.json` source loop. Wikidata source refresh and governed relationship replacement are one coordinated transaction boundary.
 
-`WikidataSparqlAdapter.extract()` still returns an empty list. Wikidata is acquired for source study only and does not yet participate in identity reconciliation, criterion mapping, risk scoring or registry persistence.
+Run a no-write preflight first:
 
-The next step is to run policy v3, compare it with the original 85,269-QID broad snapshot and policy v2, confirm the intended remaining exclusions, and then move to source projection/reconciliation rather than continuing to broaden discovery.
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --out out/wikidata-refresh-preflight.json
+```
+
+For the cached current snapshot:
+
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --offline `
+  --out out/wikidata-refresh-preflight-offline.json
+```
+
+Only when the preflight returns:
+
+```text
+status = ready
+gate_passed = true
+```
+
+may the reviewed refresh be applied:
+
+```powershell
+python -m registry_builder.wikidata_refresh `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --apply `
+  --out out/wikidata-refresh-production.json
+```
+
+The apply phase persists the new evidence-only source records, supersedes obsolete Wikidata relationship claims, materializes the current relationship set onto existing canonicals, preserves snapshot provenance and independently verifies the resulting persistent state.
+
+A successful refresh must finish with:
+
+```text
+status = completed
+verification.status = ok
+```
+
+## Production drift gates
+
+The refresh does not freeze the 2026-08-21 counts forever. Future Wikidata changes are permitted within controlled review thresholds.
+
+Current production review gates block a refresh when:
+
+- population change exceeds 2,000 records or 10%;
+- relationship-edge change exceeds 1,000 edges or 20%;
+- claim turnover exceeds 750 additions/removals or 25%;
+- any copied PRONOM/LOC/NARA identifier becomes unresolved;
+- any canonical creation/merge or copied-identifier promotion signal appears;
+- the current persisted Wikidata baseline fails independent verification.
+
+A blocked refresh requires review; it must not be blindly rerun with relaxed thresholds.
+
+## Verified production baseline
+
+First production backfill run:
+
+```text
+relationship-backfill-20260821T190919Z
+```
+
+Input SHA-256:
+
+```text
+a6c1e598b567dd89557a67f186e99bf8486cddf40615384bbe998e450a1810df
+```
+
+Verified baseline:
+
+- 3,372 current canonical formats;
+- 15,479 Wikidata evidence-only source records;
+- 2,519 QIDs with governed canonical relationships;
+- 2,793 canonicals with Wikidata relationships;
+- 2,856 governed relationship edges;
+- 3,266 matched copied authority claims: 2,337 PUID, 295 LOC, 634 NARA;
+- zero unmatched authority claims;
+- zero promoted Wikidata strong identifiers;
+- zero Wikidata risk assessments.
+
+Relationship outcomes:
+
+- single-target cross-reference: 2,240 QIDs;
+- multi-target context: 279 QIDs;
+- no authority cross-reference: 12,960 QIDs.
+
+## Verified changed-source simulation
+
+Production refresh behavior was also validated against the real persisted registry with a deterministic read-only changed-source simulation.
+
+The simulation cloned the cached 15,479-row snapshot, selected `Q2078` (one current governed edge and one copied authority identifier), and removed LOC `fdd000020` from the temporary CSV only.
+
+Expected and observed changes were exact:
+
+- population: 15,479 -> 15,479;
+- relationship edges: 2,856 -> 2,855;
+- linked QIDs: 2,519 -> 2,518;
+- matched authority claims: 3,266 -> 3,265;
+- LOC matches: 295 -> 294;
+- single-target relationships: 2,240 -> 2,239;
+- no-authority QIDs: 12,960 -> 12,961;
+- canonical formats: 3,372 -> 3,372;
+- canonical creation/merges/promotions: 0;
+- registry writes: 0;
+- persistent registry fingerprint unchanged: true.
+
+The simulation command is intentionally preflight-only and exposes no apply mode:
+
+```powershell
+python -m registry_builder.wikidata_refresh_simulation `
+  --config config/wikidata_refresh.production.json `
+  --workdir work `
+  --out-csv out/wikidata-refresh-simulated-change.csv `
+  --out out/wikidata-refresh-simulation.json
+```
+
+## Relationship persistence and rebuild survival
+
+Canonical attachments are stored in the governed `source_relationship_claims` collection. Claim identity includes the semantic relationship payload, so changed source assertions create a new claim while obsolete claims are explicitly superseded.
+
+Current relationship claims are replayed after normal reconciliation. Therefore an unrelated source rebuild cannot strip Wikidata links from canonical documents. Relationship replay never creates a missing canonical; orphan claims are reported instead.
+
+## Recovery and independent verification
+
+The one-time/recovery relationship backfill remains available:
+
+```powershell
+python -m registry_builder.wikidata_relationship_backfill `
+  --config config/wikidata_relationship_backfill.production.json `
+  --out out/wikidata-relationship-backfill-production.json
+```
+
+Independent verification:
+
+```powershell
+python -m registry_builder.wikidata_relationship_verify `
+  --config config/wikidata_relationship_backfill.production.json `
+  --out out/wikidata-relationship-verify.json
+```
+
+The verifier checks current source-record roles, projection versions, relationship counts/materialization, canonical count, copied-identifier promotion and Wikidata risk contribution. A production Wikidata layer is accepted only when the verifier returns `status: ok`.
