@@ -10,13 +10,13 @@
   },
   "exports": {
     "enabled": false,
-    "notes": "Third-ingest validation writes to MongoDB only. Existing successful DPC and NARA source contributions are reused from persistent storage."
+    "notes": "PRONOM-only persistent ingest into MongoDB."
   },
   "method_profiles": {
     "enabled": false
   },
   "identifier_kinds": {
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
@@ -27,10 +27,7 @@
       "type": "pronom_registry",
       "enabled": true,
       "required": true,
-      "retrieval_mode": "github_archive",
-      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
-      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"],
-      "notes": "Third persistent integration source. PRONOM provides authoritative PUID identity records. The pipeline reuses the latest successful DPC and NARA source contributions from MongoDB before reconciliation."
+      "notes": "Authoritative PRONOM registry source. PRONOM and DROID XML are the only sources allowed to verify PUID identity."
     }
   ]
 }
