@@ -175,20 +175,22 @@ def test_analyze_format_returns_explicit_nonzero_ambiguous_status(tmp_path, caps
 
     assert rc == 2
     output = json.loads(capsys.readouterr().out)
-    assert output == {
-        "resolution": {
-            "match_count": 2,
-            "match_type": "extension",
-            "matches": [
-                {"canonical_id": "puid-fmt-18", "preferred_name": "Portable Document Format"},
-                {"canonical_id": "puid-fmt-19", "preferred_name": "PDF/A"},
-            ],
-            "message": "Extension 'pdf' matches 2 formats; specify a canonical ID or PUID.",
-            "query": "pdf",
-            "status": "ambiguous",
-        },
-        "status": "ambiguous",
+    assert output["status"] == "ambiguous"
+    resolution = output["resolution"]
+    assert resolution["query"] == "pdf"
+    assert resolution["status"] == "ambiguous"
+    assert resolution["match_type"] == "extension"
+    assert resolution["match_count"] == 2
+    assert resolution["matches_returned"] == 2
+    assert len(resolution["matches"]) == 2
+    assert {match["canonical_id"] for match in resolution["matches"]} == {
+        "puid-fmt-18",
+        "puid-fmt-19",
     }
+    assert resolution["message"] == (
+        "Extension 'pdf' matches 2 formats; showing 2. "
+        "Specify a canonical ID or authority identifier to assess one format."
+    )
 
 
 def test_analyze_format_keeps_missing_evidence_as_needs_assessment(tmp_path, capsys):
