@@ -2,7 +2,7 @@
 
 `qnl_format_registry_builder` is the **evidence-ingestion and registry-construction module** in the File Format Preservation Manager repository.
 
-It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, DPC, or other configured sources change.
+It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, DPC, Wikidata, or other configured/governed sources change.
 
 For the first cross-package run from source acquisition to risk assessment, use:
 
@@ -70,6 +70,7 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 - NARA Digital Preservation Framework acquisition/parsing.
 - PRONOM registry and DROID/signature evidence.
 - Library of Congress FDD XML evidence.
+- **Wikidata policy-v3 acquisition plus controlled evidence-only/cross-registry relationship refresh with drift gates and independent verification.**
 - Structured JSON source packages.
 - **Reviewed transcription packages for narrative/PDF/HTML preservation sources.**
 - **AI-assisted transcription prompts and schemas for unstructured sources, including DPC Bit List.**
@@ -78,6 +79,7 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 - Content-addressed source snapshot cache and offline replay.
 - Conservative reconciliation using configured identifier authority rules.
 - Source-by-source incremental augmentation against persistent storage.
+- Governed persistent source-relationship and risk-claim replay across canonical rebuilds.
 - Declarative source-to-criterion mappings with review status/versioning.
 - **AI-assisted criterion-mapping drafts with mandatory human approval.**
 - Criterion-claim audit and backfill workflows.
@@ -95,6 +97,8 @@ The builder owns normal registry **writes and updates**. The risk manager reads 
 | First build + risk assessment across both packages | [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md) |
 | Canonical data model | [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md) |
 | Add any new source end-to-end | [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md) |
+| Wikidata acquisition and population policy | [`docs/WIKIDATA_SOURCE.md`](docs/WIKIDATA_SOURCE.md) |
+| Wikidata production evidence/relationship refresh | [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md) |
 | Add a narrative/PDF/unstructured source | [`../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md) |
 | Installation/setup/all builder modes | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
 | Full builder documentation map | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
@@ -260,11 +264,15 @@ Release behavior is source/configuration-specific. The committed integrated exam
 
 A deployment may keep separate pinned baseline and follow-latest monitoring configurations.
 
+Wikidata is a deliberate exception to the ordinary source loop. Do not add `wikidata_sparql_evidence` to `sources.qnl.json`; use the governed `wikidata_refresh` preflight/apply transaction documented in [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md). This keeps source acquisition, relationship supersession, rematerialization, drift review and post-write verification in one controlled operation.
+
 For a manually transcribed narrative source, source refresh means reviewing the new publication edition, producing/reviewing a new transcription artifact, then rerunning the source. A future DPC-specific adapter may automate edition acquisition while retaining the same reviewed-transcription gate.
 
 See:
 
 - [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md)
+- [`docs/WIKIDATA_SOURCE.md`](docs/WIKIDATA_SOURCE.md)
+- [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md)
 - [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
 
 ## Common CLI modes
@@ -277,6 +285,9 @@ See:
 | `registry_builder criterion-evidence-audit` | Read-only audit of source fields/projected criterion coverage. |
 | `registry_builder mapping validate` | Validate criterion-mapping configuration. |
 | `registry_builder criterion-claims backfill` | Rebuild criterion claims from stored evidence without reacquiring sources. |
+| `python -m registry_builder.wikidata_refresh` | Drift-gated Wikidata preflight; add `--apply` only after reviewing a ready preflight. |
+| `python -m registry_builder.wikidata_relationship_verify` | Independently verify the persisted Wikidata evidence/relationship layer. |
+| `python -m registry_builder.wikidata_refresh_simulation` | Read-only deterministic changed-source test; no apply/write mode. |
 
 Full command guide: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
 
@@ -315,9 +326,12 @@ NARA run -> refresh NARA contribution
 PRONOM run -> refresh verified PUID/identity contribution
 LOC run -> refresh FDD sustainability evidence
 DPC run -> refresh reviewed DPC transcription contribution
+Wikidata controlled refresh -> refresh evidence-only QIDs + governed source_relationship_claims
 ```
 
-The current canonical view is recomputed from active source contributions; source history/provenance is retained.
+Wikidata uses its dedicated controlled refresh command rather than the ordinary source loop because its evidence snapshot and relationship replacement are one governed operation.
+
+The current canonical view is recomputed from active source contributions; source history/provenance is retained. Current governed risk and source-relationship claims are replayed after reconciliation so unrelated canonical rebuilds do not strip those layers.
 
 Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md).
 
@@ -402,6 +416,8 @@ pytest -q
 ```
 
 For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report. For narrative sources, validate/review the transcription and prove the final criterion claim is visible to the risk manager.
+
+For Wikidata changes, use the focused preflight/verification/simulation suites and the controlled refresh workflow; do not bypass its drift and identity-safety gates.
 
 ## Related module
 
