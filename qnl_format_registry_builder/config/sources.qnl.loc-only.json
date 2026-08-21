@@ -1,0 +1,35 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "Fourth-ingest validation writes to MongoDB only. Latest successful DPC, NARA, and PRONOM source contributions are reused from persistent storage."
+  },
+  "method_profiles": {
+    "enabled": false
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "fdd_xml_zip",
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip",
+      "notes": "Fourth persistent integration source. LOC FDD supplies authoritative LOC identifiers plus source-native sustainability-factor evidence. This ingest does not invent an overall LOC risk score. Existing DPC, NARA, and PRONOM contributions are reused from MongoDB before reconciliation."
+    }
+  ]
+}
