@@ -109,6 +109,12 @@ class MongoRegistryStore(RegistryStore):
                 [("criteria_version", A), ("mapping_version", A)],
                 [("institution_id", A)],
             ],
+            "risk_assessment_claims": [
+                [("canonical_id", A), ("source_id", A), ("current", A)],
+                [("source_id", A), ("mapping_rule_id", A), ("mapping_version", A)],
+                [("source_record_id", A), ("scope_type", A)],
+                [("run_id", A)],
+            ],
         }
         for collection, collection_indexes in indexes.items():
             coll = self._collection(collection)
