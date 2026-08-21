@@ -14,7 +14,10 @@ from registry_builder.dpc_risk_mapping_mongo import (
     _load_config as _load_pipeline_config,
 )
 from registry_builder.external_risk_mapping import apply_external_risk_mappings, load_external_risk_mapping
-from registry_builder.risk_synthesis import synthesize_risk_assessments
+from registry_builder.risk_synthesis import (
+    risk_assessments_from_canonical_fields,
+    synthesize_risk_assessments,
+)
 from registry_builder.storage import create_store
 from registry_builder.storage.base import RegistryStore
 
@@ -72,6 +75,21 @@ def _current_source_claims(store: RegistryStore, source_id: str) -> list[dict[st
     ]
 
 
+def _normalized_base_assessments(row: dict[str, Any], source_id: str) -> list[dict[str, Any]]:
+    explicit = [
+        dict(item)
+        for item in (row.get("risk_assessments") or [])
+        if not _is_mapped_source_assessment(item, source_id)
+    ]
+    return risk_assessments_from_canonical_fields(
+        explicit_assessments=explicit,
+        external_hazard=row.get("external_hazard") or [],
+        institution_policy_overlays=row.get("institution_policy_overlays") or [],
+        source_records=row.get("source_records") or [],
+        canonical_name=row.get("preferred_name"),
+    )
+
+
 def build_dpc_risk_claims(
     store: RegistryStore,
     mapping: dict[str, Any],
@@ -88,13 +106,11 @@ def build_dpc_risk_claims(
     }
 
     # Remove only previously mapped DPC assertions before replaying the approved
-    # mapping. Source-native evidence records remain untouched in source_records.
+    # mapping. Rebuild the normalized baseline from explicit assessments plus
+    # compatibility fields so older canonical records cannot lose NARA/QNL risk.
     for fmt in registry:
-        fmt.risk_assessments = [
-            dict(item)
-            for item in fmt.risk_assessments
-            if not _is_mapped_source_assessment(item, source_id)
-        ]
+        source_row = original_by_id.get(fmt.canonical_id, {})
+        fmt.risk_assessments = _normalized_base_assessments(source_row, source_id)
         fmt.synthesized_risk = synthesize_risk_assessments(fmt.risk_assessments)
 
     latest_run_id, dpc_records = _latest_source_records(store, source_id)
@@ -106,15 +122,12 @@ def build_dpc_risk_claims(
     )
 
     claims: list[dict[str, Any]] = []
-    projected_by_id: dict[str, dict[str, Any]] = {}
     for fmt in registry:
         mapped = [
             dict(item)
             for item in fmt.risk_assessments
             if _is_mapped_source_assessment(item, source_id)
         ]
-        if mapped:
-            projected_by_id[fmt.canonical_id] = fmt.to_dict()
         for assessment in mapped:
             claims.append({
                 "canonical_id": fmt.canonical_id,
@@ -171,11 +184,7 @@ def _canonical_updates(
         if not original:
             continue
         updated = deepcopy(original)
-        assessments = [
-            dict(item)
-            for item in (updated.get("risk_assessments") or [])
-            if not _is_mapped_source_assessment(item, source_id)
-        ]
+        assessments = _normalized_base_assessments(updated, source_id)
         assessments.extend(
             deepcopy(claim["assessment"])
             for claim in active_by_id.get(canonical_id, [])
