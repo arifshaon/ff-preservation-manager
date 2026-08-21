@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 import hashlib
 import json
@@ -21,6 +22,7 @@ from registry_builder.wikidata_refresh import (
 )
 from registry_builder.wikidata_relationship_backfill import (
     WIKIDATA_SOURCE_ID,
+    _current_source_claims,
     _resolve_relative,
 )
 
@@ -70,13 +72,16 @@ def _collection_fingerprint(store: RegistryStore) -> str:
 def build_remove_one_relationship_snapshot(
     input_csv: str | Path,
     output_csv: str | Path,
+    *,
+    eligible_qids: set[str] | None = None,
 ) -> tuple[SourceSnapshot, dict[str, Any]]:
     """Clone a Wikidata CSV and remove one resolvable single authority assertion.
 
     The selected row must contain exactly one copied PRONOM/LOC/NARA identifier in
-    total. At the verified production baseline every copied authority assertion
-    resolves, so removing that sole assertion should remove exactly one governed
-    relationship while leaving the Wikidata population unchanged.
+    total. When ``eligible_qids`` is supplied, the row must also belong to that
+    set. The production simulation supplies only QIDs that currently own exactly
+    one governed relationship claim, making the expected one-edge removal
+    deterministic even if an authority namespace ever contains duplicate owners.
     """
 
     source = Path(input_csv)
@@ -104,10 +109,12 @@ def build_remove_one_relationship_snapshot(
             authority_values.extend((field, kind, value) for value in _split_pipe(row.get(field)))
         if len(authority_values) != 1:
             continue
-        field, kind, value = authority_values[0]
         qid = str(row.get("qid") or "").strip()
         if not qid:
             continue
+        if eligible_qids is not None and qid not in eligible_qids:
+            continue
+        field, kind, value = authority_values[0]
         row[field] = ""
         mutation = {
             "qid": qid,
@@ -118,9 +125,11 @@ def build_remove_one_relationship_snapshot(
         break
 
     if mutation is None:
+        qualifier = " with exactly one current governed relationship" if eligible_qids is not None else ""
         raise ValueError(
-            "No Wikidata row with exactly one copied PRONOM/LOC/NARA identifier "
-            "was available for the changed-source simulation"
+            "No Wikidata row with exactly one copied PRONOM/LOC/NARA identifier"
+            + qualifier
+            + " was available for the changed-source simulation"
         )
 
     with target.open("w", encoding="utf-8", newline="") as handle:
@@ -178,10 +187,27 @@ def run_wikidata_changed_source_simulation(
         )
     base_snapshot = acquired[0]
 
+    current_claims = _current_source_claims(store)
+    relationship_counts = Counter(
+        str(row.get("source_record_id") or "")
+        for row in current_claims
+        if row.get("source_record_id")
+    )
+    eligible_qids = {
+        qid for qid, count in relationship_counts.items()
+        if qid and count == 1
+    }
+    if not eligible_qids:
+        raise ValueError(
+            "No current Wikidata QID has exactly one governed relationship claim; "
+            "cannot construct deterministic one-edge simulation"
+        )
+
     before_fingerprint = _collection_fingerprint(store)
     simulated_snapshot, mutation = build_remove_one_relationship_snapshot(
         base_snapshot.local_path,
         output_csv,
+        eligible_qids=eligible_qids,
     )
 
     preflight = run_wikidata_refresh(
@@ -243,6 +269,7 @@ def run_wikidata_changed_source_simulation(
         "simulation_mode": "remove_one_copied_authority_identifier",
         "registry_writes_performed": 0 if before_fingerprint == after_fingerprint else None,
         "registry_fingerprint_unchanged": before_fingerprint == after_fingerprint,
+        "eligible_single_relationship_qids": len(eligible_qids),
         "base_snapshot": {
             "local_path": base_snapshot.local_path,
             "sha256": base_snapshot.sha256,
