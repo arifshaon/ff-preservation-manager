@@ -115,6 +115,12 @@ class MongoRegistryStore(RegistryStore):
                 [("source_record_id", A), ("scope_type", A)],
                 [("run_id", A)],
             ],
+            "source_relationship_claims": [
+                [("canonical_id", A), ("source_id", A), ("current", A)],
+                [("source_id", A), ("source_record_id", A), ("relationship", A)],
+                [("claim_id", A)],
+                [("run_id", A)],
+            ],
         }
         for collection, collection_indexes in indexes.items():
             coll = self._collection(collection)
