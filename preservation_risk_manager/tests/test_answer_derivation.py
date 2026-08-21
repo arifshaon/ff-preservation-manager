@@ -43,6 +43,40 @@ def _framework():
     })
 
 
+def _rights_framework():
+    return RiskFramework.from_dict({
+        "framework_id": "rights-example",
+        "version": "1",
+        "scale": {
+            "direction": "higher_is_risk",
+            "min_completeness_for_band": 0.5,
+            "bands": [{"band": "Low", "min_score": 0, "max_score": 10}],
+        },
+        "questions": [
+            {
+                "id": "q_ip_constraints",
+                "evidence_fields": ["rights.ip_constraints"],
+                "answers": [
+                    {"id": "low_risk", "points": 0},
+                    {"id": "moderate_risk", "points": 1},
+                    {"id": "high_risk", "points": 2},
+                    {"id": "unknown", "points": 0, "abstention": True},
+                ],
+            },
+            {
+                "id": "q_tpm_drm",
+                "evidence_fields": ["rights.tpm_drm_encryption"],
+                "answers": [
+                    {"id": "low_risk", "points": 0},
+                    {"id": "moderate_risk", "points": 1},
+                    {"id": "high_risk", "points": 2},
+                    {"id": "unknown", "points": 0, "abstention": True},
+                ],
+            },
+        ],
+    })
+
+
 def test_derives_answers_from_explicit_criterion_evidence():
     evidence_pack = {
         "global_evidence": [
@@ -133,3 +167,43 @@ def test_institution_evidence_participates_in_answer_derivation():
 
     assert derived["answers"]["q_adoption"] == "niche_or_declining"
     assert derived["answers"]["q_external_dependencies"] == "specialist_dependency"
+
+
+def test_approved_loc_ip_licensing_claim_answers_rights_question():
+    evidence_pack = {
+        "global_evidence": [
+            {
+                "criterion_id": "sustainability.ip_licensing",
+                "value": "no_known_barrier",
+                "source_id": "loc_fdd_xml",
+            }
+        ]
+    }
+
+    derived = derive_answers(_rights_framework(), evidence_pack)
+
+    assert derived["answers"]["q_ip_constraints"] == "low_risk"
+    assert derived["derivation"]["q_ip_constraints"]["status"] == "derived"
+    assert derived["derivation"]["q_ip_constraints"]["evidence_claims"][0]["source_id"] == "loc_fdd_xml"
+
+
+def test_loc_tpm_none_and_known_constraint_map_but_possible_remains_unknown():
+    none_derived = derive_answers(
+        _rights_framework(),
+        {"global_evidence": [{"criterion_id": "sustainability.tpm_encryption", "value": "none_or_not_applicable"}]},
+    )
+    high_derived = derive_answers(
+        _rights_framework(),
+        {"global_evidence": [{"criterion_id": "sustainability.tpm_encryption", "value": "known_constraint"}]},
+    )
+    possible_derived = derive_answers(
+        _rights_framework(),
+        {"global_evidence": [{"criterion_id": "sustainability.tpm_encryption", "value": "possible"}]},
+    )
+
+    assert none_derived["answers"]["q_tpm_drm"] == "low_risk"
+    assert high_derived["answers"]["q_tpm_drm"] == "high_risk"
+    assert possible_derived["answers"]["q_tpm_drm"] == "unknown"
+    assert possible_derived["derivation"]["q_tpm_drm"]["status"] == "unknown"
+    assert possible_derived["scoring_answers"]["q_tpm_drm"]["missing"] is False
+    assert possible_derived["derivation"]["q_tpm_drm"]["evidence_claims"][0]["value"] == "possible"
