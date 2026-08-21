@@ -1,0 +1,16 @@
+{
+  "storage_config": "sources.qnl.json",
+  "input_csv": "../wikidata-file-formats-policy-v3.csv",
+  "replace_source_claims": true,
+  "materialize_canonical": true,
+  "max_unmatched_authority_claims": 0,
+  "expected_counts": {
+    "canonical_formats": 3372,
+    "wikidata_records": 15479,
+    "wikidata_qids_with_relationships": 2519,
+    "canonical_formats_with_wikidata_relationships": 2793,
+    "relationship_edges": 2856,
+    "matched_authority_claims": 3266
+  },
+  "notes": "Production Wikidata relationship backfill. All frozen policy-v3 QIDs are persisted as evidence-only source records. Only copied PRONOM/LOC/NARA identifiers that resolve to current authoritative canonicals become governed relationship claims. Wikidata creates no canonical identities, promotes no identifiers, and contributes no risk assessments."
+}
