@@ -19,6 +19,7 @@ from preservation_risk_manager.format_resolver import FormatResolver
 from preservation_risk_manager.frameworks import load_framework
 from preservation_risk_manager.policy_proposals import build_policy_change_proposal
 from preservation_risk_manager.posture import compute_local_risk_posture
+from preservation_risk_manager.risk_context import build_external_risk_context
 from preservation_risk_manager.scoring import score_answers
 
 
@@ -108,6 +109,10 @@ def analyze_fixture(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _resolution_match_count(resolution) -> int:
+    return int(getattr(resolution, "total_match_count", 0) or len(resolution.matches))
+
+
 def _resolution_message(resolution) -> str | None:
     if resolution.status == "ambiguous":
         noun = {
@@ -119,9 +124,11 @@ def _resolution_message(resolution) -> str | None:
             "alias": "Alias",
             "canonical_id": "Canonical ID",
         }.get(resolution.match_type or "", "Query")
+        total = _resolution_match_count(resolution)
+        shown = len(resolution.matches)
         return (
-            f"{noun} '{resolution.query}' matches {len(resolution.matches)} formats; "
-            "specify a canonical ID or PUID."
+            f"{noun} '{resolution.query}' matches {total} formats; "
+            f"showing {shown}. Specify a canonical ID or authority identifier to assess one format."
         )
     if resolution.status == "not_found":
         return f"No format matched '{resolution.query}'."
@@ -133,7 +140,8 @@ def _resolution_summary(resolution) -> dict[str, Any]:
         "query": resolution.query,
         "status": resolution.status,
         "match_type": resolution.match_type,
-        "match_count": len(resolution.matches),
+        "match_count": _resolution_match_count(resolution),
+        "matches_returned": len(resolution.matches),
         "matches": [
             {
                 "canonical_id": match.get("canonical_id") or match.get("format_id") or match.get("id"),
@@ -275,6 +283,7 @@ def _resolved_analysis_context(args: argparse.Namespace) -> dict[str, Any]:
     )
     answer_document = derive_answers(framework, evidence_pack)
     analysis = score_answers(framework, answer_document.get("scoring_answers") or answer_document["answers"])
+    external_risk_context = build_external_risk_context(reader, resolution.format_doc)
     return {
         "framework": framework,
         "resolution": resolution,
@@ -283,6 +292,7 @@ def _resolved_analysis_context(args: argparse.Namespace) -> dict[str, Any]:
         "evidence_pack": evidence_pack,
         "answer_document": answer_document,
         "analysis": analysis,
+        "external_risk_context": external_risk_context,
     }
 
 
@@ -303,6 +313,7 @@ def analyze_format(args: argparse.Namespace) -> dict[str, Any]:
         "criterion_claims_used": len(context["criterion_claims"]),
         "derived_answers": output_answer_document,
         "analysis": context["analysis"],
+        "external_risk_context": context["external_risk_context"],
     }
     if args.evidence_summary:
         result["criterion_claims_summary"] = _criterion_claims_summary(context["criterion_claims"])
@@ -367,6 +378,7 @@ def analyze_format_ai(args: argparse.Namespace) -> dict[str, Any]:
         "derived_answers": output_answer_document,
         "deterministic_analysis": context["analysis"],
         "analysis": ai_analysis,
+        "external_risk_context": context["external_risk_context"],
     }
     if args.evidence_summary:
         result["criterion_claims_summary"] = _criterion_claims_summary(context["criterion_claims"])
