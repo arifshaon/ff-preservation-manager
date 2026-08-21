@@ -5,6 +5,7 @@ from registry_builder.adapters.standard_json import StandardJsonAdapter
 from registry_builder.adapters.pronom_registry import PronomRegistryAdapter
 from registry_builder.adapters.pronom_droid_xml import PronomDroidXmlAdapter
 from registry_builder.adapters.loc_fdd_xml import LocFddXmlAdapter
+from registry_builder.adapters.loc_fdd_xml_reviewed import LocFddXmlReviewedAdapter
 from registry_builder.adapters.loc_fdd_mapping_csv import LocFddMappingCsvAdapter
 from registry_builder.adapters.institution_policy_xlsx import InstitutionPolicyXlsxAdapter
 from registry_builder.adapters.qnl_institution_format_evidence import QnlInstitutionFormatEvidenceAdapter
@@ -21,6 +22,7 @@ ADAPTERS: dict[str, type[SourceAdapter]] = build_registry(
         PronomRegistryAdapter,
         PronomDroidXmlAdapter,
         LocFddXmlAdapter,
+        LocFddXmlReviewedAdapter,
         LocFddMappingCsvAdapter,
         InstitutionPolicyXlsxAdapter,
         QnlInstitutionFormatEvidenceAdapter,
