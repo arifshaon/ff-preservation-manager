@@ -1,0 +1,94 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "incremental_source_updates_notes": "Each successful source run contributes fresh evidence from that source and reuses the latest successful contributions from other sources before rebuilding the canonical registry.",
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": true,
+    "notes": "JSON/CSV/SQLite/Markdown exports are review products. MongoDB is the persistent registry store."
+  },
+  "method_profiles": {
+    "enabled": true,
+    "path": "method_profiles.example.json"
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]},
+    "notes": "DPC Bit List entry IDs are source-record identifiers, not canonical format identifiers."
+  },
+  "sources": [
+    {
+      "id": "qnl_policy_current",
+      "type": "institution_policy_xlsx",
+      "enabled": false,
+      "required": true,
+      "institution_id": "qnl",
+      "institution_name": "Qatar National Library",
+      "institution_format_id_prefix": "QNL",
+      "uris": ["input/QNL File Format Policy and Action Plan_27_November_2025.xlsx"],
+      "field_map": {
+        "institution_format_id": ["QNL Format ID"],
+        "name": ["Digital file"],
+        "extensions": ["File Extension(s)"],
+        "mime_types": ["MIME type(s)", "MIME", "MIME Type", "Mime Type"],
+        "category": ["Category/Plan(s)", "Category/Plan", "Category", "Format Category", "Plan"],
+        "description": ["Description and Justification", "Description/Justification", "Description", "Justification"],
+        "risk_level": ["QNL Risk Level", "Risk Level", "Risk"],
+        "preservation_action": ["QNL Preservation Action", "Preservation Action", "Action"],
+        "proposed_preservation_plan": ["QNL Proposed Preservation Plan", "Proposed Preservation Plan", "Plan"],
+        "preferred_tools": ["QNL Preferred Processing and Conversion Tool(s)", "Preferred Processing and Conversion Tool(s)", "Preferred Tools", "Tool(s)"],
+        "conversion_process": ["Conversion Process", "Command", "Process"],
+        "pronom_url": ["PRONOM", "PRONOM URL", "PUID"],
+        "loc_url": ["LOC", "Library of Congress", "LOC URL"],
+        "wikidata_url": ["Wikidata", "Wikidata URL"]
+      },
+      "notes": "Disabled until the institutional policy overlay is ready for the integrated registry."
+    },
+    {
+      "id": "nara_digital_preservation_framework",
+      "type": "nara_digital_preservation_framework",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "published_csv",
+      "release_mode": "pinned",
+      "release_date": "20260320",
+      "fallback_release_date": "20260320",
+      "github_ref": "master",
+      "fallback_local_files": []
+    },
+    {
+      "id": "pronom_registry",
+      "type": "pronom_registry",
+      "enabled": true,
+      "required": false,
+      "retrieval_mode": "github_archive",
+      "archive_url": "https://github.com/nationalarchives/pronom/archive/refs/heads/develop.zip",
+      "include_paths": ["signatures/fmt/", "signatures/x-fmt/"]
+    },
+    {
+      "id": "loc_fdd_xml",
+      "type": "loc_fdd_xml",
+      "enabled": true,
+      "required": false,
+      "retrieval_mode": "fdd_xml_zip",
+      "zip_uri": "https://www.loc.gov/preservation/digital/formats/fddXML.zip"
+    },
+    {
+      "id": "dpc_bit_list_2025",
+      "type": "dpc_bit_list",
+      "enabled": true,
+      "required": false,
+      "edition": "2025",
+      "github_ref": "3ad3fef626ea7c128ef8c323d92227e5cae2efc8",
+      "notes": "Preservation-risk evidence only. DPC records do not create canonical identity records."
+    }
+  ]
+}
