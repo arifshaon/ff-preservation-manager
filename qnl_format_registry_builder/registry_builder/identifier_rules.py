@@ -8,7 +8,7 @@ from registry_builder.utils import normalize_extension, normalize_identifier, no
 DEFAULT_IDENTIFIER_KINDS: dict[str, dict[str, Any]] = {
     "extension": {"strength": "weak", "verified_from": []},
     "mime": {"strength": "weak", "verified_from": []},
-    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml"]},
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {
         "strength": "strong",
