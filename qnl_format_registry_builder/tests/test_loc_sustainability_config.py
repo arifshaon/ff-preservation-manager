@@ -11,7 +11,7 @@ def test_loc_sustainability_production_config_is_gated_pending_v2_review():
     assert config["storage"]["database"] == "qnl_format_registry"
     assert config["incremental_source_updates"] is True
     assert config["criterion_mapping"]["enabled"] is False
-    assert config["criterion_mapping"]["mappings"] == "criterion_mappings/loc_fdd_xml.v2.draft.json"
+    assert config["criterion_mapping"]["mappings"] == "criterion_mappings/loc_fdd_xml.v2.draft2.json"
     assert config["criterion_mapping"]["include_drafts"] is False
     assert len(config["sources"]) == 1
     assert config["sources"][0]["id"] == "loc_fdd_xml"
@@ -28,13 +28,17 @@ def test_loc_sustainability_preview_is_memory_only_and_includes_v2_draft():
     assert config["incremental_source_updates"] is False
     assert config["exports"]["enabled"] is True
     assert config["criterion_mapping"]["enabled"] is True
-    assert config["criterion_mapping"]["mappings"] == "criterion_mappings/loc_fdd_xml.v2.draft.json"
+    assert config["criterion_mapping"]["mappings"] == "criterion_mappings/loc_fdd_xml.v2.draft2.json"
     assert config["criterion_mapping"]["include_drafts"] is True
     assert config["sources"][0]["type"] == "loc_fdd_xml_reviewed"
 
 
 def test_loc_mappings_contain_no_overall_risk_projection():
-    for filename in ("loc_fdd_xml.v1.approved.json", "loc_fdd_xml.v2.draft.json"):
+    for filename in (
+        "loc_fdd_xml.v1.approved.json",
+        "loc_fdd_xml.v2.draft.json",
+        "loc_fdd_xml.v2.draft2.json",
+    ):
         mapping = json.loads((ROOT / "config" / "criterion_mappings" / filename).read_text(encoding="utf-8"))
 
         assert len(mapping["maps"]) == 7
