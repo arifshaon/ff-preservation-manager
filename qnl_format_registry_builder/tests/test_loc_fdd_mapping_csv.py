@@ -10,7 +10,7 @@ from registry_builder.reconcile import reconcile
 
 
 _SAMPLE = """FDD,Format Title,PUID,Wikidata QID,PUID Match,QID Match,Notes
-fdd000001,WAVE Audio File Format,fmt/6,Q217570,Exact,Exact,Same granularity
+fdd000001,WAVE Audio File Format,fmt/6,Q217570,Exact,Exact,Same granularity; compare fmt/999 only as background
 fdd000022,TIFF 6,fmt/353,Q27231633,Not exact,Exact,PRONOM does not distinguish TIFF versions
 fdd000030,PDF Family,,,No match,,Family-level FDD
 """
@@ -45,6 +45,7 @@ def test_crosswalk_extracts_ids_and_preserves_match_context(tmp_path):
     assert len(entries) == 3
     assert entries[0]["fdd_ids"] == ["fdd000001"]
     assert entries[0]["puids"] == ["fmt/6"]
+    assert "fmt/999" not in entries[0]["puids"]
     assert entries[0]["wikidata_qids"] == ["Q217570"]
     assert entries[0]["title"] == "WAVE Audio File Format"
     assert entries[0]["mapping_context"]["PUID Match"] == "Exact"
@@ -68,4 +69,5 @@ def test_crosswalk_records_are_evidence_only_and_identifier_ownership_is_preserv
     assert claims[("loc", "fdd000001")] is True
     assert claims[("puid", "fmt/6")] is False
     assert claims[("wikidata", "Q217570")] is False
+    assert ("puid", "fmt/999") not in claims
     assert reconcile(records) == []
