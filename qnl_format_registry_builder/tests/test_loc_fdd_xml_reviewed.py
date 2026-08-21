@@ -104,6 +104,22 @@ def test_reviewed_factor_extraction_accepts_structured_exact_labels():
     }
 
 
+def test_reviewed_factor_extraction_accepts_real_loc_tech_protection_tag():
+    root = ET.fromstring(
+        """
+        <fdd:FDD xmlns:fdd="http://www.loc.gov/preservation/digital/formats/schemas/fdd/v1">
+          <fdd:sustainabilityFactors>
+            <fdd:techProtection>None.</fdd:techProtection>
+          </fdd:sustainabilityFactors>
+        </fdd:FDD>
+        """
+    )
+
+    assert extract_reviewed_loc_sustainability_factors(root) == {
+        "technical_protection_mechanisms": "None."
+    }
+
+
 def test_reviewed_factor_extraction_does_not_promote_factor_names_from_free_text():
     root = ET.fromstring(
         """
