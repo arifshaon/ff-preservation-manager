@@ -13,7 +13,8 @@ For repository-wide concepts, start with:
 
 | Task | Start here |
 | --- | --- |
-| Install, configure, and run the builder | [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md) |
+| Build the production registry from an empty MongoDB, source by source | [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) |
+| Install, configure, and run the builder generally | [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md) |
 | Understand what the module does | [`../README.md`](../README.md) |
 | Understand the canonical data model | [`../../docs/DATA_MODEL.md`](../../docs/DATA_MODEL.md) |
 | Interpret generated registry data | [`READING_THE_REGISTRY.md`](READING_THE_REGISTRY.md) |
@@ -42,19 +43,20 @@ For repository-wide concepts, start with:
 
 ## Operator path
 
-For a new operator, read:
+For a new operator building the approved QNL registry from scratch, read:
 
 ```text
 ../README.md
-  -> ../../docs/HOW_TO_ADD_A_SOURCE.md (when onboarding a source)
-  -> INSTALLATION_SETUP_AND_RUN.md
+  -> PERSISTENT_INTEGRATION.md
   -> READING_THE_REGISTRY.md
   -> source/storage specialist docs as needed
 ```
 
-`INSTALLATION_SETUP_AND_RUN.md` is the canonical runbook for installation, MongoDB/file setup, online/offline runs, source-specific runs, validation, audits, mapping validation, criterion-claim backfill, and deployment checks.
+`PERSISTENT_INTEGRATION.md` is the authoritative clean-room/source-by-source production runbook. It covers MongoDB setup, exact run order, the normal upstream file/URL for PRONOM, LOC, NARA, DPC and Wikidata, manual-download/local-file fallback configuration, the separate governed LOC/NARA/DPC/Wikidata claim stages, verification/stop conditions, known reproducibility gaps, and the TODO for moving dedicated post-ingest steps behind a more generic config-driven processor interface.
 
-For onboarding a source all the way into risk analysis, use this sequence:
+`INSTALLATION_SETUP_AND_RUN.md` remains the general builder runbook for installation, MongoDB/file setup, online/offline runs, validation, audits, mappings and deployment checks outside the specific clean-room production sequence.
+
+For onboarding a **new** source all the way into risk analysis, use this sequence:
 
 ```text
 ../../docs/HOW_TO_ADD_A_SOURCE.md
@@ -111,6 +113,7 @@ Do not treat the MongoDB document layout as the data-model definition or the onl
 
 | Document | Boundary |
 | --- | --- |
+| [`PERSISTENT_INTEGRATION.md`](PERSISTENT_INTEGRATION.md) | Clean-room production build for the approved QNL sources, one source at a time, including local fallbacks and governed follow-on steps. |
 | [`../../docs/HOW_TO_ADD_A_SOURCE.md`](../../docs/HOW_TO_ADD_A_SOURCE.md) | One obvious end-to-end onboarding route through risk-manager verification. |
 | [`../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md) | Manual/AI transcription of narrative sources into reviewed, versioned JSON. |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Concept and pipeline placement. |
@@ -204,7 +207,8 @@ config/schemas/unstructured_source_transcription.v1.schema.json
 | `../../docs/DATA_MODEL.md` | Live | Canonical backend-neutral data model. |
 | `../../docs/HOW_TO_ADD_A_SOURCE.md` | Live | End-to-end source onboarding router. |
 | `../../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md` | Live | Unstructured source transcription/review workflow. |
-| `INSTALLATION_SETUP_AND_RUN.md` | Live | Primary installation/setup/operator runbook. |
+| `PERSISTENT_INTEGRATION.md` | Live | Source-by-source production MongoDB build/runbook, including manual source-file fallback and generic-orchestration TODO. |
+| `INSTALLATION_SETUP_AND_RUN.md` | Live | General installation/setup/operator runbook. |
 | `DOCUMENTATION_MAP.md` | Live | This navigation map. |
 | `ARCHITECTURE.md` | Live | Builder internals and adapter/storage boundaries. |
 | `READING_THE_REGISTRY.md` | Live | Registry/output interpretation. |
