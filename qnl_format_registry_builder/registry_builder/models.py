@@ -64,6 +64,10 @@ class RawFormatRecord:
     institution_evidence: list[dict[str, Any]] = field(default_factory=list)
     # Backwards-compatible input alias. New adapters should use institution_policy.
     qnl: dict[str, Any] = field(default_factory=dict)
+    # Source-native risk assessments. New risk-bearing adapters should prefer
+    # this collection and retain the source's own vocabulary/scale. The legacy
+    # `hazard` dict remains supported for existing adapters such as NARA.
+    risk_assessments: list[dict[str, Any]] = field(default_factory=list)
     hazard: dict[str, Any] = field(default_factory=dict)
     readiness: dict[str, Any] = field(default_factory=dict)
     trend: dict[str, Any] = field(default_factory=dict)
@@ -95,6 +99,14 @@ class CanonicalFormat:
     source_records: list[dict[str, Any]] = field(default_factory=list)
     institution_policy_overlays: list[dict[str, Any]] = field(default_factory=list)
     institution_evidence_claims: list[dict[str, Any]] = field(default_factory=list)
+    # Every source-native risk assessment is retained independently. This is the
+    # preferred query surface for questions such as "what do NARA and DPC say?".
+    risk_assessments: list[dict[str, Any]] = field(default_factory=list)
+    # Optional decision-support view derived from risk_assessments. It never
+    # replaces or rewrites the source-native assessments above.
+    synthesized_risk: dict[str, Any] = field(default_factory=dict)
+    # Backwards-compatible hazard fields retained while existing consumers
+    # migrate to risk_assessments/synthesized_risk.
     external_hazard: list[dict[str, Any]] = field(default_factory=list)
     hazard_assessment: dict[str, Any] = field(default_factory=dict)
     readiness: list[dict[str, Any]] = field(default_factory=list)
@@ -152,6 +164,15 @@ class CanonicalFormat:
                 x.get("institution_id") or "",
                 x.get("criterion_id") or "",
                 x.get("claim_id") or "",
+            ),
+        )
+        data["risk_assessments"] = sorted(
+            data.get("risk_assessments", []),
+            key=lambda x: (
+                x.get("assessment_role") or "",
+                x.get("source_type") or "",
+                x.get("source_id") or "",
+                x.get("source_record_id") or "",
             ),
         )
         return data
