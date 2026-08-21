@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Any
 
 _BULK_CHANGE_MIN_COUNT = 25
@@ -68,6 +68,54 @@ def _source_ids(record: dict[str, Any] | None) -> list[str]:
     return sorted(source_ids)
 
 
+def _source_record_keys(record: dict[str, Any] | None) -> set[tuple[str, str]]:
+    """Stable provenance keys used to follow a source record across canonical IDs."""
+    if not record:
+        return set()
+    keys: set[tuple[str, str]] = set()
+    for source_record in record.get("source_records", []) or []:
+        source_id = str(source_record.get("source_id") or "").strip()
+        source_record_id = str(source_record.get("source_record_id") or "").strip()
+        if source_id and source_record_id:
+            keys.add((source_id, source_record_id))
+    return keys
+
+
+def _serialized_source_record_keys(keys: set[tuple[str, str]]) -> list[dict[str, str]]:
+    return [
+        {"source_id": source_id, "source_record_id": source_record_id}
+        for source_id, source_record_id in sorted(keys)
+    ]
+
+
+def _canonical_transition_map(
+    previous_by_id: dict[str, dict[str, Any]],
+    current_by_id: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """Map disappeared canonical IDs to an unambiguous current canonical owner.
+
+    Canonical IDs can legitimately change when a later authority introduces a
+    stronger reconciliation key (for example a NARA-keyed record becoming owned
+    by a PRONOM PUID). If the exact same `(source_id, source_record_id)` provenance
+    now occurs under exactly one different current canonical ID, this is an
+    identity transition, not an upstream source removal.
+    """
+    current_index: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for canonical_id, record in current_by_id.items():
+        for key in _source_record_keys(record):
+            current_index[key].add(canonical_id)
+
+    transitions: dict[str, str] = {}
+    for previous_id in sorted(set(previous_by_id) - set(current_by_id)):
+        candidates: set[str] = set()
+        for key in _source_record_keys(previous_by_id[previous_id]):
+            candidates.update(current_index.get(key, set()))
+        candidates.discard(previous_id)
+        if len(candidates) == 1:
+            transitions[previous_id] = next(iter(candidates))
+    return transitions
+
+
 def _summary(record: dict[str, Any] | None) -> dict[str, Any] | None:
     if not record:
         return None
@@ -90,6 +138,8 @@ def _action(change_type: str) -> str:
     actions = {
         "record_added": "Review the newly observed canonical format and decide whether an institutional policy overlay or readiness assessment is needed.",
         "record_removed": "Confirm whether the upstream source intentionally removed the format or whether the source adapter/configuration changed.",
+        "canonical_rekeyed": "Confirm the canonical identity transition is expected; the same source record is retained under a stronger or otherwise preferred canonical key.",
+        "canonical_merged": "Review the canonical merge and confirm that the contributing source records genuinely describe the same format identity.",
         "preferred_name_changed": "Review the naming change and update local documentation or aliases if needed.",
         "category_changed": "Review whether the category change affects method profiles, readiness, or policy grouping.",
         "identifiers_changed": "Review identifier changes before using them for automated matching or policy decisions.",
@@ -180,10 +230,15 @@ def _collapse_bulk_changes(
         for change in affected:
             for side in ("previous", "current"):
                 summary = change.get(side)
-                if not isinstance(summary, dict):
-                    continue
-                for source_id in summary.get("source_ids", []) or []:
-                    source_counter[source_id] += 1
+                if isinstance(summary, list):
+                    summaries = [item for item in summary if isinstance(item, dict)]
+                elif isinstance(summary, dict):
+                    summaries = [summary]
+                else:
+                    summaries = []
+                for item in summaries:
+                    for source_id in item.get("source_ids", []) or []:
+                        source_counter[source_id] += 1
         bulk_events.append({
             "change_id": _bulk_change_id(run_id, "source_coverage_changed", change_type),
             "run_id": run_id,
@@ -214,7 +269,9 @@ def detect_registry_changes(
 
     The first run against an empty store establishes a baseline and intentionally
     does not generate one `record_added` event per format. Subsequent runs compare
-    deterministic canonical IDs and selected evidence fields.
+    deterministic canonical IDs and selected evidence fields. Provenance is used
+    to distinguish a true source removal from a canonical re-key/merge caused by
+    stronger reconciliation evidence.
     """
     previous_by_id = _by_id(previous_registry)
     current_by_id = _by_id(current_registry)
@@ -232,8 +289,48 @@ def detect_registry_changes(
     changes: list[dict[str, Any]] = []
     previous_ids = set(previous_by_id)
     current_ids = set(current_by_id)
+    transitions = _canonical_transition_map(previous_by_id, current_by_id)
+    transitioned_previous_ids = set(transitions)
+    transition_targets = set(transitions.values())
 
-    for canonical_id in sorted(current_ids - previous_ids):
+    # Group transitions by their current canonical owner so multiple old IDs
+    # collapsing into one current identity are reported as one merge event.
+    by_target: dict[str, list[str]] = defaultdict(list)
+    for previous_id, current_id in transitions.items():
+        by_target[current_id].append(previous_id)
+
+    for current_id in sorted(by_target):
+        previous_group = sorted(by_target[current_id])
+        current_record = current_by_id[current_id]
+        shared_keys: set[tuple[str, str]] = set()
+        for previous_id in previous_group:
+            shared_keys.update(
+                _source_record_keys(previous_by_id[previous_id])
+                & _source_record_keys(current_record)
+            )
+
+        is_merge = len(previous_group) > 1 or current_id in previous_ids
+        change_type = "canonical_merged" if is_merge else "canonical_rekeyed"
+        previous_summary: Any
+        if len(previous_group) == 1:
+            previous_summary = _summary(previous_by_id[previous_group[0]])
+        else:
+            previous_summary = [_summary(previous_by_id[item]) for item in previous_group]
+        event = _event(
+            run_id=run_id,
+            created_at=created_at,
+            change_type=change_type,
+            canonical_id=current_id,
+            previous=previous_summary,
+            current=_summary(current_record),
+            severity="review" if is_merge else "info",
+        )
+        event["previous_canonical_ids"] = previous_group
+        event["current_canonical_id"] = current_id
+        event["shared_source_records"] = _serialized_source_record_keys(shared_keys)
+        changes.append(event)
+
+    for canonical_id in sorted((current_ids - previous_ids) - transition_targets):
         changes.append(_event(
             run_id=run_id,
             created_at=created_at,
@@ -243,7 +340,7 @@ def detect_registry_changes(
             severity="review",
         ))
 
-    for canonical_id in sorted(previous_ids - current_ids):
+    for canonical_id in sorted((previous_ids - current_ids) - transitioned_previous_ids):
         changes.append(_event(
             run_id=run_id,
             created_at=created_at,
