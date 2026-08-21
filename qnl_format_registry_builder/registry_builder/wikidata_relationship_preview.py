@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from registry_builder.identifier_rules import load_identifier_rules, strong_identifier_kinds
-from registry_builder.models import RawFormatRecord
+from registry_builder.models import Identifier, RawFormatRecord
 from registry_builder.pipeline import _storage_config, load_config
 from registry_builder.storage import create_store
 from registry_builder.utils import write_json
@@ -37,6 +37,31 @@ def _canonical_authority_index(
             for value in values or []:
                 index[(str(kind), str(value))].add(canonical_id)
     return index
+
+
+def _logical_copied_authority_claims(
+    record: RawFormatRecord,
+    *,
+    strong_kinds: set[str],
+) -> list[Identifier]:
+    """Return one logical copied authority assertion per kind/value pair.
+
+    ``normalize_record`` intentionally preserves provenance-distinct identifier
+    claims. A Wikidata row can therefore contain the same copied authority ID
+    once from the adapter's generic ``identifiers`` collection and once from a
+    backwards-compatible typed field such as ``puids``. For relationship
+    materialization those are one source assertion, not two relationship claims.
+    Deduplicate only within this Wikidata source record and leave the normalized
+    provenance model unchanged globally.
+    """
+
+    logical: dict[tuple[str, str], Identifier] = {}
+    for identifier in record.identifiers:
+        if identifier.verified or identifier.kind not in strong_kinds:
+            continue
+        key = (str(identifier.kind), str(identifier.value))
+        logical.setdefault(key, identifier)
+    return [logical[key] for key in sorted(logical)]
 
 
 def preview_wikidata_relationships(
@@ -70,11 +95,10 @@ def preview_wikidata_relationships(
     for record in records:
         qid = str(record.source_record_id or "")
         role = str(record.native_fields.get("wikidata_role") or record.category or "")
-        copied_claims = [
-            identifier
-            for identifier in record.identifiers
-            if not identifier.verified and identifier.kind in strong_kinds
-        ]
+        copied_claims = _logical_copied_authority_claims(
+            record,
+            strong_kinds=strong_kinds,
+        )
 
         target_claims: dict[str, list[dict[str, str]]] = defaultdict(list)
         matched_claims = 0
