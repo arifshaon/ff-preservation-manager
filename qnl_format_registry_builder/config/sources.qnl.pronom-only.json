@@ -27,7 +27,7 @@
       "type": "pronom_registry",
       "enabled": true,
       "required": true,
-      "notes": "Authoritative PRONOM registry source."
+      "notes": "Persistent PRONOM ingest into the shared QNL registry."
     }
   ]
 }
