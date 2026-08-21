@@ -13,6 +13,39 @@ def _load_loc_pair():
     return draft, approved
 
 
+def _load_loc_v2_draft():
+    return load_mapping(ROOT / "config" / "criterion_mappings" / "loc_fdd_xml.v2.draft.json")
+
+
+def _single_loc_claim(mapping, criterion_id: str, factor_name: str, source_value: str):
+    criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
+    canonical = {
+        "canonical_id": "loc-fdd000999",
+        "current": True,
+        "source_records": [
+            {
+                "source_id": "loc_fdd_xml",
+                "source_type": "loc_fdd_xml",
+                "source_record_id": "fdd000999",
+            }
+        ],
+    }
+    source_record = {
+        "source_id": "loc_fdd_xml",
+        "source_type": "loc_fdd_xml",
+        "source_record_id": "fdd000999",
+        "native_fields": {"sustainability_factors": {factor_name: source_value}},
+    }
+    claims = build_criterion_claims(
+        [canonical],
+        [source_record],
+        [mapping],
+        criteria,
+        include_drafts=True,
+    )
+    return [claim for claim in claims if claim["criterion_id"] == criterion_id]
+
+
 def test_loc_draft_and_approved_mappings_validate_against_criteria():
     criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
     draft, approved = _load_loc_pair()
@@ -24,6 +57,14 @@ def test_loc_draft_and_approved_mappings_validate_against_criteria():
     assert draft_warnings == []
     assert approved_errors == []
     assert approved_warnings == []
+
+
+def test_loc_v2_draft_mapping_validates_against_criteria():
+    criteria = load_criteria(ROOT / "config" / "criteria" / "v1.json")
+    errors, warnings = validate_mapping(_load_loc_v2_draft(), criteria)
+
+    assert errors == []
+    assert warnings == []
 
 
 def test_loc_approved_mapping_uses_same_rule_set_as_draft():
@@ -47,7 +88,8 @@ def test_loc_approved_mapping_uses_same_rule_set_as_draft():
 
 def test_loc_mapping_keeps_identity_fields_out_of_criterion_rules():
     draft, approved = _load_loc_pair()
-    for mapping in (draft, approved):
+    v2_draft = _load_loc_v2_draft()
+    for mapping in (draft, approved, v2_draft):
         mapped_fields = {rule["from_field"] for rule in mapping["maps"]}
         excluded_fields = {item["field"] for item in mapping.get("excluded_from_criteria", [])}
         assert "urls.loc" in excluded_fields
@@ -62,8 +104,8 @@ def test_loc_mapping_keeps_identity_fields_out_of_criterion_rules():
 
 def test_loc_mapping_projects_only_the_official_seven_sustainability_factors():
     _, approved = _load_loc_pair()
-    mapped_fields = {rule["from_field"] for rule in approved["maps"]}
-    assert mapped_fields == {
+    v2_draft = _load_loc_v2_draft()
+    expected = {
         "native_fields.sustainability_factors.disclosure",
         "native_fields.sustainability_factors.adoption",
         "native_fields.sustainability_factors.transparency",
@@ -72,7 +114,10 @@ def test_loc_mapping_projects_only_the_official_seven_sustainability_factors():
         "native_fields.sustainability_factors.impact_of_patents",
         "native_fields.sustainability_factors.technical_protection_mechanisms",
     }
-    assert all("documentation" not in field.replace("self_documentation", "") for field in mapped_fields)
+    for mapping in (approved, v2_draft):
+        mapped_fields = {rule["from_field"] for rule in mapping["maps"]}
+        assert mapped_fields == expected
+        assert all("documentation" not in field.replace("self_documentation", "") for field in mapped_fields)
 
 
 def test_loc_pdf_embedded_font_dependency_maps_to_low_external_dependency():
@@ -109,3 +154,40 @@ def test_loc_pdf_embedded_font_dependency_maps_to_low_external_dependency():
     assert claims[0]["mapping_rule_id"] == "loc.external_dependencies.from_sustainability_factor.v1"
     assert claims[0]["value"] == "low"
     assert claims[0]["review_status"] == "approved"
+
+
+def test_loc_v2_keeps_partial_transparency_from_being_promoted_to_transparent():
+    claims = _single_loc_claim(
+        _load_loc_v2_draft(),
+        "sustainability.transparency_readability",
+        "transparency",
+        "The format is partially transparent and requires software for some structures.",
+    )
+
+    assert len(claims) == 1
+    assert claims[0]["value"] == "partially_transparent"
+    assert claims[0]["review_status"] == "unreviewed"
+
+
+def test_loc_v2_recognizes_explicit_no_licensing_or_patent_restrictions():
+    claims = _single_loc_claim(
+        _load_loc_v2_draft(),
+        "sustainability.ip_licensing",
+        "impact_of_patents",
+        "No licensing and patent restrictions for 7z files.",
+    )
+
+    assert len(claims) == 1
+    assert claims[0]["value"] == "no_known_barrier"
+
+
+def test_loc_v2_treats_optional_encryption_support_as_possible_not_known_constraint():
+    claims = _single_loc_claim(
+        _load_loc_v2_draft(),
+        "sustainability.tpm_encryption",
+        "technical_protection_mechanisms",
+        "The format supports encryption for selected content.",
+    )
+
+    assert len(claims) == 1
+    assert claims[0]["value"] == "possible"
