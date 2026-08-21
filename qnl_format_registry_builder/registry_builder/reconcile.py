@@ -347,10 +347,6 @@ def _safe_claimed_strong_identifier_aliases(
             continue
         if _groups_name_conflict(items, groups[selected_target]):
             continue
-        # A copied strong identifier is not sufficient to collapse an
-        # unversioned/family-like record into a version-specific authority
-        # record. Keep asymmetric-version cases separate and let the explicit
-        # relationship pass record them as reviewable provenance instead.
         if _groups_have_asymmetric_version_signal(items, groups[selected_target]):
             continue
         aliases[group_key] = selected_target
@@ -454,12 +450,13 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
     strong_order = strong_identifier_order(rules)
     strong_kinds = strong_identifier_kinds(rules)
     record_list = list(records)
+    identity_records = [record for record in record_list if record.record_role != "evidence_only"]
     groups: dict[tuple[str, str], list[RawFormatRecord]] = defaultdict(list)
     alias_keys: dict[tuple[str, str], tuple[str, str]] = {}
     alias_confidence: dict[tuple[str, str], dict[str, str]] = {}
     record_keys: dict[int, tuple[str, str]] = {}
 
-    for record in record_list:
+    for record in identity_records:
         key = strongest_key(record, strong_kinds=strong_order)
         record_keys[id(record)] = key
         groups[key].append(record)
@@ -505,11 +502,6 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
                     claim_confidence = confidence["confidence"]
                     confidence_reason = confidence["confidence_reason"]
 
-                # Keep copied strong identifiers in provenance claims, but do
-                # not put them in CanonicalFormat.identifiers. The latter is the
-                # exact resolver identity index; the former records what another
-                # authority/source claimed without creating duplicate PUID/LOC/
-                # NARA ownership.
                 if identifier.kind in strong_kinds and not identifier.verified:
                     claim = _identifier_claim_dict(
                         identifier,
@@ -536,6 +528,13 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
             for claim in _institution_evidence_claims(r):
                 if claim not in cf.institution_evidence_claims:
                     cf.institution_evidence_claims.append(claim)
+            for assessment in r.risk_assessments or []:
+                stored_assessment = dict(assessment)
+                stored_assessment.setdefault("source_id", r.source_id)
+                stored_assessment.setdefault("source_type", r.source_type)
+                stored_assessment.setdefault("source_record_id", r.source_record_id)
+                if stored_assessment not in cf.risk_assessments:
+                    cf.risk_assessments.append(stored_assessment)
             if r.hazard:
                 cf.external_hazard.append(r.hazard | {"source_id": r.source_id})
             if r.readiness:
@@ -545,5 +544,5 @@ def reconcile(records: Iterable[RawFormatRecord], *, identifier_rules: dict[str,
         cf.hazard_assessment = _hazard_assessment(cf)
         canonical.append(cf)
 
-    _attach_explicit_puid_source_relationships(canonical, record_list)
+    _attach_explicit_puid_source_relationships(canonical, identity_records)
     return sorted(canonical, key=lambda x: x.preferred_name.lower())
