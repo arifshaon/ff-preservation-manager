@@ -20,7 +20,7 @@
     "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
     "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
     "wikidata": {"strength": "weak", "verified_from": ["wikidata"]},
-    "notes": "Add new identifier namespaces here instead of editing models.py, normalize.py, or reconcile.py. Example: \"dpc\": {\"strength\": \"strong\", \"verified_from\": [\"dpc_bit_list\"]}."
+    "notes": "Add new identifier namespaces here instead of editing models.py, normalize.py, or reconcile.py. DPC Bit List entry IDs are source-record identifiers, not canonical format identifiers."
   },
   "sources": [
     {
@@ -95,12 +95,21 @@
       "notes": "Default sustainability-evidence source. It downloads the official LOC FDD XML ZIP and extracts FDD IDs, names, categories, identifier claims, and conservative evidence pointers. Optional so a LOC/network issue is reported without destroying the baseline run."
     },
     {
+      "id": "dpc_bit_list_2025",
+      "type": "dpc_bit_list",
+      "enabled": true,
+      "required": false,
+      "edition": "2025",
+      "github_ref": "main",
+      "notes": "Preservation-risk evidence source. The adapter snapshots the DPC Bit List source repository, whose content/entries Markdown files are the source data for the website/report. It is acquisition-only until explicit DPC-entry-to-format/family mappings are reviewed, so it cannot create canonical format records."
+    },
+    {
       "id": "example_curated_source",
       "type": "standard_json",
       "enabled": false,
       "required": true,
       "uris": ["examples/sample_source_package.json"],
-      "notes": "Small toy source kept for adapter tests and offline demonstrations. It is disabled in the default quickstart because NARA, PRONOM, and LOC provide a better real-data first run."
+      "notes": "Small toy source kept for adapter tests and offline demonstrations. It is disabled in the default quickstart because NARA, PRONOM, LOC, and DPC provide a better real-data first run."
     },
     {
       "id": "pronom_droid_signature_file",
