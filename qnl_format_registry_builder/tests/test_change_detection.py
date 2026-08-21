@@ -10,6 +10,7 @@ def _record(
     review=False,
     external_band=None,
     institution_band=None,
+    source_records=None,
 ):
     hazard = {"band": band, "basis": basis, "review_required": review}
     if external_band is not None:
@@ -24,7 +25,7 @@ def _record(
         "preferred_name": canonical_id,
         "category": "example",
         "identifiers": {"extension": [canonical_id.replace("fmt-", "")]},
-        "source_records": [{"source_id": "nara"}],
+        "source_records": source_records if source_records is not None else [{"source_id": "nara"}],
         "hazard_assessment": hazard,
     }
 
@@ -62,6 +63,94 @@ def test_detects_added_removed_hazard_native_and_divergence_changes():
     assert "divergence_opened" in change_types
     assert report["change_counts"]["record_added"] == 1
     assert report["change_counts"]["record_removed"] == 1
+
+
+def test_canonical_rekey_is_not_reported_as_added_and_removed():
+    previous = [
+        _record(
+            "nara-nf00100",
+            source_records=[
+                {"source_id": "nara_digital_preservation_framework", "source_record_id": "NF00100"},
+            ],
+        )
+    ]
+    current = [
+        _record(
+            "puid-fmt-100",
+            source_records=[
+                {"source_id": "nara_digital_preservation_framework", "source_record_id": "NF00100"},
+                {"source_id": "pronom_registry", "source_record_id": "fmt/100"},
+            ],
+        )
+    ]
+
+    report = detect_registry_changes(previous, current, run_id="run-rekey", created_at="2026-08-21T00:00:00+00:00")
+    change_types = [change["change_type"] for change in report["changes"]]
+
+    assert change_types == ["canonical_rekeyed"]
+    event = report["changes"][0]
+    assert event["previous_canonical_ids"] == ["nara-nf00100"]
+    assert event["current_canonical_id"] == "puid-fmt-100"
+    assert event["shared_source_records"] == [
+        {"source_id": "nara_digital_preservation_framework", "source_record_id": "NF00100"}
+    ]
+    assert "record_added" not in report["raw_change_counts"]
+    assert "record_removed" not in report["raw_change_counts"]
+
+
+def test_multiple_previous_ids_absorbed_by_one_current_id_are_reported_as_merge():
+    previous = [
+        _record(
+            "nara-a",
+            source_records=[{"source_id": "nara", "source_record_id": "A"}],
+        ),
+        _record(
+            "nara-b",
+            source_records=[{"source_id": "nara", "source_record_id": "B"}],
+        ),
+    ]
+    current = [
+        _record(
+            "puid-fmt-1",
+            source_records=[
+                {"source_id": "nara", "source_record_id": "A"},
+                {"source_id": "nara", "source_record_id": "B"},
+                {"source_id": "pronom", "source_record_id": "fmt/1"},
+            ],
+        )
+    ]
+
+    report = detect_registry_changes(previous, current, run_id="run-merge", created_at="2026-08-21T00:00:00+00:00")
+
+    assert [change["change_type"] for change in report["changes"]] == ["canonical_merged"]
+    event = report["changes"][0]
+    assert event["previous_canonical_ids"] == ["nara-a", "nara-b"]
+    assert event["current_canonical_id"] == "puid-fmt-1"
+    assert "record_added" not in report["raw_change_counts"]
+    assert "record_removed" not in report["raw_change_counts"]
+
+
+def test_true_removal_without_persistent_provenance_remains_record_removed():
+    previous = [
+        _record(
+            "nara-old",
+            source_records=[{"source_id": "nara", "source_record_id": "OLD"}],
+        )
+    ]
+    current = [
+        _record(
+            "puid-new",
+            source_records=[{"source_id": "pronom", "source_record_id": "fmt/999"}],
+        )
+    ]
+
+    report = detect_registry_changes(previous, current, run_id="run-remove", created_at="2026-08-21T00:00:00+00:00")
+    change_types = [change["change_type"] for change in report["changes"]]
+
+    assert "record_added" in change_types
+    assert "record_removed" in change_types
+    assert "canonical_rekeyed" not in change_types
+    assert "canonical_merged" not in change_types
 
 
 def test_review_required_without_two_disagreeing_estimators_is_not_divergence():
