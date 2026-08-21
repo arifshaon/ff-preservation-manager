@@ -99,11 +99,11 @@ def apply_external_risk_mappings(
     for sequence, rule in enumerate(mapping.get("rules") or [], start=1):
         rule_id = str(rule.get("rule_id") or f"rule-{sequence}")
         status = str(rule.get("status") or "draft").lower()
-        if status != "approved" and not (include_drafts and status == "draft"):
-            skipped.append({"rule_id": rule_id, "status": status, "reason": "not_approved"})
-            continue
         if status in {"contextual_only", "excluded"}:
             skipped.append({"rule_id": rule_id, "status": status, "reason": status})
+            continue
+        if status != "approved" and not (include_drafts and status == "draft"):
+            skipped.append({"rule_id": rule_id, "status": status, "reason": "not_approved"})
             continue
 
         matching_records = [record for record in records if _source_record_matches(record, rule)]
