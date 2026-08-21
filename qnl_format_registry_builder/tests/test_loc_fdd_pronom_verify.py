@@ -57,6 +57,38 @@ def test_separate_authority_records_without_version_conflict_are_bridge_candidat
     assert results[0]["identity_bridge_approved"] is False
 
 
+def test_broad_family_candidate_is_held_for_scope_review():
+    loc = _canonical("loc-fdd000310", "EPUB File Format Family", [_loc_claim("fdd000310")])
+    pronom = _canonical("puid-fmt-483", "ePub Format", [_puid_claim("fmt/483")])
+    store = FakeStore({("loc", "fdd000310"): loc, ("puid", "fmt/483"): pronom})
+    results, summary = verify_review_entries(
+        [_entry(title="EPUB (Electronic Publication) File Format Family", fdd="fdd000310", puid="fmt/483")],
+        store,
+    )
+
+    assert results[0]["status"] == "broad_scope_review"
+    assert summary["status_counts"] == {"broad_scope_review": 1}
+
+
+def test_duplicate_puid_candidates_are_all_many_to_one_scope_review():
+    loc_a = _canonical("loc-fdd-a", "Example A", [_loc_claim("fdd-a")])
+    loc_b = _canonical("loc-fdd-b", "Example B", [_loc_claim("fdd-b")])
+    pronom = _canonical("puid-fmt-720", "Example PRONOM", [_puid_claim("fmt/720")])
+    store = FakeStore({
+        ("loc", "fdd-a"): loc_a,
+        ("loc", "fdd-b"): loc_b,
+        ("puid", "fmt/720"): pronom,
+    })
+    results, summary = verify_review_entries([
+        _entry(title="Example A", fdd="fdd-a", puid="fmt/720"),
+        _entry(title="Example B", fdd="fdd-b", puid="fmt/720"),
+    ], store)
+
+    assert [result["status"] for result in results] == ["many_to_one_scope_review", "many_to_one_scope_review"]
+    assert all(result["related_fdd_ids"] == ["fdd-a", "fdd-b"] for result in results)
+    assert summary["status_counts"] == {"many_to_one_scope_review": 2}
+
+
 def test_version_conflict_is_held_for_review():
     loc = _canonical("loc-fdd000100", "Example Format 1.0", [_loc_claim("fdd000100")])
     pronom = _canonical("puid-fmt-100", "Example Format 2.0", [_puid_claim("fmt/100")])
