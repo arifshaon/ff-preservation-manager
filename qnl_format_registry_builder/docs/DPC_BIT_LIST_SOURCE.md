@@ -116,7 +116,7 @@ The shared semantic level is a separate, transparent projection:
 ```text
 Lower Risk            -> minimal
 Vulnerable            -> moderate
-Endangered             -> high
+Endangered            -> high
 Critically Endangered -> critical
 Practically Extinct   -> critical
 ```
@@ -165,9 +165,38 @@ Email
 
 They are intentionally not projected to individual canonical formats because their DPC scope spans platforms, carriers, services, containers/codecs, messages, mailboxes and other broader conditions.
 
-## Mapping preview
+## Read-only persistent-registry preview
 
-Before automatic production integration, preview the approved mapping against an actual registry export:
+Before any DPC assessment is persisted onto canonical records, preview the approved mapping against the current registry in MongoDB:
+
+```powershell
+python -m registry_builder.dpc_risk_mapping_mongo `
+  --config config/sources.qnl.dpc-only.json `
+  --out out/dpc-risk-mapping-preview.json
+```
+
+This command:
+
+- loads the current canonical registry view from the configured storage backend;
+- selects only the latest completed `dpc_bit_list_2025` source run;
+- applies the reviewed mapping in memory;
+- reports the exact target canonical IDs, names and identifiers;
+- reports the mapped source-native assessment and the projected synthesized-risk view;
+- performs **no storage writes** and **no identity projection**.
+
+The preview report records:
+
+```text
+mode = read_only_store_preview
+storage_write = false
+identity_projection = false
+```
+
+This is the required review gate before production persistence of DPC risk assessments.
+
+## File-export mapping preview
+
+The older file-based preview remains useful for detached review datasets:
 
 ```powershell
 python -m registry_builder.dpc_risk_mapping `
