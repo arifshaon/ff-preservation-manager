@@ -165,6 +165,12 @@ class CanonicalFormat:
             source_records=self.source_records,
             canonical_name=self.preferred_name,
         )
+        # Institutional assessments are local views of the same format entity,
+        # not a different scope class. Keep provenance in scope_basis/role while
+        # comparing scope only at the format/family/group/content level.
+        for assessment in self.risk_assessments:
+            if assessment.get("scope_type") == "institutional_format":
+                assessment["scope_type"] = "exact_format"
         self.synthesized_risk = synthesize_risk_assessments(self.risk_assessments)
 
     def to_dict(self) -> dict[str, Any]:
