@@ -21,6 +21,7 @@ _COLLECTIONS = (
     "trend_observations",
     "assessment_changes",
     "criterion_claims",
+    "risk_assessment_claims",
 )
 
 
