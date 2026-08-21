@@ -5,6 +5,15 @@ from typing import Any
 from preservation_risk_manager.frameworks import Question, RiskFramework
 
 
+# Compatibility aliases bridge approved registry criterion vocabulary to the
+# canonical evidence fields used by the risk framework. They do not create new
+# evidence and do not change the persisted registry claims.
+EVIDENCE_FIELD_COMPATIBILITY: dict[str, set[str]] = {
+    "rights.ip_constraints": {"sustainability.ip_licensing"},
+    "rights.tpm_drm_encryption": {"sustainability.tpm_encryption"},
+}
+
+
 DERIVATION_VALUE_MAP: dict[str, dict[str, str]] = {
     "sustainability.disclosure": {
         "openly_documented": "public_specification",
@@ -75,6 +84,22 @@ DERIVATION_VALUE_MAP: dict[str, dict[str, str]] = {
         "moderate": "specialist_dependency",
         "high": "specialist_dependency",
     },
+    # Approved LOC patent/licensing claims use a sustainability criterion name,
+    # while the framework asks the equivalent preservation question under the
+    # rights domain. These values are already conservative reviewed projections.
+    "rights.ip_constraints": {
+        "no_known_barrier": "low_risk",
+        "limited_or_unclear": "moderate_risk",
+        "known_constraint": "high_risk",
+    },
+    # LOC technical-protection 'possible' is intentionally *not* mapped. It says
+    # the format can support DRM/encryption, not that a preservation-blocking TPM
+    # is actually present. The matched claim therefore remains visible as
+    # insufficient/unknown evidence instead of being promoted to a risk answer.
+    "rights.tpm_drm_encryption": {
+        "none_or_not_applicable": "low_risk",
+        "known_constraint": "high_risk",
+    },
 }
 
 _EVIDENCE_SECTIONS = (
@@ -117,13 +142,18 @@ def evidence_items(evidence_pack: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _claim_matches_field(claim: dict[str, Any], evidence_field: str) -> bool:
-    fields = (
-        claim.get("criterion_id"),
-        claim.get("field"),
-        claim.get("evidence_field"),
-        claim.get("path"),
-    )
-    return evidence_field in {str(field) for field in fields if field is not None}
+    fields = {
+        str(field)
+        for field in (
+            claim.get("criterion_id"),
+            claim.get("field"),
+            claim.get("evidence_field"),
+            claim.get("path"),
+        )
+        if field is not None
+    }
+    accepted_fields = {evidence_field, *EVIDENCE_FIELD_COMPATIBILITY.get(evidence_field, set())}
+    return bool(fields & accepted_fields)
 
 
 def _claim_value(claim: dict[str, Any]) -> str | None:
@@ -216,7 +246,8 @@ def derive_answers(framework: RiskFramework, evidence_pack: dict[str, Any]) -> d
 
     This function does not infer from format names, extensions, hazard bands, or
     general knowledge. It only uses evidence claims whose criterion/field matches
-    a framework question's declared evidence_fields.
+    a framework question's declared evidence_fields or an explicitly governed
+    compatibility alias.
     """
     claims = evidence_items(evidence_pack)
     answers: dict[str, str] = {}
