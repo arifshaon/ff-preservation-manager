@@ -35,7 +35,26 @@ def _ids(pattern: re.Pattern[str], text: str, *, upper: bool = False, lower: boo
     return sorted(values)
 
 
+def _first_value_for_headers(row: dict[str, Any], headers: tuple[str, ...]) -> str | None:
+    wanted = {_norm_header(header) for header in headers}
+    for key, value in row.items():
+        if _norm_header(key) not in wanted or value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
 def _identifier_column_text(row: dict[str, Any], kind: str) -> str:
+    """Return text only from columns that own the requested identifier.
+
+    The July 2026 LOC crosswalk uses `LC_Unique_ID`, `PRONOM_PUID`, and
+    `Wikidata_Title_ID`. These explicit schema names are recognized first, with
+    conservative fallbacks for future header variants. Free-text note columns
+    are deliberately excluded so identifiers mentioned in explanatory prose do
+    not become crosswalk assertions.
+    """
     values: list[str] = []
     for key, value in row.items():
         if value is None or not str(value).strip():
@@ -43,24 +62,83 @@ def _identifier_column_text(row: dict[str, Any], kind: str) -> str:
         header = _norm_header(key)
         include = False
         if kind == "fdd":
-            include = "fdd" in header and not any(token in header for token in ("title", "name", "match", "status", "note", "comment"))
+            include = header in {
+                "lcuniqueid",
+                "lcuniqueidentifier",
+                "fdd",
+                "fddid",
+                "fddidentifier",
+            } or (
+                "fdd" in header
+                and not any(token in header for token in ("title", "name", "match", "status", "note", "comment"))
+            )
         elif kind == "puid":
-            include = ("puid" in header or header in {"pronom", "pronomid", "pronomidentifier"}) and not any(token in header for token in ("match", "status", "note", "comment"))
+            include = header in {
+                "pronompuid",
+                "puid",
+                "pronom",
+                "pronomid",
+                "pronomidentifier",
+            } or (
+                ("puid" in header or "pronom" in header)
+                and not any(token in header for token in ("match", "status", "note", "comment"))
+            )
         elif kind == "qid":
-            include = ("qid" in header or "wikidata" in header) and not any(token in header for token in ("match", "status", "note", "comment", "title", "name"))
+            include = header in {
+                "wikidatatitleid",
+                "wikidataqid",
+                "qid",
+                "wikidataid",
+                "wikidataidentifier",
+            } or (
+                ("qid" in header or "wikidata" in header)
+                and not any(token in header for token in ("match", "status", "note", "comment"))
+            )
         if include:
             values.append(str(value))
     return " | ".join(values)
 
 
 def _row_title(row: dict[str, Any]) -> str | None:
+    # Prefer the actual LOC crosswalk schema. `Filename` must never win merely
+    # because it contains the substring "name".
+    preferred = _first_value_for_headers(
+        row,
+        (
+            "LC_Long_Name",
+            "LC_Short_Name",
+            "Long_Name",
+            "Short_Name",
+            "Format_Title",
+            "Format_Name",
+            "Title",
+        ),
+    )
+    if preferred:
+        return preferred
+
     for key, value in row.items():
         if not value:
             continue
         normalized = _norm_header(key)
-        if normalized in {"fdd", "fddid", "fddidentifier", "puid", "qid", "wikidataqid"}:
+        if normalized in {
+            "filename",
+            "file",
+            "path",
+            "filepath",
+            "lcuniqueid",
+            "lcuniqueidentifier",
+            "fdd",
+            "fddid",
+            "fddidentifier",
+            "puid",
+            "pronompuid",
+            "qid",
+            "wikidataqid",
+            "wikidatatitleid",
+        }:
             continue
-        if _TITLE_HEADER_RE.search(key):
+        if _TITLE_HEADER_RE.search(str(key)):
             text = str(value).strip()
             if text and not _FDD_RE.fullmatch(text) and not _PUID_RE.fullmatch(text) and not _QID_RE.fullmatch(text):
                 return text
