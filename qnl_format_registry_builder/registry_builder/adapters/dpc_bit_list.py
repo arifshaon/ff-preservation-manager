@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 import re
 import zipfile
 from pathlib import Path
@@ -29,6 +30,18 @@ _DPC_SEMANTIC_LEVELS = {
 }
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    return value
+
+
 def _classification_label(value: Any) -> str | None:
     text = str(value or "").strip()
     if not text:
@@ -50,7 +63,7 @@ def _front_matter(text: str) -> tuple[dict[str, Any], str]:
     metadata = yaml.safe_load(parts[1]) or {}
     if not isinstance(metadata, dict):
         raise ValueError("DPC Bit List front matter must decode to an object")
-    return metadata, parts[2].strip()
+    return _json_safe(metadata), parts[2].strip()
 
 
 def _entry_member_slug(member: str) -> str | None:
