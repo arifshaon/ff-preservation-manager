@@ -11,11 +11,8 @@ import yaml
 from registry_builder.adapters.base import SourceAdapter
 from registry_builder.models import RawFormatRecord, SourceSnapshot
 
-DEFAULT_DPC_GITHUB_REF = "main"
-DEFAULT_DPC_ARCHIVE_URL = (
-    "https://github.com/Digital-Preservation-Coalition/bit-list/"
-    "archive/refs/heads/main.zip"
-)
+DPC_2025_COMMIT = "3ad3fef626ea7c128ef8c323d92227e5cae2efc8"
+DEFAULT_DPC_GITHUB_REF = DPC_2025_COMMIT
 _DPC_ENTRY_RE = re.compile(r"(?:^|/)content/entries/([^/]+)/index\.en\.md$")
 
 _DPC_SEMANTIC_LEVELS = {
@@ -165,15 +162,57 @@ def _entry_from_markdown(
     }
 
 
-class DpcBitListAdapter(SourceAdapter):
-    """Acquire the DPC Global Bit List source repository.
+def _entry_to_evidence_record(entry: dict[str, Any], *, source_id: str, source_type: str) -> RawFormatRecord:
+    categories = entry.get("categories") or []
+    return RawFormatRecord(
+        source_id=source_id,
+        source_type=source_type,
+        source_record_id=str(entry.get("source_record_id") or entry.get("slug") or ""),
+        record_role="evidence_only",
+        name=entry.get("title"),
+        category="; ".join(str(value) for value in categories) or None,
+        description=entry.get("description"),
+        urls={"dpc_bit_list": entry.get("source_url")} if entry.get("source_url") else {},
+        risk_assessments=[dict(entry["risk_assessment"])] if entry.get("risk_assessment") else [],
+        evidence=[{
+            "type": "dpc_bit_list_entry",
+            "edition": entry.get("edition"),
+            "slug": entry.get("slug"),
+            "source_file": entry.get("source_file"),
+            "snapshot_sha256": entry.get("snapshot_sha256"),
+        }],
+        native_fields={
+            "slug": entry.get("slug"),
+            "categories": entry.get("categories") or [],
+            "threats": entry.get("threats") or [],
+            "classification": entry.get("classification"),
+            "imminence": entry.get("imminence"),
+            "effort": entry.get("effort"),
+            "trends": entry.get("trends") or [],
+            "hazards": entry.get("hazards") or [],
+            "mitigations": entry.get("mitigations") or [],
+            "examples": entry.get("examples"),
+            "year_added": entry.get("year_added"),
+            "published": entry.get("published"),
+            "last_updated": entry.get("last_updated"),
+        },
+        raw={
+            "snapshot_sha256": entry.get("snapshot_sha256"),
+            "source_file": entry.get("source_file"),
+            "raw_front_matter": entry.get("raw_front_matter") or {},
+            "review_body": entry.get("review_body"),
+            "comments": entry.get("comments"),
+            "case_studies": entry.get("case_studies") or [],
+        },
+    )
 
-    The DPC repository is the primary machine-readable source. The adapter is
-    deliberately acquisition-only for the registry pipeline until explicit
-    DPC-entry-to-format/family mappings are reviewed. `extract_entries()` exposes
-    structured Bit List entries for review and mapping work; `extract()` returns
-    no RawFormatRecord objects so broad Bit List concepts cannot accidentally
-    become canonical file formats.
+
+class DpcBitListAdapter(SourceAdapter):
+    """Acquire DPC Bit List entries as evidence-only source records.
+
+    DPC entries are never canonical identity records. They are persisted as
+    `evidence_only` records and may contribute source-native risk assessments
+    only through reviewed external-risk mappings.
     """
 
     type_name = "dpc_bit_list"
@@ -182,15 +221,18 @@ class DpcBitListAdapter(SourceAdapter):
         return str(self.config.get("edition") or "2025")
 
     def _github_ref(self) -> str:
-        return str(self.config.get("github_ref") or DEFAULT_DPC_GITHUB_REF)
+        configured = self.config.get("github_ref")
+        if configured:
+            return str(configured)
+        if self._edition() == "2025":
+            return DPC_2025_COMMIT
+        return "main"
 
     def _archive_url(self) -> str:
         configured = self.config.get("archive_url")
         if configured:
             return str(configured)
         ref = self._github_ref()
-        if ref == "main":
-            return DEFAULT_DPC_ARCHIVE_URL
         return (
             "https://github.com/Digital-Preservation-Coalition/bit-list/"
             f"archive/{ref}.zip"
@@ -204,14 +246,14 @@ class DpcBitListAdapter(SourceAdapter):
             "snapshot_retained": True,
             "github_ref": self._github_ref(),
             "edition": self._edition(),
-            "acquisition_only": True,
+            "identity_projection": False,
         }
         if local_archive:
             return [
                 self.acquire_file_snapshot(
                     str(local_archive),
                     suffix=".zip",
-                    note="retrieval_mode=local_archive; acquisition_only=true",
+                    note="retrieval_mode=local_archive; identity_projection=false",
                     metadata=metadata,
                 )
             ]
@@ -221,7 +263,7 @@ class DpcBitListAdapter(SourceAdapter):
             self.acquire_uri_snapshot(
                 archive_url,
                 suffix=".zip",
-                note="retrieval_mode=github_archive; acquisition_only=true",
+                note="retrieval_mode=github_archive; identity_projection=false",
                 metadata=metadata,
             )
         ]
@@ -249,7 +291,7 @@ class DpcBitListAdapter(SourceAdapter):
         return entries
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
-        # Preserve source acquisition without projecting broad DPC entries into
-        # canonical format identity. A reviewed mapping layer will consume the
-        # structured entries exposed by extract_entries().
-        return []
+        return [
+            _entry_to_evidence_record(entry, source_id=self.source_id, source_type=self.type_name)
+            for entry in self.extract_entries(snapshots)
+        ]
