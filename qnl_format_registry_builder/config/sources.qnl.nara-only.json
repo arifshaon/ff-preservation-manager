@@ -1,0 +1,39 @@
+{
+  "pipeline_version": "0.1.0",
+  "incremental_source_updates": true,
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "exports": {
+    "enabled": false,
+    "notes": "Second-ingest validation writes to MongoDB only. Existing successful source contributions, such as DPC, are reused from persistent storage."
+  },
+  "method_profiles": {
+    "enabled": false
+  },
+  "identifier_kinds": {
+    "puid": {"strength": "strong", "verified_from": ["pronom_registry", "pronom_droid_xml", "wikidata"]},
+    "loc": {"strength": "strong", "verified_from": ["loc_fdd_xml"]},
+    "nara": {"strength": "strong", "verified_from": ["nara_digital_preservation_framework", "nara_preservation_csv"]},
+    "wikidata": {"strength": "weak", "verified_from": ["wikidata"]}
+  },
+  "sources": [
+    {
+      "id": "nara_digital_preservation_framework",
+      "type": "nara_digital_preservation_framework",
+      "enabled": true,
+      "required": true,
+      "retrieval_mode": "published_csv",
+      "release_mode": "pinned",
+      "release_date": "20260320",
+      "fallback_release_date": "20260320",
+      "github_ref": "master",
+      "fallback_local_files": [],
+      "notes": "Second persistent integration source. Uses the pinned NARA Digital Preservation Framework release already validated by the project. The pipeline reuses the latest successful DPC source contribution from MongoDB before reconciliation."
+    }
+  ]
+}
