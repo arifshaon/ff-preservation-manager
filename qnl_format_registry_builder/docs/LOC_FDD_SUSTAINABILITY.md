@@ -28,14 +28,54 @@ Some LOC FDD XML records expose a `documentation` element alongside the sustaina
 
 `native_fields.sustainability_factor_details.disclosure.documentation`
 
+The reviewed extractor accepts exact structured LOC factor labels only. It does not classify arbitrary free text merely because words such as `transparency`, `adoption`, or `technical protection` occur in prose. The current LOC XML tag `techProtection` is recognized as the Technical protection mechanisms factor.
+
 ## Criterion projection
 
-`config/criterion_mappings/loc_fdd_xml.v1.approved.json` maps the seven source-native factors into the neutral criteria vocabulary. The mappings are derived and partial: a criterion claim is created only when an approved value or conservative text rule matches the LOC prose.
+`config/criterion_mappings/loc_fdd_xml.v2.approved.json` is the approved production mapping. It was frozen after a fresh 598-record LOC preview, seven-factor coverage review, regression testing, and manual review of high-impact IP/licensing classifications.
+
+The mapping is deliberately partial. A criterion claim is created only when an accepted value or conservative text rule supports a normalized value. Relational statements such as `See WAVE`, long historical narratives, mixed licensing statements, and otherwise ambiguous prose may remain unmapped. Higher mapping coverage is not itself a goal.
 
 The LOC mapping does not create a scalar LOC risk score, a hazard band, a preservation action, or a recommendation. LOC identity fields and cross-registry identifiers are excluded from criterion projection.
 
 ## Production integration
 
-`config/sources.qnl.loc-sustainability.json` refreshes the reviewed `loc_fdd_xml` source contribution and applies only the approved LOC criterion mapping. Incremental source updates reuse the latest DPC, NARA, PRONOM, LOC crosswalk, and approved LOC-PRONOM bridge contributions already stored in MongoDB.
+Production is intentionally a two-stage workflow.
 
-Before applying the mapping, run the read-only criterion evidence audit against the current persistent source records. After the LOC sustainability run, repeat the audit to inspect stored claim coverage and source-native field coverage.
+### Stage 1: refresh source-native LOC evidence
+
+Run:
+
+```powershell
+python -m registry_builder run `
+  --config config/sources.qnl.loc-sustainability.json `
+  --workdir work `
+  --out out/loc-sustainability-refresh
+```
+
+This refreshes the reviewed `loc_fdd_xml` contribution in MongoDB while reusing the latest DPC, NARA, PRONOM, LOC crosswalk, and approved LOC-PRONOM bridge contributions. Criterion mapping is deliberately disabled during this pipeline run.
+
+### Stage 2: apply approved criterion claims with source-level replacement
+
+Run:
+
+```powershell
+python -m registry_builder criterion-claims backfill `
+  --config config/loc_fdd_sustainability_backfill.production.json
+```
+
+The backfill uses `config/criterion_mappings/loc_fdd_xml.v2.approved.json` and `replace_source_claims=true`. Source-level replacement is required so a previously current LOC criterion claim is superseded when a later approved mapping/source refresh no longer produces it, including the case where a mapping rule produces zero claims.
+
+## Reviewed preview baseline
+
+The final pre-production preview used 598 reviewed LOC FDD records and generated 1,565 draft claims across all seven factors. Coverage was intentionally partial:
+
+- Disclosure: 305 / 598 (51.0%)
+- Adoption: 191 / 597 (31.99%)
+- Transparency: 173 / 594 (29.12%)
+- Self-documentation: 27 / 593 (4.55%)
+- External dependencies: 217 / 592 (36.66%)
+- Impact of patents: 354 / 596 (59.4%)
+- Technical protection mechanisms: 298 / 590 (50.51%)
+
+For IP/licensing, the final reviewed distribution was 169 `no_known_barrier`, 181 `limited_or_unclear`, and 4 `known_constraint`. The four high-impact cases were manually inspected before approval.
