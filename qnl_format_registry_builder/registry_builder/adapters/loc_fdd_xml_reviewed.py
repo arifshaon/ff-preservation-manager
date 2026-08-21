@@ -4,6 +4,57 @@ from registry_builder.adapters.loc_fdd_xml import LocFddXmlAdapter
 from registry_builder.models import RawFormatRecord, SourceSnapshot
 
 
+LOC_SUSTAINABILITY_TOP_LEVEL_FACTORS = (
+    "disclosure",
+    "adoption",
+    "transparency",
+    "self_documentation",
+    "external_dependencies",
+    "impact_of_patents",
+    "technical_protection_mechanisms",
+)
+
+
+def normalize_loc_sustainability_structure(record: RawFormatRecord) -> RawFormatRecord:
+    """Project LOC sustainability evidence using the official seven-factor model.
+
+    LOC's sustainability framework defines seven top-level factors. Some FDD XML
+    records also expose a ``documentation`` element near Disclosure. Documentation
+    remains useful source-native evidence, but it is supporting detail for
+    Disclosure rather than an eighth peer factor. Preserve it under
+    ``native_fields.sustainability_factor_details.disclosure.documentation``.
+    """
+
+    factors = dict(record.native_fields.get("sustainability_factors") or {})
+    documentation = factors.pop("documentation", None)
+    official = {
+        key: factors[key]
+        for key in LOC_SUSTAINABILITY_TOP_LEVEL_FACTORS
+        if factors.get(key)
+    }
+
+    if official:
+        record.native_fields["sustainability_factors"] = official
+    else:
+        record.native_fields.pop("sustainability_factors", None)
+
+    if documentation:
+        details = dict(record.native_fields.get("sustainability_factor_details") or {})
+        disclosure_details = dict(details.get("disclosure") or {})
+        disclosure_details["documentation"] = documentation
+        details["disclosure"] = disclosure_details
+        record.native_fields["sustainability_factor_details"] = details
+
+    for evidence in record.evidence:
+        if "sustainability_factor_count" in evidence:
+            evidence["sustainability_factor_count"] = len(official)
+        if documentation:
+            evidence["sustainability_supporting_evidence_count"] = 1
+            evidence["sustainability_framework"] = "loc_seven_sustainability_factors"
+
+    return record
+
+
 def contextualize_loc_xml_identifier_references(record: RawFormatRecord) -> RawFormatRecord:
     """Keep LOC-embedded PUID/QID strings as context, not identity assertions.
 
@@ -39,12 +90,14 @@ def contextualize_loc_xml_identifier_references(record: RawFormatRecord) -> RawF
 
 
 class LocFddXmlReviewedAdapter(LocFddXmlAdapter):
-    """LOC FDD XML adapter with reviewed cross-registry identity boundaries."""
+    """LOC FDD XML adapter with reviewed identity and sustainability boundaries."""
 
     type_name = "loc_fdd_xml_reviewed"
 
     def extract(self, snapshots: list[SourceSnapshot]) -> list[RawFormatRecord]:
-        return [
+        records: list[RawFormatRecord] = []
+        for record in super().extract(snapshots):
+            normalize_loc_sustainability_structure(record)
             contextualize_loc_xml_identifier_references(record)
-            for record in super().extract(snapshots)
-        ]
+            records.append(record)
+        return records
