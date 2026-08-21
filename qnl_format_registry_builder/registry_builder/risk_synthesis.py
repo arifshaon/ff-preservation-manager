@@ -40,6 +40,207 @@ def normalize_semantic_level(value: Any) -> str | None:
     return aliases.get(text)
 
 
+def semantic_level_from_three_band(value: Any) -> str | None:
+    """Map an already-normalized Low/Moderate/High label to semantic concern.
+
+    This helper is intentionally limited to the shared three-band vocabulary
+    already used by NARA/QNL in the current pipeline. Source-specific vocabularies
+    such as DPC's Vulnerable/Endangered scale must be mapped explicitly by their
+    own adapter/config before synthesis.
+    """
+
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if "high" in text:
+        return "high"
+    if "moderate" in text or "medium" in text:
+        return "moderate"
+    if "low" in text:
+        return "low"
+    return None
+
+
+def _first_value(data: dict[str, Any], keys: Iterable[str]) -> Any:
+    for key in keys:
+        value = data.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+
+def _float_value(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _source_record_id_for(source_id: Any, source_records: Iterable[dict[str, Any]]) -> str | None:
+    matches = [
+        item.get("source_record_id")
+        for item in source_records
+        if str(item.get("source_id") or "") == str(source_id or "") and item.get("source_record_id")
+    ]
+    unique = list(dict.fromkeys(str(value) for value in matches))
+    return unique[0] if len(unique) == 1 else None
+
+
+def _assessment_from_external_hazard(
+    hazard: dict[str, Any],
+    *,
+    source_records: Iterable[dict[str, Any]],
+    canonical_name: str | None,
+) -> dict[str, Any]:
+    source_id = hazard.get("source_id")
+    source_type = hazard.get("source_type")
+    source_record_id = hazard.get("source_record_id") or _source_record_id_for(source_id, source_records)
+    native_label = _first_value(
+        hazard,
+        (
+            "native_label",
+            "external_native_band",
+            "native_band",
+            "risk_level",
+            "external_risk_level",
+            "external_band",
+            "band",
+        ),
+    )
+    native_score = _first_value(
+        hazard,
+        (
+            "native_score",
+            "external_rating_native",
+            "external_native_rating",
+            "native_rating",
+            "rating",
+            "normalized_rating",
+            "score",
+        ),
+    )
+    native_scale = _first_value(
+        hazard,
+        (
+            "native_scale",
+            "external_rating_native_scale",
+        ),
+    )
+    normalized_band = _first_value(
+        hazard,
+        ("normalized_band", "external_band", "band", "hazard_band"),
+    )
+    normalized_score = _first_value(
+        hazard,
+        ("normalized_score", "normalized_rating", "rating", "hazard_rating", "risk_score"),
+    )
+    semantic_level = normalize_semantic_level(hazard.get("semantic_level"))
+    if semantic_level is None:
+        semantic_level = semantic_level_from_three_band(normalized_band)
+
+    assessment: dict[str, Any] = {
+        "assessment_role": hazard.get("assessment_role") or "external",
+        "source_id": source_id,
+        "source_type": source_type,
+        "source_record_id": source_record_id,
+        "source_label": hazard.get("source_label") or hazard.get("source") or source_id or source_type,
+        "native_label": native_label,
+        "native_score": _float_value(native_score) if native_score is not None else None,
+        "native_scale": native_scale,
+        "normalized_band": normalized_band,
+        "normalized_score": _float_value(normalized_score) if normalized_score is not None else None,
+        "semantic_level": semantic_level,
+        "scope_type": hazard.get("scope_type") or "exact_format",
+        "scope_name": hazard.get("scope_name") or canonical_name,
+        "scope_basis": hazard.get("scope_basis") or "reconciled_source_record",
+        "native_assessment": dict(hazard),
+    }
+    if semantic_level:
+        assessment["semantic_label"] = SEMANTIC_RISK_LABELS[semantic_level]
+    return {key: value for key, value in assessment.items() if value is not None}
+
+
+def _assessment_from_institution_policy(
+    policy: dict[str, Any],
+    *,
+    canonical_name: str | None,
+) -> dict[str, Any] | None:
+    native_label = _first_value(policy, ("local_risk_level", "risk_level", "spreadsheet_risk_level"))
+    semantic_level = semantic_level_from_three_band(native_label)
+    if native_label is None and semantic_level is None:
+        return None
+
+    normalized_band = None
+    normalized_score = None
+    if semantic_level == "low":
+        normalized_band, normalized_score = "Low", 1.0
+    elif semantic_level == "moderate":
+        normalized_band, normalized_score = "Moderate", 2.0
+    elif semantic_level == "high":
+        normalized_band, normalized_score = "High", 3.0
+
+    source_record_id = policy.get("institution_format_id")
+    if not source_record_id and policy.get("source_file"):
+        source_record_id = str(policy.get("source_file"))
+        if policy.get("source_row") is not None:
+            source_record_id += f"#{policy.get('source_row')}"
+
+    assessment: dict[str, Any] = {
+        "assessment_role": "institutional",
+        "source_id": policy.get("institution_id") or "institution_policy",
+        "source_type": "institution_policy",
+        "source_record_id": source_record_id,
+        "source_label": policy.get("institution_name") or policy.get("institution_id") or "Institutional assessment",
+        "native_label": native_label,
+        "normalized_band": normalized_band,
+        "normalized_score": normalized_score,
+        "semantic_level": semantic_level,
+        "scope_type": "institutional_format",
+        "scope_name": canonical_name,
+        "scope_basis": "institution_policy_overlay",
+        "native_assessment": dict(policy),
+    }
+    if semantic_level:
+        assessment["semantic_label"] = SEMANTIC_RISK_LABELS[semantic_level]
+    return {key: value for key, value in assessment.items() if value is not None}
+
+
+def risk_assessments_from_canonical_fields(
+    *,
+    explicit_assessments: Iterable[dict[str, Any]] = (),
+    external_hazard: Iterable[dict[str, Any]] = (),
+    institution_policy_overlays: Iterable[dict[str, Any]] = (),
+    source_records: Iterable[dict[str, Any]] = (),
+    canonical_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Build the preferred source-native risk-assessment view.
+
+    Explicit risk_assessments take precedence for future adapters. Legacy hazard
+    and institution-policy structures are projected into the same view so the
+    migration is backwards compatible and existing source data is not rewritten.
+    """
+
+    assessments: list[dict[str, Any]] = [dict(item) for item in explicit_assessments]
+    assessments.extend(
+        _assessment_from_external_hazard(
+            dict(hazard),
+            source_records=source_records,
+            canonical_name=canonical_name,
+        )
+        for hazard in external_hazard
+        if hazard
+    )
+    for policy in institution_policy_overlays:
+        assessment = _assessment_from_institution_policy(dict(policy), canonical_name=canonical_name)
+        if assessment:
+            assessments.append(assessment)
+    return dedupe_risk_assessments(assessments)
+
+
 def _assessment_key(assessment: dict[str, Any]) -> tuple[Any, ...]:
     return (
         assessment.get("assessment_role"),
