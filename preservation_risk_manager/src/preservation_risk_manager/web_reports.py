@@ -142,6 +142,55 @@ def _ai_synthesis(response: dict[str, Any]) -> tuple[dict[str, Any], dict[str, A
     return synthesis, overall
 
 
+def _synthesis_policy_from_items(items: list[dict[str, Any]]) -> dict[str, Any]:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        response = item.get("response") if isinstance(item.get("response"), dict) else {}
+        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+        context = result.get("external_risk_context") if isinstance(result.get("external_risk_context"), dict) else {}
+        policy = context.get("synthesis_policy")
+        if isinstance(policy, dict) and isinstance(policy.get("semantic_levels"), list):
+            return dict(policy)
+        synthesis = response.get("ai_synthesis") if isinstance(response.get("ai_synthesis"), dict) else {}
+        overall = synthesis.get("overall_synthesized_risk") if isinstance(synthesis.get("overall_synthesized_risk"), dict) else {}
+        if overall.get("policy_id"):
+            return {
+                "policy_id": overall.get("policy_id"),
+                "version": overall.get("policy_version"),
+                "semantic_levels": [],
+            }
+    return {}
+
+
+def _semantic_levels(policy: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    configured = []
+    for item in policy.get("semantic_levels") or []:
+        if not isinstance(item, dict):
+            continue
+        level_id = str(item.get("id") or "").strip()
+        if not level_id:
+            continue
+        configured.append({
+            "id": level_id,
+            "label": str(item.get("label") or level_id),
+            "rank": int(item.get("rank", len(configured))),
+        })
+    if configured:
+        return sorted(configured, key=lambda item: item["rank"])
+
+    observed: list[str] = []
+    for row in rows:
+        for key in ("governed_risk_level", "ai_risk_level"):
+            value = str(row.get(key) or "").strip()
+            if value and value not in observed:
+                observed.append(value)
+    return [
+        {"id": value, "label": value.replace("_", " ").title(), "rank": index}
+        for index, value in enumerate(observed)
+    ]
+
+
 def summary_row(item: dict[str, Any]) -> dict[str, Any]:
     response = item.get("response") if isinstance(item.get("response"), dict) else {}
     deterministic = response.get("result") if isinstance(response.get("result"), dict) else {}
@@ -196,11 +245,13 @@ def summary_row(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _level_counts(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
-    counts = {"minimal": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "unassessed": 0}
+def _level_counts(rows: list[dict[str, Any]], key: str, levels: list[dict[str, Any]]) -> dict[str, int]:
+    level_ids = [str(item.get("id")) for item in levels if str(item.get("id") or "").strip()]
+    counts = {level_id: 0 for level_id in level_ids}
+    counts["unassessed"] = 0
     for row in rows:
-        value = str(row.get(key) or "").strip().lower()
-        if value in counts and value != "unassessed":
+        value = str(row.get(key) or "").strip()
+        if value and value in counts and value != "unassessed":
             counts[value] += 1
         else:
             counts["unassessed"] += 1
@@ -216,22 +267,26 @@ def report_document(
     items: list[dict[str, Any]],
 ) -> dict[str, Any]:
     rows = [summary_row(item) for item in items]
+    policy = _synthesis_policy_from_items(items)
+    levels = _semantic_levels(policy, rows)
     success_count = sum(1 for row in rows if row.get("status") == "ok")
     ai_success = sum(1 for row in rows if row.get("ai_status") == "ok")
     return {
         "report_type": "format_risk_batch",
-        "report_schema_version": "2.0",
+        "report_schema_version": "2.1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "framework": framework,
+        "synthesis_policy": policy,
+        "semantic_levels": levels,
         "scope": scope,
         "institution_id": institution_id,
         "ai_mode": ai_mode,
         "input_count": len(items),
         "successful_assessments": success_count,
         "failed_or_unresolved": len(items) - success_count,
-        "governed_risk_counts": _level_counts(rows, "governed_risk_level"),
+        "governed_risk_counts": _level_counts(rows, "governed_risk_level", levels),
         "ai_successful_syntheses": ai_success,
-        "ai_risk_counts": _level_counts(rows, "ai_risk_level") if ai_mode == "synthesize" else None,
+        "ai_risk_counts": _level_counts(rows, "ai_risk_level", levels) if ai_mode == "synthesize" else None,
         "summary": rows,
         "items": items,
     }
@@ -244,6 +299,9 @@ def _json_for_html(value: Any) -> str:
 def _curator_html(report: dict[str, Any]) -> str:
     rows = report.get("summary") if isinstance(report.get("summary"), list) else []
     items = report.get("items") if isinstance(report.get("items"), list) else []
+    levels = [item for item in report.get("semantic_levels") or [] if isinstance(item, dict) and item.get("id")]
+    levels_desc = sorted(levels, key=lambda item: int(item.get("rank", 0)), reverse=True)
+    labels = {str(item["id"]): str(item.get("label") or item["id"]) for item in levels}
     item_by_input = {str(item.get("input_format_id")): item for item in items if isinstance(item, dict)}
 
     table_rows: list[str] = []
@@ -316,10 +374,18 @@ def _curator_html(report: dict[str, Any]) -> str:
 </section>''')
 
     governed_counts = report.get("governed_risk_counts") or {}
-    count_text = " · ".join(
-        f"{label.title()}: {governed_counts.get(label, 0)}"
-        for label in ("critical", "high", "moderate", "low", "minimal", "unassessed")
-    )
+    count_parts = [f"{labels.get(str(item['id']), str(item['id']))}: {governed_counts.get(str(item['id']), 0)}" for item in levels_desc]
+    count_parts.append(f"Unassessed: {governed_counts.get('unassessed', 0)}")
+    count_text = " · ".join(count_parts)
+    risk_options = ''.join(
+        f'<option value="{escape(str(item["id"]), quote=True)}">{escape(str(item.get("label") or item["id"]))}</option>'
+        for item in levels_desc
+    ) + '<option value="unassessed">Unassessed</option>'
+    policy = report.get("synthesis_policy") if isinstance(report.get("synthesis_policy"), dict) else {}
+    policy_text = ""
+    if policy.get("policy_id"):
+        policy_text = f" · Policy: {policy.get('policy_id')} v{policy.get('version') or ''}".rstrip()
+
     return f'''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Preservation Risk Batch Report</title>
@@ -327,8 +393,8 @@ def _curator_html(report: dict[str, Any]) -> str:
 body{{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:#f5f7fa;color:#172033}}main{{max-width:1400px;margin:auto;padding:28px}}h1{{margin-bottom:6px}}.muted{{color:#667085;font-weight:400}}.summary,.detail{{background:#fff;border:1px solid #e2e7ef;border-radius:12px;padding:18px;margin:16px 0}}.controls{{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}}input,select{{padding:9px 10px;border:1px solid #cbd3df;border-radius:8px}}table{{width:100%;border-collapse:collapse;font-size:13px}}th,td{{padding:9px;border-bottom:1px solid #edf0f4;text-align:left;vertical-align:top}}th{{background:#f8fafc;position:sticky;top:0}}.tablewrap{{overflow:auto;max-height:65vh}}a{{color:#175cd3}}details{{margin:12px 0;border-top:1px solid #edf0f4;padding-top:10px}}summary{{font-weight:700;cursor:pointer}}pre{{white-space:pre-wrap;overflow:auto;background:#f7f8fa;padding:12px;border-radius:8px;font-size:12px}}.riskline{{padding:10px;background:#f8fafc;border-radius:8px}}
 </style></head><body><main>
 <h1>Preservation Risk Batch Report</h1>
-<p class="muted">Generated {escape(str(report.get("generated_at") or ""))} · AI mode: {escape(str(report.get("ai_mode") or "off"))}</p>
-<section class="summary"><strong>{escape(count_text)}</strong><div class="controls"><input id="search" placeholder="Filter by format, PUID or source"><select id="risk"><option value="">All governed risks</option><option>critical</option><option>high</option><option>moderate</option><option>low</option><option>minimal</option><option>unassessed</option></select></div>
+<p class="muted">Generated {escape(str(report.get("generated_at") or ""))} · AI mode: {escape(str(report.get("ai_mode") or "off"))}{escape(policy_text)}</p>
+<section class="summary"><strong>{escape(count_text)}</strong><div class="controls"><input id="search" placeholder="Filter by format, PUID or source"><select id="risk"><option value="">All governed risks</option>{risk_options}</select></div>
 <div class="tablewrap"><table><thead><tr><th>Input</th><th>PUID</th><th>Format</th><th>Governed risk</th><th>Scope</th><th>AI risk</th><th>AI confidence</th><th>AI relation</th><th>Status</th></tr></thead><tbody id="rows">{''.join(table_rows)}</tbody></table></div></section>
 {''.join(detail_sections)}
 <script>const q=document.getElementById('search'),r=document.getElementById('risk');function f(){{const s=q.value.toLowerCase(),v=r.value;document.querySelectorAll('#rows tr').forEach(x=>{{x.style.display=((!s||x.dataset.search.includes(s))&&(!v||x.dataset.governed===v))?'':'none'}})}}q.addEventListener('input',f);r.addEventListener('change',f);</script>
