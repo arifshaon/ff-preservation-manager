@@ -9,6 +9,7 @@
     "max_output_tokens": 1200,
     "tokens_per_minute": 10000,
     "response_verbosity": "medium",
+    "input_log_file": null,
     "timeout_seconds": 60,
     "external_research": {
       "allowed_domains": [],
