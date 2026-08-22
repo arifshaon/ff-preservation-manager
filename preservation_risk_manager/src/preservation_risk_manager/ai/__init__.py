@@ -15,7 +15,7 @@ from preservation_risk_manager.ai.base import (
     AIWebCitation,
     AIWebResearchResponse,
 )
-from preservation_risk_manager.ai.capability_synthesis import (
+from preservation_risk_manager.ai.capability_result import (
     synthesize_with_capabilities,
     synthesize_with_web_research,
 )
