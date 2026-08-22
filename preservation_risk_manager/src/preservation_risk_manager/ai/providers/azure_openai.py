@@ -293,7 +293,7 @@ class AzureOpenAIProvider(AIProvider):
         }
         if request.response_schema is not None:
             payload["text"] = {
-                "verbosity": "low",
+                "verbosity": self.config.response_verbosity,
                 "format": {
                     "type": "json_schema",
                     "name": request.response_schema_name,
@@ -332,6 +332,7 @@ class AzureOpenAIProvider(AIProvider):
             metadata={
                 "deployment": self.model_name,
                 "responses_api": True,
+                "response_verbosity": self.config.response_verbosity,
                 "web_search_available": True,
                 **audit,
             },
