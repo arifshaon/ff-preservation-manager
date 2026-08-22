@@ -293,12 +293,13 @@ class AzureOpenAIProvider(AIProvider):
         }
         if request.response_schema is not None:
             payload["text"] = {
+                "verbosity": "low",
                 "format": {
                     "type": "json_schema",
                     "name": request.response_schema_name,
                     "strict": True,
                     "schema": request.response_schema,
-                }
+                },
             }
         temperature = request.temperature if request.temperature is not None else self.config.temperature
         payload["temperature"] = temperature
