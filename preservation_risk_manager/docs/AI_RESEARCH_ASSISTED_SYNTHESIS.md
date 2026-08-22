@@ -137,6 +137,46 @@ The runtime records:
 
 A web-search failure does not automatically discard the AI analysis. The final structured synthesis can still be produced from the supplied application context.
 
+## Tokens-per-minute budgeting
+
+AI provider configuration may declare the deployment's tokens-per-minute quota:
+
+```json
+{
+  "ai": {
+    "tokens_per_minute": 10000,
+    "max_output_tokens": 1200
+  }
+}
+```
+
+When `tokens_per_minute` is present, capability-driven overall synthesis preflights the request against that quota. The tool automatically reserves output capacity and a safety margin, compacts verbose evidence, and removes lower-priority context only when necessary.
+
+The priority order is:
+
+1. governed/config-normalized source-level risk assessments;
+2. governed criterion claims;
+3. source-native risk assessments;
+4. source-native sustainability/documentation evidence;
+5. other source-native descriptive context.
+
+For a 10,000 TPM deployment with `max_output_tokens` set to 1,200, the current budgeting policy reserves 1,200 tokens for output and 1,500 tokens as rate-limit headroom, leaving an estimated prompt budget of approximately 7,300 tokens.
+
+The synthesis response records the budget decision, including:
+
+- configured TPM;
+- configured and effective maximum output tokens;
+- safety reserve;
+- prompt token budget;
+- conservative estimated prompt tokens;
+- evidence items available and supplied;
+- omitted evidence refs, if any;
+- whether the framework or evidence context had to be compacted.
+
+The estimator deliberately uses a conservative provider-neutral approximation of three characters per token. It is a preflight protection mechanism, not a replacement for provider-reported token usage.
+
+If `tokens_per_minute` is omitted, the existing unbudgeted behavior is preserved.
+
 ## Privacy boundary
 
 Institution-scoped/private operational evidence is not included in the public-search capability prompt.
