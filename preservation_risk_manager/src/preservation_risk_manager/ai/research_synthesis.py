@@ -9,13 +9,12 @@ from preservation_risk_manager.synthesis_policy import SynthesisPolicy
 
 
 AI_RESEARCH_SYNTHESIS_SYSTEM_PROMPT = (
-    "You are the research-assisted synthesis component of a digital-preservation risk system. The registry evidence "
-    "and configured QNL policy are the starting point and must remain visible in the analysis. You are not producing "
-    "an independent preservation opinion from scratch. Use the supplied web-grounded research only to verify, "
-    "challenge, update, or supplement the supplied registry evidence. Never change a source's native assessment or "
-    "configured source-to-semantic mapping. Missing database evidence is not a risk signal. Do not numerically "
-    "average heterogeneous source scales. Distinguish database evidence from web research and cite both by the "
-    "reference IDs supplied by the application."
+    "You are the research-assisted synthesis component of a digital-preservation risk system. Registry evidence "
+    "and the configured QNL policy are the starting point. Do not produce an independent preservation opinion from "
+    "scratch. Use supplied web-grounded research only to verify, challenge, update, or supplement registry evidence. "
+    "Never change a source-native assessment or configured source mapping. Missing database evidence is not a risk "
+    "signal. Never numerically average heterogeneous source scales. Keep database evidence and web findings distinct "
+    "and cite them only with reference IDs supplied by the application."
 )
 
 
@@ -34,43 +33,51 @@ def _safe(value: Any, *, max_string: int = 5000) -> Any:
 def _is_institution_scoped(item: dict[str, Any]) -> bool:
     if item.get("institution_id"):
         return True
-    return str(item.get("source_independence") or "").strip().lower() == "institution_scoped"
+    if str(item.get("source_independence") or "").strip().lower() == "institution_scoped":
+        return True
+    return str(item.get("scope_type") or "").strip().lower() == "institutional_format"
 
 
 def _public_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Exclude institution/private evidence before invoking public web grounding."""
     return [dict(item) for item in items if isinstance(item, dict) and not _is_institution_scoped(item)]
 
 
 def _public_format_context(format_context: dict[str, Any]) -> dict[str, Any]:
-    """Send only format identity fields to the external web-grounding service."""
     allowed = (
-        "canonical_id",
-        "format_id",
-        "preferred_name",
-        "format_name",
-        "name",
-        "label",
-        "version",
-        "versions",
-        "puids",
-        "loc_ids",
-        "nara_ids",
-        "extensions",
-        "mime_types",
-        "internal_signature_names",
-        "identifiers",
+        "canonical_id", "format_id", "preferred_name", "format_name", "name", "label",
+        "version", "versions", "puids", "loc_ids", "nara_ids", "extensions", "mime_types",
+        "internal_signature_names", "identifiers",
     )
     return {key: _safe(format_context.get(key)) for key in allowed if format_context.get(key) is not None}
+
+
+def _public_governed_summary(governed: dict[str, Any]) -> dict[str, Any]:
+    """Keep only public/global baseline details in the Bing/web-grounding prompt."""
+    summary_keys = (
+        "assessed", "semantic_level", "semantic_label", "method", "basis", "policy_id", "policy_version",
+        "missing_evidence_policy", "numeric_aggregation", "same_scope_aggregation", "broader_scope_policy",
+    )
+    result = {key: _safe(governed.get(key)) for key in summary_keys if governed.get(key) is not None}
+    result["contributors"] = _safe(_public_evidence([
+        item for item in governed.get("contributors") or [] if isinstance(item, dict)
+    ]))
+    result["contextual_contributors"] = _safe(_public_evidence([
+        item for item in governed.get("contextual_contributors") or [] if isinstance(item, dict)
+    ]))
+    public_scopes = [
+        str(scope) for scope in governed.get("selected_scope_types") or []
+        if str(scope).strip().lower() != "institutional_format"
+    ]
+    if public_scopes:
+        result["selected_scope_types"] = public_scopes
+    return result
 
 
 def _framework_summary(framework: Any | None) -> dict[str, Any] | None:
     if framework is None:
         return None
-    questions: list[dict[str, Any]] = []
+    questions = []
     for question in getattr(framework, "questions", ()):
-        # Only public question metadata is sent; no institution-specific answers
-        # or local evidence are included in the web-grounding payload.
         questions.append({
             "question_id": getattr(question, "id", None),
             "label": getattr(question, "label", None),
@@ -96,36 +103,56 @@ def _research_prompt(
     database_evidence: list[dict[str, Any]],
     framework: Any | None,
 ) -> str:
-    web_policy = (policy.ai or {}).get("web_research") or {}
     context = {
         "format": _public_format_context(format_context),
-        "governed_config_synthesis": _safe(governed_synthesis),
+        "governed_config_synthesis": _public_governed_summary(governed_synthesis),
         "database_evidence": _safe(database_evidence),
         "assessment_framework": _safe(_framework_summary(framework)),
-        "web_research_policy": _safe(web_policy),
+        "web_research_policy": _safe((policy.ai or {}).get("web_research") or {}),
     }
     return (
         "Perform targeted public-web research to VERIFY AND SUPPLEMENT the supplied preservation evidence for the "
         "resolved file format. Do not search for a generic overall 'risk score' and do not start a new assessment "
-        "without the supplied evidence. First check current/authoritative information relevant to claims already in "
-        "the database; then investigate material preservation factors that the database does not cover. Prefer "
-        "primary sources such as standards bodies, specification owners, official software/tool projects, national "
-        "archives/libraries, preservation organizations, and authoritative technical documentation.\n\n"
-        "For each important finding, state whether it CONFIRMS, CONTRADICTS, UPDATES/QUALIFIES, or SUPPLEMENTS the "
-        "database evidence, and explain its preservation relevance. Pay particular attention to: source accuracy and "
-        "currentness; specification disclosure/governance; current software and open-source tooling; adoption and "
-        "community support; dependencies/external assets; migration/conversion pathways; IP/DRM constraints; and "
-        "metadata/self-documentation. Do not treat an absence of search results as Low risk. Preserve source-native "
-        "ratings exactly as supplied.\n\n"
-        "The supplied database evidence contains global/public format evidence only. Do not infer or seek internal "
-        "institutional capability, policy, storage, or readiness information from the public web.\n\n"
-        "The grounded report will later be used by a policy-guided synthesis step, so include concrete current facts "
-        "and cite the web sources supporting them.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
+        "without the supplied evidence. First check current or authoritative information relevant to claims already "
+        "in the database; then investigate material preservation factors not covered there. Prefer standards bodies, "
+        "specification owners, official software/tool projects, national archives/libraries, preservation "
+        "organizations, and authoritative technical documentation.\n\n"
+        "For each material finding, say whether it CONFIRMS, CONTRADICTS, UPDATES/QUALIFIES, or SUPPLEMENTS the "
+        "database evidence and explain preservation relevance. Check source currentness; specification disclosure and "
+        "governance; current software/open-source tooling; adoption/community support; dependencies/external assets; "
+        "migration pathways; IP/DRM constraints; and metadata/self-documentation. Absence of search results is not "
+        "Low risk. Preserve source-native ratings exactly.\n\n"
+        "Only public/global format evidence is supplied. Do not infer, search for, or discuss internal institutional "
+        "capability, policy, storage, readiness, or other private operational information. Include concrete current "
+        "facts and citations for the grounded synthesis step.\n\n"
+        + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
 
 
 def _response_schema(policy: SynthesisPolicy) -> dict[str, Any]:
     levels = list(policy.level_by_id)
+    finding = {
+        "type": "object",
+        "properties": {
+            "finding": {"type": "string"},
+            "relationship_to_database": {
+                "type": "string",
+                "enum": ["confirms", "contradicts", "qualifies_or_updates", "supplements", "unclear"],
+            },
+            "risk_effect": {
+                "type": "string",
+                "enum": ["raises_concern", "reduces_concern", "neutral", "uncertain"],
+            },
+            "database_evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "web_source_refs": {"type": "array", "items": {"type": "string"}},
+            "rationale": {"type": "string"},
+        },
+        "required": [
+            "finding", "relationship_to_database", "risk_effect",
+            "database_evidence_refs", "web_source_refs", "rationale",
+        ],
+        "additionalProperties": False,
+    }
     return {
         "type": "object",
         "properties": {
@@ -134,54 +161,19 @@ def _response_schema(policy: SynthesisPolicy) -> dict[str, Any]:
             "rationale": {"type": "string"},
             "database_evidence_refs": {"type": "array", "items": {"type": "string"}},
             "web_source_refs": {"type": "array", "items": {"type": "string"}},
-            "verification_findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "finding": {"type": "string"},
-                        "relationship_to_database": {
-                            "type": "string",
-                            "enum": ["confirms", "contradicts", "qualifies_or_updates", "supplements", "unclear"],
-                        },
-                        "risk_effect": {
-                            "type": "string",
-                            "enum": ["raises_concern", "reduces_concern", "neutral", "uncertain"],
-                        },
-                        "database_evidence_refs": {"type": "array", "items": {"type": "string"}},
-                        "web_source_refs": {"type": "array", "items": {"type": "string"}},
-                        "rationale": {"type": "string"},
-                    },
-                    "required": [
-                        "finding",
-                        "relationship_to_database",
-                        "risk_effect",
-                        "database_evidence_refs",
-                        "web_source_refs",
-                        "rationale"
-                    ],
-                    "additionalProperties": False,
-                }
-            },
+            "verification_findings": {"type": "array", "items": finding},
             "policy_rules_applied": {"type": "array", "items": {"type": "string"}},
             "governed_baseline_relation": {
                 "type": "string",
-                "enum": ["same", "higher_concern", "lower_concern", "not_comparable"]
+                "enum": ["same", "higher_concern", "lower_concern", "not_comparable"],
             },
-            "uncertainty": {"type": "string"}
+            "uncertainty": {"type": "string"},
         },
         "required": [
-            "semantic_level",
-            "confidence",
-            "rationale",
-            "database_evidence_refs",
-            "web_source_refs",
-            "verification_findings",
-            "policy_rules_applied",
-            "governed_baseline_relation",
-            "uncertainty"
+            "semantic_level", "confidence", "rationale", "database_evidence_refs", "web_source_refs",
+            "verification_findings", "policy_rules_applied", "governed_baseline_relation", "uncertainty",
         ],
-        "additionalProperties": False
+        "additionalProperties": False,
     }
 
 
@@ -209,27 +201,22 @@ def _validate_synthesis(
 
     db_refs = {str(item.get("ref")) for item in database_evidence}
     web_refs = {str(item.get("ref")) for item in web_sources}
-
     used_db = [str(value) for value in data.get("database_evidence_refs") or []]
     used_web = [str(value) for value in data.get("web_source_refs") or []]
-    unknown_db = sorted(set(used_db) - db_refs)
-    unknown_web = sorted(set(used_web) - web_refs)
-    if unknown_db:
-        raise AIProviderError("AI researched synthesis cited unknown database refs: " + ", ".join(unknown_db))
-    if unknown_web:
-        raise AIProviderError("AI researched synthesis cited unknown web refs: " + ", ".join(unknown_web))
+    if set(used_db) - db_refs:
+        raise AIProviderError("AI researched synthesis cited unknown database refs.")
+    if set(used_web) - web_refs:
+        raise AIProviderError("AI researched synthesis cited unknown web refs.")
     if level != "unassessed" and not (used_db or used_web):
         raise AIProviderError("An assessed researched synthesis must cite database or web evidence.")
 
-    findings: list[dict[str, Any]] = []
+    findings = []
     for item in data.get("verification_findings") or []:
         if not isinstance(item, dict):
             raise AIProviderError("verification_findings entries must be objects.")
         finding_db = [str(value) for value in item.get("database_evidence_refs") or []]
         finding_web = [str(value) for value in item.get("web_source_refs") or []]
-        bad_db = sorted(set(finding_db) - db_refs)
-        bad_web = sorted(set(finding_web) - web_refs)
-        if bad_db or bad_web:
+        if set(finding_db) - db_refs or set(finding_web) - web_refs:
             raise AIProviderError("AI researched synthesis finding cites unknown evidence refs.")
         findings.append({
             "finding": str(item.get("finding") or ""),
@@ -276,11 +263,8 @@ def synthesize_with_web_research(
 ) -> dict[str, Any]:
     """Verify/supplement public registry evidence on the web, then synthesize.
 
-    The workflow is registry-first. It does not ask the model to independently
-    assess a format from general knowledge. Public web search validates or
-    supplements existing global/source evidence and retains URLs for audit.
-    Institution-scoped evidence is excluded before web grounding. No research
-    finding is persisted to MongoDB.
+    Institution-scoped evidence is excluded before web grounding. Source-native
+    assessments remain immutable and researched findings are not written to MongoDB.
     """
     web_policy = (policy.ai or {}).get("web_research") or {}
     if not web_policy.get("require_web_grounding", True):
@@ -288,37 +272,31 @@ def synthesize_with_web_research(
     if not provider.capabilities.web_search:
         raise AIProviderError(f"AI provider '{provider.provider_name}' does not support web search.")
 
-    public_risk_assessments = _public_evidence(risk_assessments)
-    public_criterion_claims = _public_evidence(criterion_claims)
-    public_source_evidence = _public_evidence(source_evidence)
+    public_risk = _public_evidence(risk_assessments)
+    public_claims = _public_evidence(criterion_claims)
+    public_source = _public_evidence(source_evidence)
     excluded_private_count = (
-        (len(risk_assessments) - len(public_risk_assessments))
-        + (len(criterion_claims) - len(public_criterion_claims))
-        + (len(source_evidence) - len(public_source_evidence))
+        len(risk_assessments) - len(public_risk)
+        + len(criterion_claims) - len(public_claims)
+        + len(source_evidence) - len(public_source)
     )
-
     database_evidence = build_synthesis_evidence(
-        risk_assessments=public_risk_assessments,
-        criterion_claims=public_criterion_claims,
-        source_evidence=public_source_evidence,
+        risk_assessments=public_risk,
+        criterion_claims=public_claims,
+        source_evidence=public_source,
         policy=policy,
         max_items=max_evidence_items,
     )
-    research = provider.research_web(
-        _research_prompt(
-            format_context=_public_format_context(format_context),
-            policy=policy,
-            governed_synthesis=governed_synthesis,
-            database_evidence=database_evidence,
-            framework=framework,
-        )
-    )
+
+    research = provider.research_web(_research_prompt(
+        format_context=format_context,
+        policy=policy,
+        governed_synthesis=governed_synthesis,
+        database_evidence=database_evidence,
+        framework=framework,
+    ))
     citations = [
-        {
-            "ref": f"W{index:03d}",
-            "url": citation.url,
-            "title": citation.title,
-        }
+        {"ref": f"W{index:03d}", "url": citation.url, "title": citation.title}
         for index, citation in enumerate(research.citations, start=1)
     ]
     if web_policy.get("require_citations", True) and not citations:
@@ -326,6 +304,8 @@ def synthesize_with_web_research(
 
     synthesis_context = {
         "format": _public_format_context(format_context),
+        # The second synthesis call stays inside the configured Azure model boundary,
+        # but public database refs remain the only detailed evidence being researched.
         "governed_config_synthesis": _safe(governed_synthesis),
         "synthesis_policy": _safe(policy.raw),
         "assessment_framework": _safe(_framework_summary(framework)),
@@ -344,23 +324,22 @@ def synthesize_with_web_research(
             "institution_scoped_evidence_excluded_from_web_grounding": True,
         },
     }
-    request = AIRequest(
+    response = provider.generate(AIRequest(
         messages=(
             AIMessage("system", AI_RESEARCH_SYNTHESIS_SYSTEM_PROMPT),
             AIMessage(
                 "user",
-                "Using the supplied registry evidence as the primary evidence base and the grounded web report only "
-                "as verification/supplementary evidence, produce the final AI-assisted preservation-risk synthesis. "
-                "Explain material confirmations, contradictions, updates, or new evidence. Apply the configured QNL "
-                "policy where relevant and do not modify source-native ratings or their configured mappings.\n\n"
+                "Using registry evidence as the primary evidence base and the grounded web report only as "
+                "verification/supplementary evidence, produce the final AI-assisted preservation-risk synthesis. "
+                "Explain confirmations, contradictions, updates, or additions. Apply configured QNL rules and do "
+                "not modify source-native ratings or mappings.\n\n"
                 + json.dumps(synthesis_context, indent=2, sort_keys=True, default=str),
             ),
         ),
         response_schema=_response_schema(policy),
         response_schema_name="preservation_risk_researched_synthesis",
         temperature=0.0,
-    )
-    response = provider.generate(request)
+    ))
     overall = _validate_synthesis(
         response,
         database_evidence=database_evidence,
@@ -388,10 +367,9 @@ def synthesize_with_web_research(
         },
         "provider": provider.describe(),
         "authority_boundary": (
-            "The AI-assisted result begins with collected public/global registry evidence and configured source "
-            "mappings. Public-web research is used only to verify, qualify, or supplement that evidence. "
-            "Institution-scoped evidence is not sent to public web grounding. Source-native ratings and configured "
-            "mappings are not rewritten, missing evidence contributes nothing, and researched findings are not "
-            "persisted to the registry by this workflow."
+            "The AI-assisted result begins with collected public/global registry evidence and configured mappings. "
+            "Public-web research only verifies, qualifies, or supplements that evidence. Institution-scoped evidence "
+            "is not sent to public web grounding. Source-native ratings and configured mappings are not rewritten, "
+            "missing evidence contributes nothing, and researched findings are not persisted to the registry."
         ),
     }
