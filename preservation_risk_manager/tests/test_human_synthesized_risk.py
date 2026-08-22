@@ -3,8 +3,8 @@ from __future__ import annotations
 from preservation_risk_manager.human_renderer_multi import render_human_response
 
 
-def test_normal_risk_question_leads_with_source_synthesis_not_missing_framework_questions():
-    response = {
+def _base_response():
+    return {
         "status": "ok",
         "request": {"action": "assess_format", "format": "puid-fmt-276"},
         "result": {
@@ -77,6 +77,10 @@ def test_normal_risk_question_leads_with_source_synthesis_not_missing_framework_
         },
     }
 
+
+def test_normal_risk_question_leads_with_source_synthesis_not_missing_framework_questions():
+    response = _base_response()
+
     text = render_human_response(response)
 
     assert "Overall synthesized preservation risk\nLow concern" in text
@@ -93,3 +97,33 @@ def test_normal_risk_question_leads_with_source_synthesis_not_missing_framework_
     assert "19 question" not in text
     assert "Evidence completeness" not in text
     assert "matches the existing locked MongoDB synthesis" in text
+
+
+def test_synthesis_only_mode_reports_real_ai_synthesis_not_question_ai_placeholder():
+    response = _base_response()
+    response["result"]["overall_synthesized_risk"] = {
+        **response["result"]["external_risk_context"]["policy_synthesized_risk"],
+        "ai_consulted": True,
+        "ai_assisted": False,
+        "ai_rationale": "Configured source mappings already determine the result.",
+    }
+    response["ai_synthesis"] = {
+        "status": "ok",
+        "provider": {"provider": "azure_openai", "model": "test"},
+        "ai_interpreted_assessments": [],
+        "ai": {"proposed_overall_level": "low"},
+        "overall_synthesized_risk": response["result"]["overall_synthesized_risk"],
+        "authority_boundary": "Configured mappings remain binding.",
+    }
+    response["ai_risk_assessment"] = {
+        "status": "not_requested_synthesis_only",
+        "ai_mode": "synthesize",
+    }
+
+    text = render_human_response(response)
+
+    assert "AI consulted: yes" in text
+    assert "AI synthesis\n- Status: ok." in text
+    assert "AI was consulted, but no configured source assessment required AI interpretation" in text
+    assert "Final policy-governed overall level: low." in text
+    assert "not_requested_synthesis_only" not in text
