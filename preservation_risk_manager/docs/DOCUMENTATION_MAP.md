@@ -26,7 +26,8 @@ For repository-wide architecture/storage, also read:
 | Look up CLI commands/options | [`CLI_REFERENCE.md`](CLI_REFERENCE.md) |
 | Ask natural-language preservation questions | [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md) |
 | Integrate using canonical JSON | [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md) |
-| Configure AI/local models and understand `fill-gaps`/`review-all` | [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md) |
+| Configure AI/local models and understand `synthesize`/`fill-gaps`/`review-all` | [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md) |
+| Enable registry-first cited public-web verification for synthesis | [`AI_RESEARCH_ASSISTED_SYNTHESIS.md`](AI_RESEARCH_ASSISTED_SYNTHESIS.md) |
 | Review provider configuration details | [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md) |
 | Review the 8 domains / 22 questions | [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md) |
 | Set up periodic source refresh / Top 10 / watchlist reports | [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md) |
@@ -82,6 +83,7 @@ RISK_ANALYSIS_WORKFLOW.md
 ARCHITECTURE.md
  -> FORMAT_IDENTIFICATION.md
  -> AI_ASSISTED_ANALYSIS.md
+ -> AI_RESEARCH_ASSISTED_SYNTHESIS.md
  -> AI_PROVIDER_INTERFACE.md
  -> MODULE_REFERENCE.md
 ```
@@ -100,7 +102,8 @@ ARCHITECTURE.md
 | `INSTALLATION_SETUP_AND_RUN.md` | Installation, storage/AI setup and runnable modes. |
 | `CLI_REFERENCE.md` | Command-by-command CLI reference. |
 | `HUMAN_AND_SYSTEM_QUERIES.md` | Human prompts, canonical request actions, JSON examples, scopes and result behavior. |
-| `AI_ASSISTED_ANALYSIS.md` | Human routing, `fill-gaps`, `review-all`, local/Azure configuration and guardrails. |
+| `AI_ASSISTED_ANALYSIS.md` | Human routing, synthesis, `fill-gaps`, `review-all`, local/Azure configuration and guardrails. |
+| `AI_RESEARCH_ASSISTED_SYNTHESIS.md` | Registry-first public-web verification/supplementation, citations, privacy boundaries and researched synthesis. |
 | `AI_PROVIDER_INTERFACE.md` | Provider-neutral AI contract and provider diagnostics. |
 | `PRESERVATION_RISK_QUESTIONS.md` | 8 domains / 22 stable question IDs and applicability. |
 | `RISK_MONITORING_AND_REPORTING.md` | Periodic source refresh, watchlists, Top 10/high-risk/evidence-gap reports and external reporting service patterns. |
@@ -148,7 +151,7 @@ human question
  -> AI request router (intent/parameters only)
  -> optional bounded AI identification fallback
  -> same canonical request executor
- -> same deterministic result
+ -> source synthesis / optional registry-first web verification
  -> human_renderer
 ```
 
@@ -159,6 +162,7 @@ structured JSON request
  -> programmatic identification
  -> optional bounded AI identification fallback
  -> same canonical request executor
+ -> optional AI synthesis/web verification only when explicitly enabled
  -> canonical JSON
 ```
 
@@ -185,7 +189,7 @@ The broad framework is a QNL working synthesis, not a verbatim official LOC/NARA
 
 | File | Purpose |
 | --- | --- |
-| `examples/ai.azure.example.json` | Azure OpenAI configuration template. |
+| `examples/ai.azure.example.json` | Azure OpenAI configuration template, including disabled-by-default public-web research controls. |
 | `examples/ai.local.example.json` | OpenAI-compatible/local inference server template. |
 
 ## Interface modes at a glance
@@ -193,12 +197,12 @@ The broad framework is a QNL working synthesis, not a verbatim official LOC/NARA
 | Mode | Input | Output | AI role |
 | --- | --- | --- | --- |
 | `web` | Browser human question or pasted/uploaded format IDs | Interactive progress + TXT/CSV/JSON/ZIP downloads | Optional human identification and risk fill-gaps; batch IDs remain deterministic identifiers |
-| `ask` | Natural-language question | Detailed human-readable answer | Route request only; optional identification fallback when explicitly enabled |
-| `ask --json` | Natural-language question | Canonical JSON + router/identification audit metadata | Route request; optional identification fallback |
-| `query-json` | Structured request | Canonical JSON | None by default; optional identification fallback when explicitly enabled |
+| `ask` | Natural-language question | Detailed human-readable answer | Route request; optional synthesis/web verification and identification fallback when explicitly enabled |
+| `ask --json` | Natural-language question | Canonical JSON + router/identification audit metadata | Same controlled AI options with machine-readable audit |
+| `query-json` | Structured request | Canonical JSON | None by default; optional synthesis/web verification and identification fallback when explicitly enabled |
 | `analyze-format` | Explicit format/framework/store | Deterministic JSON | None |
-| `analyze-format-ai --ai-mode fill-gaps` | Explicit format/framework/store | Deterministic + bounded AI-assisted JSON | Interpret unresolved evidence only |
-| `analyze-format-ai --ai-mode review-all` | Explicit format/framework/store | Deterministic + independent review comparison | Raw-source-only review |
+| `analyze-format-ai --ai-mode fill-gaps` | Explicit format/framework/store | Deterministic + bounded AI-assisted JSON | Interpret unresolved supplied evidence only |
+| `analyze-format-ai --ai-mode review-all` | Explicit format/framework/store | Deterministic + independent review comparison | Raw-source-only calibration review |
 | `analyze-fixture` | Fixture files | Deterministic JSON | None |
 | `propose-policy-change` | Evidence context + human goal | Draft proposal package | No automatic approval/write |
 
