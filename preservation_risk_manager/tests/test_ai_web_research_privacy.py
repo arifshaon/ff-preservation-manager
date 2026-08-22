@@ -81,6 +81,22 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
             "assessed": True,
             "semantic_level": "low",
             "semantic_label": "Low concern",
+            "contributors": [
+                {
+                    "source_id": "nara_digital_preservation_framework",
+                    "source_record_id": "NF00369",
+                    "scope_type": "exact_format",
+                    "semantic_level": "low",
+                },
+                {
+                    "source_id": "qnl_internal",
+                    "source_record_id": "LOCAL-RISK-1",
+                    "scope_type": "institutional_format",
+                    "semantic_level": "moderate",
+                    "institution_id": "qnl",
+                    "internal_note": "PRIVATE-BASELINE-DETAIL",
+                },
+            ],
         },
         risk_assessments=[
             {
@@ -123,4 +139,6 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
     assert "internal-sensitive-value" not in provider.research_prompt
     assert "private-local-description" not in provider.research_prompt
     assert "DO-NOT-SEND" not in provider.research_prompt
+    assert "PRIVATE-BASELINE-DETAIL" not in provider.research_prompt
+    assert "LOCAL-RISK-1" not in provider.research_prompt
     assert result["web_research"]["institution_scoped_evidence_excluded"] == 2
