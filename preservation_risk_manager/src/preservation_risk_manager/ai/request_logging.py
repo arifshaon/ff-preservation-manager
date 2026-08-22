@@ -76,6 +76,21 @@ class AIRequestLoggingProvider(AIProvider):
         except OSError as exc:
             raise AIProviderError(f"Could not write AI input log file '{self.log_path}': {exc}") from exc
 
+    def _effective_domains(
+        self,
+        allowed_domains: tuple[str, ...],
+        blocked_domains: tuple[str, ...],
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        config = getattr(self.delegate, "config", None)
+        effective_allowed = tuple(allowed_domains)
+        effective_blocked = tuple(blocked_domains)
+        if config is not None:
+            if not effective_allowed:
+                effective_allowed = tuple(getattr(config, "external_research_allowed_domains", ()) or ())
+            if not effective_blocked:
+                effective_blocked = tuple(getattr(config, "external_research_blocked_domains", ()) or ())
+        return effective_allowed, effective_blocked
+
     def generate(self, request: AIRequest) -> AIResponse:
         self._append("generate", {"request": _request_payload(request)})
         return self.delegate.generate(request)
@@ -87,14 +102,15 @@ class AIRequestLoggingProvider(AIProvider):
         allowed_domains: tuple[str, ...] = (),
         blocked_domains: tuple[str, ...] = (),
     ) -> AIResponse:
+        effective_allowed, effective_blocked = self._effective_domains(allowed_domains, blocked_domains)
         self._append(
             "generate_with_capabilities",
             {
                 "request": _request_payload(request),
                 "capability_options": {
                     "web_search": True,
-                    "allowed_domains": list(allowed_domains),
-                    "blocked_domains": list(blocked_domains),
+                    "allowed_domains": list(effective_allowed),
+                    "blocked_domains": list(effective_blocked),
                     "tool_choice": "auto",
                 },
             },
@@ -115,14 +131,15 @@ class AIRequestLoggingProvider(AIProvider):
         allowed_domains: tuple[str, ...] = (),
         blocked_domains: tuple[str, ...] = (),
     ) -> AIWebResearchResponse:
+        effective_allowed, effective_blocked = self._effective_domains(allowed_domains, blocked_domains)
         self._append(
             "research_web",
             {
                 "prompt": prompt,
                 "capability_options": {
                     "web_search": True,
-                    "allowed_domains": list(allowed_domains),
-                    "blocked_domains": list(blocked_domains),
+                    "allowed_domains": list(effective_allowed),
+                    "blocked_domains": list(effective_blocked),
                     "tool_choice": "auto",
                 },
             },
