@@ -6,8 +6,6 @@ from preservation_risk_manager.ai.base import (
     AIRequest,
     AIResponse,
     AIUsage,
-    AIWebCitation,
-    AIWebResearchResponse,
 )
 from preservation_risk_manager.ai.research_synthesis import synthesize_with_capabilities
 from preservation_risk_manager.synthesis_policy import load_synthesis_policy
@@ -21,18 +19,7 @@ class _WebOnlyAnswerProvider(AIProvider):
     def model_name(self) -> str:
         return "fake-web-only-model"
 
-    def research_web(self, prompt: str, *, allowed_domains=(), blocked_domains=()):
-        return AIWebResearchResponse(
-            provider=self.provider_name,
-            model=self.model_name,
-            text="A current public source provides additional preservation information.",
-            citations=(AIWebCitation("https://example.org/current", "Current source"),),
-            search_queries=("verify current preservation evidence",),
-            consulted_urls=("https://example.org/current",),
-            metadata={"web_search_used": True},
-        )
-
-    def generate(self, request: AIRequest) -> AIResponse:
+    def generate_with_capabilities(self, request: AIRequest) -> AIResponse:
         return AIResponse(
             provider=self.provider_name,
             model=self.model_name,
@@ -41,14 +28,12 @@ class _WebOnlyAnswerProvider(AIProvider):
                 "confidence": 0.8,
                 "rationale": "The external source suggests moderate concern.",
                 "database_evidence_refs": [],
-                "external_source_refs": ["W001"],
                 "considerations": [
                     {
                         "finding": "A current external source reports a preservation concern.",
                         "basis": "external_information",
                         "risk_effect": "raises_concern",
                         "database_evidence_refs": [],
-                        "external_source_refs": ["W001"],
                     }
                 ],
                 "config_rules_considered": ["missing_assessment_policy=exclude"],
@@ -56,7 +41,19 @@ class _WebOnlyAnswerProvider(AIProvider):
                 "uncertainty": "The structured response did not explicitly cite the supplied registry evidence.",
             },
             usage=AIUsage(input_tokens=20, output_tokens=20, total_tokens=40),
+            metadata={
+                "responses_api": True,
+                "web_search_used": True,
+                "search_queries": ["verify current preservation evidence"],
+                "consulted_urls": ["https://example.org/current"],
+                "external_sources": [
+                    {"url": "https://example.org/current", "title": "Current source"}
+                ],
+            },
         )
+
+    def generate(self, request: AIRequest) -> AIResponse:
+        raise AssertionError("Global capability synthesis should use generate_with_capabilities")
 
 
 def test_ai_result_that_does_not_explicitly_reference_registry_is_returned_with_warning():
@@ -86,6 +83,6 @@ def test_ai_result_that_does_not_explicitly_reference_registry_is_returned_with_
 
     overall = result["overall_synthesized_risk"]
     assert overall["semantic_level"] == "moderate"
-    assert overall["external_source_refs"] == ["W001"]
+    assert overall["external_sources"][0]["url"] == "https://example.org/current"
     assert any("did not explicitly reference" in warning for warning in overall["quality_warnings"])
     assert result["governed_synthesis"]["semantic_level"] == "low"
