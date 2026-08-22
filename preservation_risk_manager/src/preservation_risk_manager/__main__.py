@@ -12,6 +12,10 @@ if __name__ == "__main__":
         from preservation_risk_manager.web_cli import main as web_main
 
         raise SystemExit(web_main(argv[1:]))
+    if argv and argv[0] == "batch-report":
+        from preservation_risk_manager.batch_cli import main as batch_main
+
+        raise SystemExit(batch_main(argv[1:]))
     if argv and argv[0] == "audit-registry":
         from preservation_risk_manager.audit_cli import main as audit_main
 
