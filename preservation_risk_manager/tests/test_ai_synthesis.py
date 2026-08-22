@@ -27,16 +27,16 @@ class FakeSynthesisProvider(AIProvider):
         )
 
 
-def test_ai_cannot_override_configured_scope_result_without_new_interpreted_risk():
+def test_bounded_ai_is_not_called_when_config_already_resolves_source_risk():
     policy = load_synthesis_policy()
     provider = FakeSynthesisProvider({
         "proposed_overall_level": "moderate",
         "confidence": 0.8,
-        "rationale": "Broader DPC context is moderate.",
+        "rationale": "This response must never be used.",
         "source_interpretations": [],
         "supporting_evidence_refs": ["R001", "R002"],
         "policy_rules_applied": ["most_specific_available"],
-        "uncertainty": "DPC is broader scope.",
+        "uncertainty": "None.",
     })
 
     result = synthesize_with_ai(
@@ -61,10 +61,11 @@ def test_ai_cannot_override_configured_scope_result_without_new_interpreted_risk
         source_evidence=[],
     )
 
+    assert result["status"] == "skipped_no_ai_work_required"
+    assert provider.requests == []
     overall = result["overall_synthesized_risk"]
     assert overall["semantic_level"] == "low"
-    assert overall["ai_proposed_overall_level"] == "moderate"
-    assert overall["ai_proposal_matches_policy_result"] is False
+    assert overall["ai_consulted"] is False
     assert overall["ai_assisted"] is False
 
 
