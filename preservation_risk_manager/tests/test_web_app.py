@@ -36,21 +36,27 @@ def _wait(client, job_id):
 def test_web_app_serves_ui_and_background_batch_download(tmp_path):
     config = _config(tmp_path)
     manager = JobManager(config.jobs_dir, max_workers=1)
+    seen_modes = []
 
     def fake_batch(_config, payload, _job_id, update, job_dir):
         assert payload["format_ids"] == ["fmt/18", "fmt/19"]
+        seen_modes.append(payload["ai_mode"])
         update(progress=60, message="Assessing")
         (job_dir / "risk-report.csv").write_text("puid\nfmt/18\nfmt/19\n", encoding="utf-8")
+        (job_dir / "risk-report.html").write_text("<h1>Governed risk</h1>", encoding="utf-8")
         return {
             "message": "Complete",
-            "downloads": {"csv": "risk-report.csv"},
+            "downloads": {"csv": "risk-report.csv", "html": "risk-report.html"},
             "preview": {"kind": "batch", "rows": [], "input_count": 2},
         }
 
     app = create_app(config, manager=manager, batch_runner=fake_batch)
     with TestClient(app) as client:
-        assert client.get("/").status_code == 200
-        assert "QNL Preservation Risk Manager" in client.get("/").text
+        home = client.get("/")
+        assert home.status_code == 200
+        assert "QNL Preservation Risk Manager" in home.text
+        assert "AI-assisted overall synthesis" in home.text
+        assert "Governed risk" in home.text
         assert client.get("/api/health").json() == {"status": "ok"}
 
         submitted = client.post(
@@ -64,5 +70,17 @@ def test_web_app_serves_ui_and_background_batch_download(tmp_path):
         download = client.get(f"/api/jobs/{job['job_id']}/download/csv")
         assert download.status_code == 200
         assert "fmt/18" in download.text
+        html_download = client.get(f"/api/jobs/{job['job_id']}/download/html")
+        assert html_download.status_code == 200
+        assert html_download.headers["content-type"].startswith("text/html")
 
+        synth = client.post(
+            "/api/jobs/batch",
+            json={"ids_text": "fmt/18\nfmt/19", "ai_mode": "synthesize", "scope": "global"},
+        )
+        assert synth.status_code == 200
+        synth_job = _wait(client, synth.json()["job_id"])
+        assert synth_job["status"] == "completed"
+
+    assert seen_modes == ["off", "synthesize"]
     manager.shutdown(wait=True)
