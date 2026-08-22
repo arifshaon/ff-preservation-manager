@@ -14,7 +14,7 @@ When AI mode is enabled, the Preservation Risk Manager gives the AI client the p
 
 The application does **not** prescribe a mandatory research sequence and does not require the AI to reproduce the deterministic result.
 
-The AI client may use whatever capabilities it actually exposes. If web search is available, the capability is made available automatically and the provider/model decides whether to use it. If web search is unavailable, unsupported, fails, or is simply not useful, the AI can still analyse the supplied evidence.
+The AI client may use whatever capabilities it actually exposes. If web search is available, the capability is made available automatically and the provider/model decides whether to use it. If web search is unavailable, unsupported, fails, is suppressed for privacy, or is simply not useful, the AI can still analyse the supplied evidence.
 
 ## Workflow
 
@@ -38,6 +38,7 @@ Configured AI client
         |
         |-- web/search capability available? make it available
         |-- provider/model may use it or decline it
+        |-- institution/private evidence present? suppress public web capability
         |-- other model capabilities may also inform analysis
         v
 AI-assisted synthesized risk
@@ -124,7 +125,9 @@ The historical `web_research.enabled` property is accepted for backward compatib
 
 ## Azure OpenAI
 
-For Azure OpenAI, the provider exposes the Responses API `web_search` tool with automatic tool choice. The model may call it or decline it.
+For Azure OpenAI, global/public overall synthesis uses one Responses API request. The `web_search` tool is exposed with automatic tool choice, so the model may call it or decline it. The same response returns the final structured synthesis.
+
+For structured Responses output, the provider requests low response verbosity to reduce avoidable output growth while preserving the required JSON fields.
 
 The runtime records:
 
@@ -134,8 +137,6 @@ The runtime records:
 - search queries and URLs when returned;
 - external citations when returned;
 - any capability error.
-
-A web-search failure does not automatically discard the AI analysis. The final structured synthesis can still be produced from the supplied application context.
 
 ## Tokens-per-minute budgeting
 
@@ -150,22 +151,36 @@ AI provider configuration may declare the deployment's tokens-per-minute quota:
 }
 ```
 
-When `tokens_per_minute` is present, capability-driven overall synthesis preflights the request against that quota. The tool automatically reserves output capacity and a safety margin, compacts verbose evidence, and removes lower-priority context only when necessary.
+`max_output_tokens` remains the normal limit for request routing and other AI helpers. Overall structured synthesis may derive a larger response allowance from `tokens_per_minute`, because a response cut off mid-object is not usable JSON. The synthesis prompt budget shrinks by the same amount so the total request remains within the configured deployment budget.
 
-The priority order is:
+The current synthesis reserve policy is:
 
-1. governed/config-normalized source-level risk assessments;
+- reserve up to 20% of TPM for structured output, capped at 2,000 tokens;
+- never reserve more than 25% of TPM for a single response;
+- keep a separate 15% TPM safety reserve, with a minimum of 500 tokens;
+- use the remaining allowance for the estimated prompt.
+
+For a 10,000 TPM deployment with `max_output_tokens` set to 1,200:
+
+```text
+normal provider max output       1,200
+synthesis output reserve         2,000
+rate-limit safety reserve        1,500
+estimated synthesis prompt       6,500
+```
+
+When necessary, the prompt builder compacts evidence in this order:
+
+1. governed/config-normalized source-level risk assessments are retained first;
 2. governed criterion claims;
 3. source-native risk assessments;
 4. source-native sustainability/documentation evidence;
 5. other source-native descriptive context.
 
-For a 10,000 TPM deployment with `max_output_tokens` set to 1,200, the current budgeting policy reserves 1,200 tokens for output and 1,500 tokens as rate-limit headroom, leaving an estimated prompt budget of approximately 7,300 tokens.
-
 The synthesis response records the budget decision, including:
 
 - configured TPM;
-- configured and effective maximum output tokens;
+- configured and effective synthesis maximum output tokens;
 - safety reserve;
 - prompt token budget;
 - conservative estimated prompt tokens;
@@ -179,9 +194,9 @@ If `tokens_per_minute` is omitted, the existing unbudgeted behavior is preserved
 
 ## Privacy boundary
 
-Institution-scoped/private operational evidence is not included in the public-search capability prompt.
+For global/public format assessments, the single Responses request may expose web search to the model.
 
-The final AI synthesis may still receive the full assessment context through the configured AI provider, but public web grounding receives only public/global format evidence and public format identity.
+When the assessment context contains institution-scoped/private operational evidence, public web-search capability is suppressed for that synthesis call. The AI provider can still analyse the supplied evidence without public web grounding. The response records this as `suppressed_for_institution_evidence=true`.
 
 ## Quality warnings rather than hard rejection
 
