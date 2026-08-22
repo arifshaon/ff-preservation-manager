@@ -15,12 +15,12 @@ from preservation_risk_manager.ai.base import (
     AIWebCitation,
     AIWebResearchResponse,
 )
-from preservation_risk_manager.ai.config import AIProviderConfig, load_ai_config
-from preservation_risk_manager.ai.factory import build_ai_provider
-from preservation_risk_manager.ai.research_synthesis import (
+from preservation_risk_manager.ai.capability_synthesis import (
     synthesize_with_capabilities,
     synthesize_with_web_research,
 )
+from preservation_risk_manager.ai.config import AIProviderConfig, load_ai_config
+from preservation_risk_manager.ai.factory import build_ai_provider
 from preservation_risk_manager.ai.review import review_answers_with_ai
 from preservation_risk_manager.ai.risk_analysis import (
     AI_ELIGIBLE_STATUSES,
