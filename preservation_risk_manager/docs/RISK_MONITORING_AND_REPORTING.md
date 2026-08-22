@@ -45,18 +45,27 @@ python -m registry_builder.refresh `
   --report monitoring\nara-refresh.json
 ```
 
-Refresh more than one configured source by repeating `--source`:
+Refresh more than one configured source by repeating `--source`. Use source IDs from `sources.qnl.json`:
 
 ```powershell
 python -m registry_builder.refresh `
   --config config\sources.qnl.json `
-  --source pronom `
-  --source loc_fdd_xml_reviewed `
+  --source pronom_registry `
+  --source loc_fdd_xml `
   --workdir work `
   --out output
 ```
 
-The command creates a temporary selection of the existing reviewed configuration, forces `incremental_source_updates=true`, and invokes the normal pipeline. The production configuration itself is not rewritten.
+The current production external source IDs are:
+
+```text
+nara_digital_preservation_framework
+pronom_registry
+loc_fdd_xml
+dpc_bit_list_2025
+```
+
+The command creates a temporary selection of the existing reviewed configuration, forces `incremental_source_updates=true`, and invokes the normal pipeline. The production configuration itself is not rewritten. The compact refresh report records the absolute base-config path and SHA-256 so the selected-source run can be tied back to the exact reviewed configuration.
 
 A successful selected-source refresh:
 
@@ -73,7 +82,7 @@ If a selected optional source fails, its previous successful evidence is retaine
 
 Refreshing does not automatically mean "use the newest possible release." Each adapter's reviewed source configuration controls release/retrieval behavior.
 
-For example, a pinned NARA configuration remains pinned when refreshed. A separately reviewed monitoring configuration can use NARA `release_mode=latest` to discover the newest complete release. Review newly discovered evidence/mapping effects before changing a pinned production baseline when that is the governance model.
+For example, the current NARA production configuration is pinned to release `20260320`. Rerunning that source refreshes/verifies that reviewed release; it does not silently move the production registry to a future NARA release. A separately reviewed monitoring configuration can use NARA `release_mode=latest` when the goal is to discover a newer complete release for review.
 
 `--offline` replays cached snapshots and cannot discover upstream material that has never been acquired.
 
@@ -163,7 +172,7 @@ There is deliberately no hidden third "combined AI + database" score. The curato
 
 The report should be reviewed for more than just a High/Critical label. Useful attention signals include:
 
-- governed `critical`, `high` or `moderate` risk;
+- governed `critical`, `high` or `moderate` risk under the current QNL semantic vocabulary;
 - AI result higher than governed risk;
 - source disagreement at the selected scope;
 - broader-scope warnings such as a vulnerable format family;
@@ -206,7 +215,7 @@ Push-Location ..\qnl_format_registry_builder
 python -m registry_builder.refresh `
   --config config\sources.qnl.json `
   --source nara_digital_preservation_framework `
-  --source pronom `
+  --source pronom_registry `
   --workdir work `
   --out output `
   --report "..\preservation_risk_manager\$reportDir\registry-refresh.json"
@@ -231,6 +240,7 @@ Retain at least:
 
 ```text
 registry refresh run_id
+base registry configuration path/hash
 selected/refreshed source IDs
 source changed/unchanged/failed status
 source snapshot/release metadata
