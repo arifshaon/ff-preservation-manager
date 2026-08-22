@@ -1,72 +1,77 @@
-# File Format Preservation Manager data model
+# Data model
 
-This is the **canonical backend-neutral data model** for the repository.
+This is the canonical backend-neutral data model for File Format Preservation Manager.
 
-Use this document when you need to understand what data exists, how it moves through the system, and which objects are source evidence versus normalized evidence versus risk conclusions.
+MongoDB is the normal persistent implementation, but the logical objects below are the model. Physical MongoDB indexes/key escaping are documented separately in [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md).
 
-MongoDB is only one physical storage implementation. MongoDB indexes, key escaping, collection setup, and administration remain documented separately in [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md).
-
-## Model at a glance
+## 1. Model at a glance
 
 ```text
-source artifact / publication
-        |
-        v
-SourceSnapshot
-        |
-        v
-SourceAdapter.extract()
-        |
-        v
-RawFormatRecord + Identifier claims
-        |
-        v
-normalization + reconciliation
-        |
-        v
-CanonicalFormat
-        |
-        +--------------------+
-        |                    |
-        v                    v
-source-native evidence   institution evidence
-        |                    |
-        +----------+---------+
-                   |
-                   v
-          declarative criterion mapping
-                   |
-                   v
-             criterion_claims
-                   |
-                   v
-             RiskFramework
-                   |
-                   v
-       deterministic question answers
-                   |
-                   v
-       score / band / gaps / remediation
+upstream publication / local evidence
+              |
+              v
+        SourceSnapshot
+              |
+              v
+       RawFormatRecord
+              |
+     +--------+---------+
+     |                  |
+     v                  v
+identifier claims   source-native evidence
+     |                  |
+     v                  +-------------------------------+
+authority-aware                                         |
+reconciliation                                           |
+     |                                                   |
+     v                                                   |
+CanonicalFormat                                          |
+     |                                                   |
+     +--------------------+------------------------------+
+                          |
+              governed persisted evidence
+                          |
+        +-----------------+------------------+
+        |                 |                  |
+        v                 v                  v
+ criterion_claims  risk_assessment_claims  source_relationship_claims
+        |                 |                  |
+        +-----------------+------------------+
+                          |
+                          v
+                    RegistryReader
+                          |
+                 +--------+--------+
+                 |                 |
+                 v                 v
+        governed overall      framework/question
+        risk synthesis        diagnostics
+                 |                 |
+                 +--------+--------+
+                          |
+                          v
+                 optional AI synthesis
+                          |
+                          v
+               CLI / batch / web / API
 ```
 
-A major architectural rule is that these layers remain separate:
+Core separation rules:
 
 ```text
-source observation != normalized criterion claim
-criterion claim     != risk conclusion
-risk conclusion     != preservation action
-institution evidence != universal format fact
+source observation != canonical identity
+identifier claim   != verified identifier
+criterion claim    != overall risk assessment
+source risk        != question-framework score
+AI synthesis       != source evidence
+institution fact   != universal format fact
 ```
 
-## 1. In-flight Python types
-
-These objects exist while the registry builder is acquiring, extracting, and reconciling evidence. They are not MongoDB-specific.
+## 2. In-flight acquisition objects
 
 ### `SourceSnapshot`
 
-Defined in `registry_builder/models.py`.
-
-A snapshot records the exact artifact used as evidence for a source run.
+A snapshot records the artifact/evidence acquired for a source run.
 
 Typical fields:
 
@@ -74,273 +79,367 @@ Typical fields:
 | --- | --- |
 | `source_id` | Configured source instance. |
 | `source_type` | Adapter implementation/type. |
-| `uri` | Original or local source location. |
-| `acquired_at` | Acquisition timestamp. |
-| `sha256` | Content hash of the acquired artifact. |
-| `local_path` | Cached/temporary local path used for extraction. |
-| `content_type` | Optional media/content type. |
-| `note` | Retrieval/acquisition note. |
-| `changed` | Whether the artifact changed from the previous known snapshot where available. |
+| `uri` | Original/local source location. |
+| `acquired_at` | Retrieval timestamp. |
+| `sha256` | Content hash of acquired artifact. |
+| `local_path` | Cached working path. |
+| `changed` | Whether content changed relative to known prior snapshot where available. |
 | `from_cache` | Whether cached evidence was reused. |
-| `metadata` | Adapter-specific acquisition metadata. |
+| `metadata` | Release/ref/acquisition-specific metadata. |
 
-Retained snapshots make source acquisition reproducible and auditable. Temporary snapshots may be deleted after extraction when the useful source payload is preserved in `RawFormatRecord.raw`.
+Snapshots support audit, change detection and offline replay.
 
 ### `Identifier`
 
-An `Identifier` is an identifier **claim**, not merely a string.
+An identifier is a claim with provenance, not merely a string.
+
+Conceptually:
 
 ```text
 kind
 value
 source
-verified
 source_record_id
+verified
 ```
-
-`verified=true` means the claim came from the authority that owns the namespace.
 
 Examples:
 
 ```text
-PUID from PRONOM      -> verified
-PUID copied by NARA   -> useful claim, not PRONOM-verified
-LOC FDD ID from LOC   -> verified
-LOC URL in local XLSX -> useful claim, not LOC-verified
+PUID from PRONOM -> verified PUID
+PUID copied by Wikidata -> unverified PUID assertion
+LOC FDD ID from LOC -> verified LOC identity
+NARA ID from NARA -> verified NARA identity
+QID from Wikidata -> verified Wikidata source identity
 ```
-
-This distinction is central to conservative reconciliation.
 
 ### `RawFormatRecord`
 
-`RawFormatRecord` is the source-adapter boundary.
+The adapter boundary. It preserves a source's extracted representation before canonical reconciliation.
 
-Important fields include:
+Common fields:
 
 ```text
 source_id
 source_type
 source_record_id
-name
-category
-description
-extensions
-mime_types
-puids / loc_ids / nara_ids / wikidata_ids
-identifiers
+record_role
+name / category / description
+extensions / mime_types
+identifier claims
 urls
-institution_policy
-institution_evidence
-hazard
-readiness
-trend
-evidence
+risk_assessments
+institution evidence/policy
+hazard/readiness/trend fields where source-native
 native_fields
 raw
+evidence/provenance
 ```
 
-Two fields are particularly important for source onboarding:
+Two fields matter especially for extensibility:
 
-- `native_fields`: source-native observations intended for declarative criterion mapping;
-- `raw`: retained source payload/provenance that should not be lost during normalization.
+```text
+native_fields
+    source-native values exposed for reviewed declarative mapping
 
-Adapters should not calculate QNL risk bands in `RawFormatRecord`. They should preserve what the source actually says.
+raw
+    retained source payload/provenance that should not be lost during normalization
+```
 
-### `CanonicalFormat`
+Adapters should retain source meaning rather than convert every source into a single QNL risk vocabulary.
 
-`CanonicalFormat` is the current reconciled identity view.
+## 3. `CanonicalFormat`
 
-Typical fields:
+`CanonicalFormat` is the reconciled current identity view.
+
+Typical content includes:
 
 ```text
 canonical_id
 preferred_name
-category
-description
+category / description
 identifiers
 identifier_claims
-source_records
-institution_policy_overlays
-institution_evidence_claims
-external_hazard
-hazard_assessment
-readiness
-trend
-preservation_method
-provenance
+source_records / provenance
+institution overlays/evidence references
+current derived relationship/context
+current synthesized_risk where materialized
 ```
 
-The canonical format is a current view over retained source evidence. It does not replace the source records.
+A canonical format does not replace historical/source evidence. It provides a stable read target assembled from governed active contributions.
 
-## 2. Logical persisted collections
+A canonical ID such as:
 
-`RegistryStore` exposes logical collection names independent of physical backend.
+```text
+puid-fmt-276
+```
 
-| Logical collection | Purpose |
+is an internal registry identity. The external authority identifier remains:
+
+```text
+fmt/276
+```
+
+## 4. Logical persisted collections
+
+The active persistent model includes the following important logical collections.
+
+| Collection | Purpose |
 | --- | --- |
-| `runs` | Pipeline/run identity, timestamps, status, configuration/provenance. |
+| `runs` | Pipeline/backfill/refresh run identity, status and provenance. |
 | `source_snapshots` | Acquired source artifacts and hashes. |
-| `source_records` | Adapter-extracted source records before canonical reconciliation. |
-| `canonical_formats` | Current reconciled format identities. |
-| `format_identifiers` | Authority/source identifier claims associated with canonical formats. |
-| `institution_policy_overlays` | Institution-specific policy/decisions. |
-| `format_evidence_claims` | Legacy/general evidence objects retained for compatibility. |
-| `criterion_claims` | Normalized provenance-bearing observations against the neutral criteria vocabulary. |
-| `hazard_assessments` | Stored hazard/conclusion outputs from builder workflows. |
-| `readiness_assessments` | Local/operational readiness observations. |
-| `trend_observations` | Time-based observations. |
-| `assessment_changes` | Detected changes between assessment/registry states. |
+| `source_records` | Adapter-extracted source evidence/history. |
+| `canonical_formats` | Current/historical reconciled format identities. |
+| `format_identifiers` | Identifier claims/authority links for canonicals. |
+| `criterion_claims` | Reviewed normalized preservation observations. |
+| `risk_assessment_claims` | Source-native/governed overall risk assessments mapped to canonical targets. |
+| `source_relationship_claims` | Governed contextual/cross-registry relationships such as Wikidata authority cross-references. |
+| `institution_policy_overlays` | Institution-specific policy decisions. |
+| `format_evidence_claims` | General/legacy evidence objects retained for compatibility where present. |
+| `hazard_assessments` | Historical/other hazard assessment outputs used by builder workflows. |
+| `readiness_assessments` | Local/operational readiness observations where used. |
+| `trend_observations` | Time-series observations where used. |
+| `assessment_changes` | Detected changes across stored assessment/registry states. |
 
-A backend may store these as MongoDB collections, files, in-memory lists, SQL tables, or another compatible implementation. The logical meaning stays the same.
+Operational read rule:
 
-## 3. `criterion_claims` — normalized evidence layer
+```text
+current != false -> active/current
+current == false -> historical/superseded
+```
 
-`criterion_claims` are the main harmonized evidence objects consumed by `preservation_risk_manager`.
+Do not query historical `source_records` directly as deterministic current risk evidence. Current governed claims/current canonical views are the read layer.
 
-A typical claim contains:
+## 5. `criterion_claims`
+
+A criterion claim is a normalized evidence statement against a neutral preservation vocabulary.
+
+Conceptual example:
 
 ```json
 {
-  "canonical_id": "puid-fmt-18",
+  "canonical_id": "puid-fmt-276",
   "criterion_id": "sustainability.disclosure",
   "value": "openly_documented",
-  "source_id": "pronom_registry",
-  "source_type": "pronom_registry",
-  "source_record_id": "fmt/18",
-  "source_field": "native_fields.specification_status",
-  "source_value": "Full",
-  "native_vocabulary": "pronom",
-  "directness": "explicit",
-  "covers": "full",
-  "source_independence": "independent",
-  "criteria_version": "v1",
-  "mapping_version": "2026-08-17",
-  "mapping_rule_id": "pronom.disclosure.specification_status.v1",
+  "source_id": "loc_fdd_xml",
+  "source_record_id": "fdd000277",
+  "source_field": "native_fields.disclosure",
+  "source_value": "...native LOC value...",
+  "mapping_rule_id": "...",
+  "mapping_version": "...",
   "review_status": "approved",
-  "observed_at": "2026-08-17T00:00:00+00:00"
+  "current": true
 }
 ```
 
-Not every source populates every optional field, but a usable claim should preserve enough provenance to answer:
+A useful criterion claim answers:
 
-1. **what format?** — `canonical_id`;
-2. **what neutral observation?** — `criterion_id` + `value`;
-3. **who said it?** — `source_id` / `source_type`;
-4. **where in the source?** — `source_record_id`, `source_field`, and retained raw/source value;
-5. **how was it normalized?** — mapping version/rule;
-6. **was it reviewed?** — review status;
-7. **is it local or global?** — `institution_id` / `source_independence`.
+1. what format?
+2. what neutral observation?
+3. what native source value supported it?
+4. who supplied it?
+5. where in the source?
+6. which mapping/version transformed it?
+7. what scope applies?
+8. is the mapping reviewed/current?
 
-### Global vs institution-scoped claims
+Criterion claims support framework questions. They are not automatically an overall preservation-risk score.
 
-Global source evidence uses values such as:
+## 6. Neutral criteria vocabulary
 
-```text
-source_independence = independent
-source_independence = source_derived
-```
-
-Local institutional observations use:
-
-```text
-source_independence = institution_scoped
-institution_id = qnl
-```
-
-A QNL statement such as “QNL lacks software X” must not become a universal claim about the format.
-
-## 4. Neutral criteria vocabulary
-
-The criteria vocabulary is configuration, not adapter code:
+The neutral criteria vocabulary is configuration:
 
 ```text
 qnl_format_registry_builder/config/criteria/v1.json
 ```
 
-It defines neutral preservation-relevant observations and their allowed values.
-
-Example conceptual distinction:
+Source-to-criterion mappings live under:
 
 ```text
-criterion:
-  sustainability.adoption = low
-
-not criterion:
-  risk = High
-  migrate_now = true
+qnl_format_registry_builder/config/criterion_mappings/
 ```
 
-Source-to-criterion mappings live separately under `config/criterion_mappings/`.
+This separates:
 
-This allows multiple sources to express different native vocabularies while contributing to one neutral evidence layer.
+```text
+source native observation
+from
+neutral preservation observation
+from
+risk-framework answer
+```
 
-## 5. Risk framework model
+Do not invent a new criterion merely because a source uses a different label if an existing criterion can represent the underlying observation faithfully.
 
-`preservation_risk_manager` consumes criterion claims through a `RiskFramework`.
+## 7. `risk_assessment_claims`
 
-Main types:
+This collection stores governed source-level risk assessments independently of the question framework.
+
+Typical fields retained/compacted by the Risk Manager include:
+
+```text
+canonical_id
+source_id / source_type / source_label
+source_record_id
+scope_type / scope_name / scope_basis
+native_label
+native_score
+native_scale
+native_direction
+normalized_band/score where source projection provides it
+semantic_level
+mapping_rule_id / mapping_version / projection_version
+current
+```
+
+Examples:
+
+```text
+NARA
+  native label/score/scale
+  exact format scope where reconciled
+
+DPC
+  native classification (e.g. Vulnerable)
+  format-group/context scope
+```
+
+The source-native values remain authoritative descriptions of what the source said. The semantic level is a governed mapping for cross-source synthesis; it does not erase the native label.
+
+## 8. Config-driven governed synthesis
+
+`risk_assessment_claims` are synthesized at read time through:
+
+```text
+preservation_risk_manager/config/qnl_preservation_risk_synthesis.v1.json
+```
+
+The returned `policy_synthesized_risk` contains the governed current interpretation according to the selected policy.
+
+Typical output concepts:
+
+```text
+semantic_level / semantic_label
+selected_scope_types
+contributors
+contextual_contributors
+unmapped_assessments
+policy id/version
+```
+
+A canonical document can also carry a locked/materialized `synthesized_risk` from registry projection. Risk Manager reports parity between that stored baseline and the current policy execution so a configuration migration can be verified before changing the persisted baseline.
+
+Do not confuse:
+
+```text
+source risk assessment
+policy-synthesized current headline
+AI-assisted synthesis
+```
+
+They are three different provenance layers.
+
+## 9. Risk terminology mapping
+
+The synthesis policy defines:
+
+```text
+semantic_levels
+source_rules
+synthesis operators/rules
+```
+
+A source rule may map a native vocabulary to a semantic level understood by the governed engine and AI contract.
+
+Example:
+
+```text
+DPC native "Vulnerable"
+ -> source-specific configured rule
+ -> moderate
+```
+
+Unknown values remain unmapped unless reviewed configuration explains them.
+
+See [`../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md`](../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md).
+
+## 10. `source_relationship_claims`
+
+Relationships are persisted separately from identity.
+
+Wikidata is the important current example:
+
+```text
+QID evidence-only source record
+ -> copied authority cross-reference
+ -> governed relationship claim
+ -> existing canonical format
+```
+
+A relationship can be:
+
+```text
+single-target cross-reference
+multi-target context
+other governed source relationship
+```
+
+It does not automatically mean identity equivalence.
+
+This separate collection lets relationships survive canonical rebuilds without allowing a contextual source to create/merge canonicals.
+
+## 11. Institution-specific objects
+
+Institution evidence/policy must retain institutional scope.
+
+Examples:
+
+```text
+institution_policy_overlays
+institution-scoped criterion claims
+readiness/local capability evidence
+```
+
+Typical identity:
+
+```text
+institution_id = qnl
+```
+
+Global assessment excludes institution-scoped claims. Institution assessment may use global plus matching institution evidence.
+
+## 12. Question/framework model
+
+The Risk Manager also consumes `criterion_claims` through a `RiskFramework`.
+
+Main concepts:
 
 ```text
 RiskFramework
-RiskScale
-ScoreBand
 Question
 AnswerOption
+Domain
+weights / applicability / evidence fields
+calibration/banding settings
 ```
 
-A question declares:
-
-```text
-id
-human label
-domain
-critical flag
-weight
-evidence_fields
-allowed answers
-evidence-value mapping
-guidance/applicability
-```
-
-The framework, not the source adapter, decides how normalized observations answer a preservation-risk question.
-
-## 6. Derived assessment model
-
-The risk manager transforms evidence into controlled question results.
-
-For each question the deterministic derivation layer records states such as:
+For each question the deterministic derivation/scoring layer records states such as:
 
 ```text
 derived
 missing_evidence
 unknown
 derived_conflict_conservative
+abstention
 ```
 
-The scorer then returns fields such as:
+The broad QNL working framework is separate from the source-level governed synthesis and currently has draft/unvalidated calibration/banding status.
 
-```text
-framework_id / version
-calibration_status
-banding_enabled
-score / max_score
-analysed_band
-band_suppressed_reason
-analysis_status
-evidence_completeness
-answered_questions
-missing_count
-abstention_count
-question_results
-```
+## 13. Evidence completeness/gaps
 
-`analysed_band = null` is a valid result when the framework is uncalibrated or evidence is insufficient.
+Unknown/unmapped/missing evidence is preserved as a diagnostic state.
 
-## 7. Evidence-gap/remediation model
-
-Unknown/unbanded evidence is not treated as Low risk.
-
-The deterministic gap layer distinguishes conditions such as:
+Examples:
 
 ```text
 no_matching_evidence
@@ -348,122 +447,90 @@ claims_exist_but_do_not_map
 claims_exist_but_not_for_framework
 ```
 
-The remediation planner can then classify work such as:
+The remediation layer can propose review categories such as mapping work or source-evidence research.
+
+These gaps do not automatically change the governed overall risk level.
+
+## 14. AI synthesis data boundary
+
+For optional AI synthesis, the application constructs a bounded evidence package containing references such as:
 
 ```text
-mapping_rule_needed
-source_evidence_needed
-framework_alignment_review
+R... governed/source risk assessment refs
+C... criterion claim refs
+S... source-native evidence refs
 ```
 
-This is intentionally separate from the risk band itself.
-
-## 8. Transformation chain for a structured source
+The AI response records:
 
 ```text
-remote/local CSV/JSON/XML
- -> SourceSnapshot
- -> adapter extraction
- -> RawFormatRecord(native_fields + raw)
- -> source_records
- -> normalization/reconciliation
- -> canonical_formats
- -> criterion mapping
- -> criterion_claims
- -> risk framework
- -> question answers
- -> risk/gap/remediation result
+semantic_level
+confidence
+rationale
+database_evidence_refs
+considerations
+config_rules_considered
+governed_baseline_relation
+uncertainty
+external source URLs/capability metadata where applicable
 ```
 
-## 9. Transformation chain for an unstructured source
+This AI result is not a persisted source claim by default.
 
-Narrative publications such as a PDF/web report require one additional controlled artifact:
+The application also checks model-returned metadata such as baseline relation against configured semantic ranks.
+
+## 15. Source update model
+
+Persistent evidence is historical, while the current read view is replaceable source-by-source.
 
 ```text
-PDF / HTML publication
- -> manual or AI-assisted transcription
- -> reviewed versioned transcription JSON
- -> standard_json or thin source-specific adapter
- -> RawFormatRecord
- -> normal pipeline
- -> criterion_claims
- -> risk analysis
+source A refreshed successfully
+ -> new active A contribution
+ -> old A retained historically but superseded
+
+source B not refreshed
+ -> latest successful B contribution reused
 ```
 
-The transcription is an auditable intermediate source artifact. AI output must be treated as draft until reviewed by a named human.
+The active canonical/claim view is reconciled from the complete active evidence set.
 
-See [`TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](TRANSCRIBING_UNSTRUCTURED_SOURCES.md).
+This is why source update does not mean deleting/reinstalling the registry.
 
-## 10. Source provenance for transcribed evidence
-
-For narrative sources, every transcribed record should retain a source locator such as:
-
-```text
-source_page
-source_section
-source_heading
-source_url
-source_excerpt
-```
-
-This allows an archivist to trace a normalized claim back to the actual passage rather than to an opaque AI response.
-
-## 11. Storage contract
+## 16. Storage contract
 
 The backend-neutral persistence boundary is `RegistryStore`.
 
-At minimum:
+The Risk Manager reads via `RegistryReader` and needs a query-compatible store.
 
-```python
-upsert(collection, key, document)
-query(collection, filter)
-```
+MongoDB is selected through registry configuration. Export-backed workflows can read `registry.json` and sibling claim exports where supported.
 
-The registry builder owns normal writes/updates. The risk manager consumes the read side through `RegistryReader`.
+Storage implementation detail: [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md).
 
-Detailed storage/adapter behavior remains in [`DATA_MODEL_AND_STORAGE_INTERFACE.md`](DATA_MODEL_AND_STORAGE_INTERFACE.md).
-
-## 12. File-export model
-
-When exports are enabled, `registry.json` contains canonical format data while normalized criterion evidence may be written separately as:
+## 17. Data flow for adding a source
 
 ```text
-criterion_claims.jsonl
-criterion_claims.json
+remote/local CSV/JSON/XML/API/archive
+ -> snapshot
+ -> adapter
+ -> RawFormatRecord
+ -> native/raw preservation
+ -> identifier authority classification
+ -> canonical reconciliation
+ -> optional criterion mapping
+ -> optional governed risk terminology/projection
+ -> persistence
+ -> Risk Manager verification
 ```
 
-The risk manager's export reader automatically discovers those sibling claim files when `--registry-json` points to `registry.json`.
+For narrative/unstructured material, insert a reviewed structured transcription before the normal adapter boundary.
 
-So the supported export-backed handoff is:
+See [`HOW_TO_ADD_A_SOURCE.md`](HOW_TO_ADD_A_SOURCE.md).
 
-```text
-output/
-  registry.json
-  criterion_claims.jsonl
-        |
-        v
-preservation_risk_manager --registry-json output/registry.json
-```
+## 18. Related documentation
 
-## 13. MongoDB-specific representation
-
-MongoDB is an implementation of this model, not the definition of it.
-
-Use the MongoDB document for:
-
-- physical collections;
-- indexes;
-- key escaping;
-- Mongo-specific verification queries;
-- connection configuration.
-
-See [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md).
-
-## Related documentation
-
-- Storage interface/backend contract: [`DATA_MODEL_AND_STORAGE_INTERFACE.md`](DATA_MODEL_AND_STORAGE_INTERFACE.md)
-- Repository architecture: [`REPOSITORY_ARCHITECTURE.md`](REPOSITORY_ARCHITECTURE.md)
+- Architecture: [`REPOSITORY_ARCHITECTURE.md`](REPOSITORY_ARCHITECTURE.md)
 - Add a source: [`HOW_TO_ADD_A_SOURCE.md`](HOW_TO_ADD_A_SOURCE.md)
-- Unstructured/narrative source transcription: [`TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
-- Criterion mapping: [`../qnl_format_registry_builder/docs/criterion_mapping_workflow.md`](../qnl_format_registry_builder/docs/criterion_mapping_workflow.md)
-- Risk framework model: [`../preservation_risk_manager/docs/FRAMEWORKS.md`](../preservation_risk_manager/docs/FRAMEWORKS.md)
+- Source catalogue: [`sources/README.md`](sources/README.md)
+- Risk synthesis: [`../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md`](../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md)
+- Identifier reconciliation: [`../qnl_format_registry_builder/docs/IDENTIFIER_RECONCILIATION.md`](../qnl_format_registry_builder/docs/IDENTIFIER_RECONCILIATION.md)
+- MongoDB schema: [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md)
