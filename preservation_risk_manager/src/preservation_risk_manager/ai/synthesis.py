@@ -348,6 +348,30 @@ def synthesize_with_ai(
         policy,
     )
     deterministic = synthesize_assessments(effective_assessments, policy)
+
+    unmapped_source_risk = [
+        item for item in ai_source_evidence
+        if str(item.get("evidence_kind") or "") == "source_native_risk_assessment"
+    ]
+    if deterministic.get("assessed") and not unmapped_source_risk:
+        overall = deepcopy(deterministic)
+        overall["ai_consulted"] = False
+        overall["ai_assisted"] = False
+        return {
+            "status": "skipped_no_ai_work_required",
+            "policy": policy.summary(),
+            "deterministic_synthesis": deterministic,
+            "config_normalized_source_assessments": config_normalized,
+            "suppressed_configured_source_risk_duplicates": suppressed_duplicates,
+            "ai_interpreted_assessments": [],
+            "overall_synthesized_risk": overall,
+            "authority_boundary": (
+                "The config already produced a mapped source-level synthesis and no genuinely unmapped source-native "
+                "risk assessment remained. Bounded AI synthesis was therefore not called. Use the separate expert "
+                "synthesis mode when a parallel model-knowledge-based opinion is wanted."
+            ),
+        }
+
     evidence = build_synthesis_evidence(
         risk_assessments=effective_assessments,
         criterion_claims=criterion_claims,
