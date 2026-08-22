@@ -52,6 +52,7 @@ class AIProviderConfig:
     model: str | None = None
     temperature: float = 0.0
     max_output_tokens: int | None = None
+    tokens_per_minute: int | None = None
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
@@ -70,6 +71,19 @@ class AIProviderConfig:
         max_retries = int(data.get("max_retries", 0))
         if max_retries < 0:
             raise AIConfigurationError("AI configuration 'max_retries' must be zero or greater.")
+
+        raw_tpm = data.get("tokens_per_minute")
+        tokens_per_minute = int(raw_tpm) if raw_tpm is not None else None
+        if tokens_per_minute is not None and tokens_per_minute <= 0:
+            raise AIConfigurationError("AI configuration 'tokens_per_minute' must be greater than zero.")
+
+        max_output_tokens = (
+            int(data["max_output_tokens"])
+            if data.get("max_output_tokens") is not None
+            else None
+        )
+        if max_output_tokens is not None and max_output_tokens <= 0:
+            raise AIConfigurationError("AI configuration 'max_output_tokens' must be greater than zero.")
 
         # ``human_ai_format_limit`` was the first name introduced for this
         # setting. Preserve it as a compatibility alias, but the setting now
@@ -108,11 +122,8 @@ class AIProviderConfig:
             deployment=_optional_string(data.get("deployment")),
             model=_optional_string(data.get("model")),
             temperature=float(data.get("temperature", 0.0)),
-            max_output_tokens=(
-                int(data["max_output_tokens"])
-                if data.get("max_output_tokens") is not None
-                else None
-            ),
+            max_output_tokens=max_output_tokens,
+            tokens_per_minute=tokens_per_minute,
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
             human_format_assessment_limit=human_format_assessment_limit,
@@ -169,6 +180,7 @@ class AIProviderConfig:
             "model": self.model,
             "temperature": self.temperature,
             "max_output_tokens": self.max_output_tokens,
+            "tokens_per_minute": self.tokens_per_minute,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "human_format_assessment_limit": self.human_format_assessment_limit,
