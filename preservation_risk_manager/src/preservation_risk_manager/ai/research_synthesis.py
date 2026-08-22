@@ -10,12 +10,12 @@ from preservation_risk_manager.synthesis_policy import SynthesisPolicy
 
 AI_CAPABILITY_SYNTHESIS_SYSTEM_PROMPT = (
     "You are assisting with a digital-preservation risk assessment. The application supplies the resolved format, "
-    "its collected registry/source evidence, the configured deterministic synthesis, the QNL synthesis policy, and "
-    "the assessment framework. Treat all of that as important context. Produce an AI-assisted synthesized preservation "
-    "risk using your available capabilities. You may use additional external information when it is useful and "
-    "available, but do not misattribute external information to NARA, DPC, LOC, PRONOM, or another supplied source. "
-    "Preserve source-native statements as source statements. Missing evidence is not Low risk. Explain material "
-    "agreement or disagreement with the governed/config baseline, and report confidence and uncertainty."
+    "collected registry/source evidence, the deterministic/config synthesis, the QNL synthesis policy, and the "
+    "assessment framework. Treat all of that as important context. Produce an AI-assisted synthesized preservation "
+    "risk using your available capabilities. You may use additional external information when useful and available, "
+    "but do not misattribute it to NARA, DPC, LOC, PRONOM, or another supplied source. Preserve source-native "
+    "statements as source statements. Missing evidence is not Low risk. Explain material agreement or disagreement "
+    "with the governed baseline, and report confidence and uncertainty."
 )
 
 
@@ -32,11 +32,11 @@ def _safe(value: Any, *, max_string: int = 5000) -> Any:
 
 
 def _is_institution_scoped(item: dict[str, Any]) -> bool:
-    if item.get("institution_id"):
-        return True
-    if str(item.get("source_independence") or "").strip().lower() == "institution_scoped":
-        return True
-    return str(item.get("scope_type") or "").strip().lower() == "institutional_format"
+    return bool(
+        item.get("institution_id")
+        or str(item.get("source_independence") or "").strip().lower() == "institution_scoped"
+        or str(item.get("scope_type") or "").strip().lower() == "institutional_format"
+    )
 
 
 def _public_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -55,46 +55,45 @@ def _public_format_context(format_context: dict[str, Any]) -> dict[str, Any]:
 def _framework_summary(framework: Any | None) -> dict[str, Any] | None:
     if framework is None:
         return None
-    questions = []
-    for question in getattr(framework, "questions", ()):
-        questions.append({
-            "question_id": getattr(question, "id", None),
-            "label": getattr(question, "label", None),
-            "domain_id": getattr(question, "domain_id", None),
-            "domain_label": getattr(question, "domain_label", None),
-            "critical": bool(getattr(question, "critical", False)),
-            "evidence_fields": list(getattr(question, "evidence_fields", ()) or ()),
-            "applicability": list(getattr(question, "applicability", ()) or ()),
-        })
     return {
         "framework_id": getattr(framework, "framework_id", None),
         "version": getattr(framework, "version", None),
         "calibration_status": getattr(framework, "calibration_status", None),
-        "questions": questions,
+        "questions": [
+            {
+                "question_id": getattr(question, "id", None),
+                "label": getattr(question, "label", None),
+                "domain_id": getattr(question, "domain_id", None),
+                "domain_label": getattr(question, "domain_label", None),
+                "critical": bool(getattr(question, "critical", False)),
+                "evidence_fields": list(getattr(question, "evidence_fields", ()) or ()),
+                "applicability": list(getattr(question, "applicability", ()) or ()),
+            }
+            for question in getattr(framework, "questions", ())
+        ],
     }
 
 
 def _capability_prompt(
     *,
     format_context: dict[str, Any],
-    governed_synthesis: dict[str, Any],
     database_evidence: list[dict[str, Any]],
     framework: Any | None,
     policy: SynthesisPolicy,
 ) -> str:
+    # Only public/global evidence is supplied to an external/public-search tool.
     context = {
         "format": _public_format_context(format_context),
-        "governed_config_synthesis": _safe(governed_synthesis),
         "database_evidence": _safe(database_evidence),
         "assessment_framework": _safe(_framework_summary(framework)),
         "synthesis_policy": _safe(policy.raw),
     }
     return (
-        "Here is the preservation-risk context assembled by the application. Analyse it using the capabilities "
+        "Here is public preservation-risk context assembled by the application. Analyse it using the capabilities "
         "available to you. If external/web search is useful, you may use it; if it is not useful or unavailable, "
-        "continue with the supplied context. Do not ignore the supplied source evidence or deterministic baseline. "
-        "If you use information from outside the supplied evidence, make that clear so it can be distinguished from "
-        "registry evidence. Return a concise analytical report that can be passed into a structured synthesis step.\n\n"
+        "continue with the supplied context. If you use information from outside the supplied evidence, make that "
+        "clear so it can be distinguished from registry evidence. Do not infer or search for internal institutional "
+        "capability, policy, storage, readiness, or other private operational information.\n\n"
         + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
 
@@ -181,7 +180,7 @@ def _validate_with_warnings(
     if database_evidence and not used_db:
         warnings.append("AI did not explicitly reference supplied registry/database evidence in its structured result.")
 
-    considerations: list[dict[str, Any]] = []
+    considerations = []
     for item in data.get("considerations") or []:
         if not isinstance(item, dict):
             continue
@@ -227,14 +226,7 @@ def synthesize_with_capabilities(
     framework: Any | None = None,
     max_evidence_items: int = 100,
 ) -> dict[str, Any]:
-    """Produce one AI-assisted synthesis from application context and provider capabilities.
-
-    The application supplies evidence and methodology. It does not require a
-    particular research sequence. When the provider exposes web search, that
-    capability is made available with provider-side automatic tool choice. The
-    provider/model may use it or decline it. Failure or absence of external search
-    does not prevent the AI from analysing the supplied registry evidence.
-    """
+    """Return AI analysis from supplied context while making provider capabilities available."""
     database_evidence = build_synthesis_evidence(
         risk_assessments=[dict(item) for item in risk_assessments if isinstance(item, dict)],
         criterion_claims=[dict(item) for item in criterion_claims if isinstance(item, dict)],
@@ -250,6 +242,7 @@ def synthesize_with_capabilities(
         "capability_available": bool(capabilities_available.get("web_search")),
         "capability_invoked": False,
         "web_search_used": False,
+        "institution_scoped_evidence_excluded": 0,
         "error": None,
     }
 
@@ -257,6 +250,11 @@ def synthesize_with_capabilities(
         public_risk = _public_evidence(risk_assessments)
         public_claims = _public_evidence(criterion_claims)
         public_source = _public_evidence(source_evidence)
+        external_metadata["institution_scoped_evidence_excluded"] = (
+            len(risk_assessments) - len(public_risk)
+            + len(criterion_claims) - len(public_claims)
+            + len(source_evidence) - len(public_source)
+        )
         public_database_evidence = build_synthesis_evidence(
             risk_assessments=public_risk,
             criterion_claims=public_claims,
@@ -268,7 +266,6 @@ def synthesize_with_capabilities(
             external = provider.research_web(
                 _capability_prompt(
                     format_context=format_context,
-                    governed_synthesis=governed_synthesis,
                     database_evidence=public_database_evidence,
                     framework=framework,
                     policy=policy,
@@ -303,7 +300,7 @@ def synthesize_with_capabilities(
             "error": external_metadata.get("error"),
         },
     }
-    request = AIRequest(
+    response = provider.generate(AIRequest(
         messages=(
             AIMessage("system", AI_CAPABILITY_SYNTHESIS_SYSTEM_PROMPT),
             AIMessage(
@@ -318,8 +315,7 @@ def synthesize_with_capabilities(
         response_schema=_response_schema(policy),
         response_schema_name="preservation_risk_ai_synthesis",
         temperature=0.0,
-    )
-    response = provider.generate(request)
+    ))
     overall = _validate_with_warnings(
         response,
         database_evidence=database_evidence,
@@ -328,9 +324,7 @@ def synthesize_with_capabilities(
     )
     overall["governed_baseline"] = _safe(governed_synthesis)
     overall["capabilities_available"] = _safe(capabilities_available)
-    overall["capabilities_used"] = {
-        "web_search": bool(external_metadata.get("web_search_used")),
-    }
+    overall["capabilities_used"] = {"web_search": bool(external_metadata.get("web_search_used"))}
 
     return {
         "status": "ok",
