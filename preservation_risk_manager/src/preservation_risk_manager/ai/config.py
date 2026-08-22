@@ -17,6 +17,7 @@ _PLACEHOLDER_MARKERS = (
     "replace_me",
     "changeme",
 )
+_RESPONSE_VERBOSITY_VALUES = {"low", "medium", "high"}
 
 
 def _looks_like_placeholder(value: str) -> bool:
@@ -53,6 +54,7 @@ class AIProviderConfig:
     temperature: float = 0.0
     max_output_tokens: int | None = None
     tokens_per_minute: int | None = None
+    response_verbosity: str = "medium"
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
@@ -84,6 +86,12 @@ class AIProviderConfig:
         )
         if max_output_tokens is not None and max_output_tokens <= 0:
             raise AIConfigurationError("AI configuration 'max_output_tokens' must be greater than zero.")
+
+        response_verbosity = str(data.get("response_verbosity", "medium") or "medium").strip().lower()
+        if response_verbosity not in _RESPONSE_VERBOSITY_VALUES:
+            raise AIConfigurationError(
+                "AI configuration 'response_verbosity' must be one of: low, medium, high."
+            )
 
         # ``human_ai_format_limit`` was the first name introduced for this
         # setting. Preserve it as a compatibility alias, but the setting now
@@ -124,6 +132,7 @@ class AIProviderConfig:
             temperature=float(data.get("temperature", 0.0)),
             max_output_tokens=max_output_tokens,
             tokens_per_minute=tokens_per_minute,
+            response_verbosity=response_verbosity,
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
             human_format_assessment_limit=human_format_assessment_limit,
@@ -199,6 +208,7 @@ class AIProviderConfig:
             "max_output_tokens": self.max_output_tokens,
             "synthesis_max_output_tokens": self.synthesis_max_output_tokens,
             "tokens_per_minute": self.tokens_per_minute,
+            "response_verbosity": self.response_verbosity,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "human_format_assessment_limit": self.human_format_assessment_limit,
