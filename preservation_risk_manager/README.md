@@ -37,7 +37,7 @@ format reference
  -> human renderer OR machine JSON
 ```
 
-AI is optional and bounded. It can route human questions, interpret unresolved evidence in `fill-gaps`, or independently review raw evidence in `review-all`. It does not silently rewrite deterministic answers, scores, risk bands, evidence, or institutional policy.
+AI is optional. The registry evidence remains the primary evidence base. AI can route human questions, interpret unresolved bounded evidence in `fill-gaps`, independently review supplied raw evidence in `review-all` for calibration, and—when explicitly enabled in the Azure provider configuration—verify and supplement the collected preservation evidence through cited public-web research before producing an AI-assisted synthesis. AI web research does not replace the registry with an independent opinion, silently rewrite source-native assessments, change configured source mappings, or persist researched findings back to MongoDB.
 
 ## Start here
 
@@ -52,6 +52,7 @@ AI is optional and bounded. It can route human questions, interpret unresolved e
 | CLI command reference | [`docs/CLI_REFERENCE.md`](docs/CLI_REFERENCE.md) |
 | Human prompts and machine JSON actions | [`docs/HUMAN_AND_SYSTEM_QUERIES.md`](docs/HUMAN_AND_SYSTEM_QUERIES.md) |
 | AI `fill-gaps`, `review-all`, Azure and local models | [`docs/AI_ASSISTED_ANALYSIS.md`](docs/AI_ASSISTED_ANALYSIS.md) |
+| Registry-first cited AI web research and synthesis | [`docs/AI_RESEARCH_ASSISTED_SYNTHESIS.md`](docs/AI_RESEARCH_ASSISTED_SYNTHESIS.md) |
 | Module-by-module code responsibilities | [`docs/MODULE_REFERENCE.md`](docs/MODULE_REFERENCE.md) |
 | Set up periodic source refresh/watchlists/Top 10 reports | [`docs/RISK_MONITORING_AND_REPORTING.md`](docs/RISK_MONITORING_AND_REPORTING.md) |
 | Review the 8 domains / 22 preservation-risk questions | [`docs/PRESERVATION_RISK_QUESTIONS.md`](docs/PRESERVATION_RISK_QUESTIONS.md) |
@@ -154,9 +155,9 @@ python -m preservation_risk_manager ask `
   --ai-config config\ai.local.json
 ```
 
-Normal output is detailed human-readable text with evidence coverage, question-level conclusions, supporting evidence, unresolved evidence, and calibration cautions.
+Normal output is detailed human-readable text with source assessments, synthesis reasoning, question-level evidence where requested, unresolved evidence, and calibration cautions.
 
-The AI model routes the question to a controlled action; the registry/framework engine determines the actual assessment.
+The AI model routes the question to a controlled action; the registry/framework engine remains the evidence authority. With `--ai-mode synthesize`, the normal config-driven synthesis is used by default. If `ai.web_research.enabled=true` in the Azure AI config, the same action additionally verifies and supplements the collected evidence through cited public-web research before returning the AI-assisted synthesized result. See [`docs/AI_RESEARCH_ASSISTED_SYNTHESIS.md`](docs/AI_RESEARCH_ASSISTED_SYNTHESIS.md).
 
 Use `--json` only when you want the canonical result and router audit metadata.
 
@@ -184,7 +185,7 @@ python -m preservation_risk_manager query-json `
   --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
 ```
 
-This path makes no AI call and returns canonical JSON for APIs, dashboards, scheduled processes, tests, and other integrations.
+This path makes no AI call unless an AI mode is explicitly supplied. It returns canonical JSON for APIs, dashboards, scheduled processes, tests, and other integrations.
 
 ## Controlled request actions
 
@@ -249,6 +250,8 @@ Azure:
 ```text
 examples/ai.azure.example.json
 ```
+
+The Azure example includes an explicit `web_research` block. It is disabled by default. Set `enabled` to `true` only when cited public-web verification is intended and permitted for the deployment/subscription.
 
 Local/OpenAI-compatible:
 
