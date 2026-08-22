@@ -31,11 +31,46 @@ def _safe(value: Any, *, max_string: int = 5000) -> Any:
     return _safe(str(value), max_string=max_string)
 
 
+def _is_institution_scoped(item: dict[str, Any]) -> bool:
+    if item.get("institution_id"):
+        return True
+    return str(item.get("source_independence") or "").strip().lower() == "institution_scoped"
+
+
+def _public_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exclude institution/private evidence before invoking public web grounding."""
+    return [dict(item) for item in items if isinstance(item, dict) and not _is_institution_scoped(item)]
+
+
+def _public_format_context(format_context: dict[str, Any]) -> dict[str, Any]:
+    """Send only format identity fields to the external web-grounding service."""
+    allowed = (
+        "canonical_id",
+        "format_id",
+        "preferred_name",
+        "format_name",
+        "name",
+        "label",
+        "version",
+        "versions",
+        "puids",
+        "loc_ids",
+        "nara_ids",
+        "extensions",
+        "mime_types",
+        "internal_signature_names",
+        "identifiers",
+    )
+    return {key: _safe(format_context.get(key)) for key in allowed if format_context.get(key) is not None}
+
+
 def _framework_summary(framework: Any | None) -> dict[str, Any] | None:
     if framework is None:
         return None
     questions: list[dict[str, Any]] = []
     for question in getattr(framework, "questions", ()):
+        # Only public question metadata is sent; no institution-specific answers
+        # or local evidence are included in the web-grounding payload.
         questions.append({
             "question_id": getattr(question, "id", None),
             "label": getattr(question, "label", None),
@@ -63,7 +98,7 @@ def _research_prompt(
 ) -> str:
     web_policy = (policy.ai or {}).get("web_research") or {}
     context = {
-        "format": _safe(format_context),
+        "format": _public_format_context(format_context),
         "governed_config_synthesis": _safe(governed_synthesis),
         "database_evidence": _safe(database_evidence),
         "assessment_framework": _safe(_framework_summary(framework)),
@@ -82,6 +117,8 @@ def _research_prompt(
         "community support; dependencies/external assets; migration/conversion pathways; IP/DRM constraints; and "
         "metadata/self-documentation. Do not treat an absence of search results as Low risk. Preserve source-native "
         "ratings exactly as supplied.\n\n"
+        "The supplied database evidence contains global/public format evidence only. Do not infer or seek internal "
+        "institutional capability, policy, storage, or readiness information from the public web.\n\n"
         "The grounded report will later be used by a policy-guided synthesis step, so include concrete current facts "
         "and cite the web sources supporting them.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
@@ -237,12 +274,13 @@ def synthesize_with_web_research(
     framework: Any | None = None,
     max_evidence_items: int = 100,
 ) -> dict[str, Any]:
-    """Verify/supplement registry evidence on the web, then synthesize with policy context.
+    """Verify/supplement public registry evidence on the web, then synthesize.
 
     The workflow is registry-first. It does not ask the model to independently
-    assess a format from general knowledge. Web search is used to validate or
-    supplement the evidence already collected, and all resulting web claims are
-    retained with URLs for audit. No research finding is persisted to MongoDB.
+    assess a format from general knowledge. Public web search validates or
+    supplements existing global/source evidence and retains URLs for audit.
+    Institution-scoped evidence is excluded before web grounding. No research
+    finding is persisted to MongoDB.
     """
     web_policy = (policy.ai or {}).get("web_research") or {}
     if not web_policy.get("require_web_grounding", True):
@@ -250,16 +288,25 @@ def synthesize_with_web_research(
     if not provider.capabilities.web_search:
         raise AIProviderError(f"AI provider '{provider.provider_name}' does not support web search.")
 
+    public_risk_assessments = _public_evidence(risk_assessments)
+    public_criterion_claims = _public_evidence(criterion_claims)
+    public_source_evidence = _public_evidence(source_evidence)
+    excluded_private_count = (
+        (len(risk_assessments) - len(public_risk_assessments))
+        + (len(criterion_claims) - len(public_criterion_claims))
+        + (len(source_evidence) - len(public_source_evidence))
+    )
+
     database_evidence = build_synthesis_evidence(
-        risk_assessments=risk_assessments,
-        criterion_claims=criterion_claims,
-        source_evidence=source_evidence,
+        risk_assessments=public_risk_assessments,
+        criterion_claims=public_criterion_claims,
+        source_evidence=public_source_evidence,
         policy=policy,
         max_items=max_evidence_items,
     )
     research = provider.research_web(
         _research_prompt(
-            format_context=format_context,
+            format_context=_public_format_context(format_context),
             policy=policy,
             governed_synthesis=governed_synthesis,
             database_evidence=database_evidence,
@@ -278,7 +325,7 @@ def synthesize_with_web_research(
         raise AIProviderError("Web-researched synthesis requires cited web sources, but none were returned.")
 
     synthesis_context = {
-        "format": _safe(format_context),
+        "format": _public_format_context(format_context),
         "governed_config_synthesis": _safe(governed_synthesis),
         "synthesis_policy": _safe(policy.raw),
         "assessment_framework": _safe(_framework_summary(framework)),
@@ -294,6 +341,7 @@ def synthesize_with_web_research(
             "missing_database_evidence_is_not_low_risk": True,
             "generic_independent_risk_analysis_forbidden": True,
             "web_findings_must_be_cited": True,
+            "institution_scoped_evidence_excluded_from_web_grounding": True,
         },
     }
     request = AIRequest(
@@ -336,12 +384,14 @@ def synthesize_with_web_research(
             "model": research.model,
             "usage": research.to_dict()["usage"],
             "persisted": False,
+            "institution_scoped_evidence_excluded": excluded_private_count,
         },
         "provider": provider.describe(),
         "authority_boundary": (
-            "The AI-assisted result begins with the collected registry evidence and configured source mappings. "
-            "Public-web research is used only to verify, qualify, or supplement that evidence. Source-native ratings "
-            "and configured mappings are not rewritten, missing evidence contributes nothing, and web findings are "
-            "not persisted to the registry by this workflow."
+            "The AI-assisted result begins with collected public/global registry evidence and configured source "
+            "mappings. Public-web research is used only to verify, qualify, or supplement that evidence. "
+            "Institution-scoped evidence is not sent to public web grounding. Source-native ratings and configured "
+            "mappings are not rewritten, missing evidence contributes nothing, and researched findings are not "
+            "persisted to the registry by this workflow."
         ),
     }
