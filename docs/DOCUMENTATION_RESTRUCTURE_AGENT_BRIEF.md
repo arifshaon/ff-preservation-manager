@@ -398,12 +398,26 @@ Split it:
 | Content | Destination |
 | --- | --- |
 | Acquisition patterns 1–5, adapter class guidance | `ADAPTER_IMPLEMENTATION_GUIDE.md` |
-| "Running X only with MongoDB" examples | the relevant `sources/*.md` |
+| "Running X only with MongoDB" examples | the relevant `sources/*.md` — **but see below** |
 | Seven-step path | delete — `docs/HOW_TO_ADD_A_SOURCE.md` is the single surviving copy |
 | "Common mistakes to avoid" | new `qnl_format_registry_builder/docs/PITFALLS.md`, audience: developer |
 | "Where to document a new source" | delete (Task 2.4) |
 
 Then `git rm` the file.
+
+**Do not carry the "Running X only with MongoDB" sections across verbatim.** Each one prints a JSON
+config blob and then runs `--config config/nara.mongodb.local.json` (or `pronom.`/`loc.`) — a file
+the reader is never told to create, and which does not exist. Worse, committed example configs
+already do exactly this job:
+
+```text
+config/sources.nara.mongodb.example.json
+config/sources.pronom.mongodb.example.json
+config/sources.loc.mongodb.example.json
+```
+
+Replace each hand-written blob with a reference to the committed example config. (Note those examples
+also use database `format_registry` — see §9.3.)
 
 **Note:** the seven-step onboarding path currently exists in three places —
 `docs/HOW_TO_ADD_A_SOURCE.md`, `ADDING_AND_RUNNING_DATA_SOURCES.md`, and as a nine-step variant in
@@ -665,15 +679,53 @@ when several mapping files share a source type, later files overwrite earlier on
 reported `loc_fdd_xml: 2026-08-21-v2-draft2` — a `needs_review` draft that contributed zero claims.
 `INSTALLATION_SETUP_AND_RUN.md` §8 tells operators to inspect this report. Code fix, not a docs fix.
 
-### 9.3 Three database names
+### 9.3 The documentation points at the wrong database — 62 references
 
-Production `sources.qnl.*` configs use database `qnl_format_registry`.
-`config/storage.mongodb.example.json` and `config/criterion-claims-backfill.mongodb.example.json`
-use `format_registry`. `INSTALLATION_SETUP_AND_RUN.md` §15/§17 and `docs/GETTING_STARTED.md` tell
-operators to audit and backfill using the example configs — i.e. against a database their production
-build never wrote to, so the audit returns empty and looks like missing evidence.
+This is the most pervasive defect in the repository and the highest-value single fix. Treat it as the
+maintainer's first decision, not a footnote.
 
-**Document the discrepancy** at each command site. Do not change the config files.
+Every production config (`config/sources.qnl.*.json`, and every `*.production.json` backfill config)
+writes to database **`qnl_format_registry`**. But `config/storage.mongodb.example.json` and
+`config/criterion-claims-backfill.mongodb.example.json` declare database **`format_registry`**, and
+the documentation points readers at those example configs **62 times across 18 documents** — versus
+only 3 documents that mention `qnl_format_registry` at all.
+
+Verify for yourself:
+
+```bash
+grep -rho "storage.mongodb.example.json" --include='*.md' . | wc -l   # 62
+grep -rl  "storage.mongodb.example.json" --include='*.md' . | wc -l   # 18
+grep -rl  "qnl_format_registry\b"        --include='*.md' . | wc -l   #  3
+```
+
+Affected: `qnl_format_registry_builder/docs/INSTALLATION_SETUP_AND_RUN.md` §15/§17,
+`ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`, `criterion_mapping_workflow.md`,
+`STORAGE_AND_EXPORT_CONFIG.md`, `REBUILD_FROM_STORED_SOURCE_RECORDS.md`, `docs/GETTING_STARTED.md`,
+the root `README.md`, and essentially every command example in the risk manager docs
+(`INSTALLATION_SETUP_AND_RUN.md`, `CLI_REFERENCE.md`, `FORMAT_IDENTIFICATION.md`,
+`AI_ASSISTED_ANALYSIS.md`, `AI_PROVIDER_INTERFACE.md`, `HUMAN_AND_SYSTEM_QUERIES.md`, `WEB_UI.md`,
+`RISK_MONITORING_AND_REPORTING.md`, `RISK_ANALYSIS_WORKFLOW.md`, `REGISTRY_RISK_EVIDENCE_AUDIT.md`,
+`README.md`).
+
+**Why it matters:** an operator completes the source-by-source build into `qnl_format_registry`,
+then follows any documented audit or risk-query example and silently queries an empty
+`format_registry`. The result is unknowns and "Not Assessed" — which is precisely the failure the
+docs elsewhere warn must never be read as format safety
+(`INSTALLATION_SETUP_AND_RUN.md` §8). The system looks like it has no evidence when it is fully
+populated.
+
+Two possible fixes, both requiring maintainer approval because both touch `config/`:
+
+- **Option A (one line):** change `database` to `qnl_format_registry` in
+  `config/storage.mongodb.example.json` and `config/criterion-claims-backfill.mongodb.example.json`.
+  All 62 references become correct at once. Risk: anyone with an existing local `format_registry`
+  database silently starts pointing elsewhere.
+- **Option B:** add a new `config/storage.qnl.mongodb.json` pointing at `qnl_format_registry`, leave
+  the examples untouched, and repoint the 62 doc references. More edits, no behavioural surprise.
+
+**What you may do without approval:** wherever a document tells the reader to pass
+`storage.mongodb.example.json`, add a one-line warning that this example targets `format_registry`
+and that a production build populates `qnl_format_registry`. Do not edit the config files.
 
 ---
 
