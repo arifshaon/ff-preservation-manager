@@ -3,7 +3,7 @@ from __future__ import annotations
 from preservation_risk_manager.human_renderer_multi import render_human_response
 
 
-def test_human_researched_synthesis_keeps_registry_sources_primary_and_shows_web_verification():
+def test_human_ai_synthesis_keeps_registry_sources_and_reports_capability_use():
     governed = {
         "assessed": True,
         "semantic_level": "low",
@@ -24,32 +24,34 @@ def test_human_researched_synthesis_keeps_registry_sources_primary_and_shows_web
             }
         ],
     }
-    researched = {
+    ai_result = {
         "assessed": True,
         "semantic_level": "moderate",
         "semantic_label": "Moderate concern",
-        "method": "ai_web_research_assisted_synthesis",
+        "method": "ai_capability_driven_synthesis",
         "policy_id": "qnl-preservation-risk-synthesis",
         "policy_version": "1.0",
         "ai_assisted": True,
-        "web_researched": True,
         "governed_baseline": governed,
         "governed_baseline_relation": "higher_concern",
-        "rationale": "Current cited evidence qualifies the governed Low baseline.",
-        "verification_findings": [
+        "confidence": 0.82,
+        "rationale": "The supplied evidence plus current external context support Moderate concern.",
+        "capabilities_available": {"web_search": True},
+        "capabilities_used": {"web_search": True},
+        "considerations": [
             {
                 "finding": "Official current tooling remains available.",
-                "relationship_to_database": "supplements",
+                "basis": "mixed",
                 "risk_effect": "reduces_concern",
             },
             {
                 "finding": "Current preservation guidance identifies added complexity for some features.",
-                "relationship_to_database": "qualifies_or_updates",
+                "basis": "external_information",
                 "risk_effect": "raises_concern",
             },
         ],
-        "missing_evidence_policy": "exclude",
-        "numeric_aggregation": "forbidden_across_source_scales",
+        "quality_warnings": [],
+        "uncertainty": "External evidence does not rewrite the source-native NARA assessment.",
     }
     response = {
         "status": "ok",
@@ -60,7 +62,7 @@ def test_human_researched_synthesis_keeps_registry_sources_primary_and_shows_web
                 "label": "Acrobat PDF 1.7 - Portable Document Format",
                 "puids": ["fmt/276"],
             },
-            "overall_synthesized_risk": researched,
+            "overall_synthesized_risk": ai_result,
             "external_risk_context": {
                 "assessments": [
                     {
@@ -96,18 +98,19 @@ def test_human_researched_synthesis_keeps_registry_sources_primary_and_shows_web
         },
         "ai_synthesis": {
             "status": "ok",
-            "mode": "registry_first_web_research",
+            "mode": "capability_driven_ai_synthesis",
             "provider": {"provider": "azure_openai", "model": "test-model"},
-            "overall_synthesized_risk": researched,
-            "web_research": {
-                "search_queries": ["verify PDF 1.7 current preservation tooling"],
-                "citations": [
+            "overall_synthesized_risk": ai_result,
+            "external_capability": {
+                "capability_available": True,
+                "capability_invoked": True,
+                "web_search_used": True,
+                "sources": [
                     {"ref": "W001", "title": "Official tooling", "url": "https://example.org/tooling"},
                     {"ref": "W002", "title": "Preservation guidance", "url": "https://example.org/guidance"},
                 ],
-                "persisted": False,
             },
-            "authority_boundary": "Registry evidence remains primary; web research verifies or supplements it.",
+            "authority_boundary": "The AI result is returned alongside the governed baseline for the consumer to evaluate.",
         },
         "ai_risk_assessment": {
             "status": "synthesis_only",
@@ -126,11 +129,10 @@ def test_human_researched_synthesis_keeps_registry_sources_primary_and_shows_web
     assert "Synthesis role: governed baseline headline contributor" in text
     assert "DPC Global Bit List 2025" in text
     assert "Synthesis role: governed baseline broader-scope context" in text
-    assert "registry evidence was verified and supplemented using cited public-web research" in text
-    assert "configured synthesis was used as the governed baseline" in text
-    assert "qualifies or updates" in text
-    assert "Registry-first web verification was performed using 2 cited web source(s)" in text
+    assert "AI web-search capability: available; used by the model" in text
+    assert "model decided whether to use them" in text
+    assert "external information" in text
+    assert "Web search capability was available to the AI client; the model used it" in text
     assert "W001: Official tooling — https://example.org/tooling" in text
     assert "W002: Preservation guidance — https://example.org/guidance" in text
     assert "19 question" not in text
-    assert "independent" not in text.lower()
