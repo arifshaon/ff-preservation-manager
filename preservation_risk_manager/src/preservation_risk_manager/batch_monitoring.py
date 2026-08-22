@@ -78,9 +78,12 @@ def run_batch_assessment(
     ``fill-gaps`` preserves the older batched question-level evidence interpreter.
     The governed result remains available in every mode.
     """
-    cleaned = [normalize_input_format_id(value) for value in format_ids]
-    cleaned = [value for value in cleaned if value]
-    if not cleaned:
+    pairs = [
+        (str(original), normalize_input_format_id(original))
+        for original in format_ids
+    ]
+    pairs = [(original, normalized) for original, normalized in pairs if normalized]
+    if not pairs:
         raise ValueError("At least one format identifier is required.")
 
     ai_mode = str(ai_mode or "off").strip().lower()
@@ -100,9 +103,9 @@ def run_batch_assessment(
     items: list[dict[str, Any]] = []
     fill_gap_candidates: list[dict[str, Any]] = []
     fill_gap_assessments: list[dict[str, Any]] = []
-    total = len(cleaned)
+    total = len(pairs)
 
-    for index, (original, normalized) in enumerate(zip(format_ids, cleaned), start=1):
+    for index, (original, normalized) in enumerate(pairs, start=1):
         identification = resolver.resolve(normalized)
         if identification.resolved and identification.resolution.format_doc:
             format_doc = identification.resolution.format_doc
@@ -114,6 +117,11 @@ def run_batch_assessment(
             resolved_puid = puids[0] if puids else None
 
             if ai_mode == "synthesize" and response.get("status") == "ok":
+                if progress:
+                    progress(
+                        5 + int(((index - 0.45) / total) * 72),
+                        f"AI synthesis {index}/{total}: {original}",
+                    )
                 response = base._apply_ai_risk_assessment(
                     reader,
                     framework,
