@@ -62,6 +62,13 @@ def test_exact_puid_lookup_returns_that_format():
     assert result["matches"][0]["loc_ids"] == ["fdd000277"]
 
 
+def test_puid_lookup_normalizes_common_pronom_syntax():
+    result = lookup_puids(FakeReader(_rows()), "PRONOM fmt 276", limit=10)
+
+    assert result["normalized_query"] == "fmt/276"
+    assert result["matches"][0]["puid"] == "fmt/276"
+
+
 def test_name_lookup_returns_only_puid_backed_formats_and_applies_limit():
     result = lookup_puids(FakeReader(_rows()), "PDF", limit=2)
 
@@ -73,9 +80,10 @@ def test_name_lookup_returns_only_puid_backed_formats_and_applies_limit():
     assert "loc-fdd-no-puid" not in {row["canonical_id"] for row in result["matches"]}
 
 
-def test_lookup_can_search_mime_and_extension():
+def test_lookup_can_search_mime_and_dotted_extension():
     mime = lookup_puids(FakeReader(_rows()), "image/tiff", limit=10)
-    extension = lookup_puids(FakeReader(_rows()), "tiff", limit=10)
+    extension = lookup_puids(FakeReader(_rows()), ".tiff", limit=10)
 
     assert mime["matches"][0]["puid"] == "fmt/353"
+    assert extension["normalized_query"] == "tiff"
     assert extension["matches"][0]["puid"] == "fmt/353"
