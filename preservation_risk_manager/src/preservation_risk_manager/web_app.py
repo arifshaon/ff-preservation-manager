@@ -48,11 +48,11 @@ def _human_match_limit(config: WebRuntimeConfig) -> int:
 
     Human broad-format assessment already uses AIProviderConfig's
     ``human_format_assessment_limit``. Reuse that setting for the web lookup so
-    "PDF" behaves consistently across the Ask and PUID Lookup workflows. A web
-    app without AI configured still gets the same default of ten lookup rows.
+    "PDF" behaves consistently across the Ask and PUID Lookup workflows. When
+    no AI config is present, use the web runtime's ``human_match_limit``.
     """
     if not config.ai_config:
-        return 10
+        return max(1, int(config.human_match_limit))
     ai_cfg = base.load_ai_config(base._require_file(config.ai_config, label="AI config file"))
     return max(1, int(ai_cfg.human_format_assessment_limit))
 
