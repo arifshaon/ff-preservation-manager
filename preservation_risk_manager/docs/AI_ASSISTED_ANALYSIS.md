@@ -1,172 +1,233 @@
 # AI-assisted preservation analysis
 
-AI support is optional. When enabled, the Preservation Risk Manager supplies the model with controlled preservation context while keeping source records, deterministic calculations, and approved policy outside automatic AI write control.
+This is the technical reference for the Risk Manager's AI-assisted analysis layer. Provider setup for operators is documented in [`../../docs/AI_PROVIDERS.md`](../../docs/AI_PROVIDERS.md).
 
-The application owns:
+AI is optional. The application supplies the model with collected preservation evidence and methodology while keeping registry evidence, governed synthesis and write authority outside automatic model control.
+
+## Analysis layers
 
 ```text
-registry evidence and provenance
-format resolution
-framework questions
-controlled deterministic answers
-configured synthesis rules
-deterministic/config baseline
-gap/remediation logic
-policy approval boundaries
-MongoDB writes
+current registry evidence
+        |
+        v
+governed config synthesis   <- auditable application baseline
+        |
+        +--> framework/question diagnostics
+        |
+        v
+complete bounded AI context
+        |
+        v
+configured provider/model
+        |
+        v
+AI-assisted synthesis       <- separate advisory result
 ```
 
-The AI provider supplies analysis using the capabilities it actually exposes.
+The AI result may agree or disagree. It does not silently replace the governed baseline.
 
-## Supported provider styles
+## `--ai-mode synthesize`
 
-- Azure OpenAI
-- OpenAI-compatible hosted/local endpoints
+This is the primary overall-risk AI path.
 
-Provider-neutral setup details: [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md).
+The model receives:
 
-## Install AI support
+- resolved format identity;
+- governed source-level risk assessments;
+- source-native evidence;
+- approved criterion claims;
+- governed/config baseline;
+- active synthesis policy/methodology;
+- assessment framework/context.
 
-```powershell
-cd preservation_risk_manager
-python -m pip install -e ".[dev,ai]"
+The prompt asks for structured fields including:
+
+```text
+semantic_level
+confidence
+rationale
+database_evidence_refs
+considerations
+config_rules_considered
+governed_baseline_relation
+uncertainty
 ```
 
-## Configure a provider
+The application validates the returned level against the configured semantic vocabulary and deterministically checks the baseline relation. For example, Low vs Low is `same` even if model prose incorrectly reports `higher_concern`.
 
-Azure example:
+## Capability-driven behavior
 
-```powershell
-New-Item -ItemType Directory -Force config | Out-Null
-Copy-Item examples\ai.azure.example.json config\ai.local.json
+The core does not prescribe a mandatory research sequence.
+
+```text
+provider/model capabilities available
+        |
+        +--> expose supported capabilities when permitted
+        |
+        +--> model may use or decline them
+        |
+        v
+one final structured synthesis result
 ```
 
-Replace deployment/key placeholders locally. Do not commit real secrets.
+### Azure OpenAI
 
-Optional external-research domain controls are administrative only:
+The native Azure provider uses one Responses request for global/public synthesis and exposes `web_search` with automatic tool choice.
+
+The runtime audits:
+
+- whether hosted web search was available;
+- whether it was actually used;
+- search queries returned by the provider;
+- consulted URLs;
+- citation/source metadata when returned.
+
+### OpenAI-compatible endpoints
+
+The generic compatibility provider uses one structured Chat Completions request and advertises no provider-hosted web-search capability. A vendor-specific native provider can add richer search/grounding later without changing this core contract.
+
+## External information versus registry evidence
+
+AI must not turn external/model information into a false NARA, DPC, LOC, PRONOM or other source statement.
+
+The evidence package uses local references such as:
+
+```text
+R... governed/source risk assessment
+C... criterion claim
+S... source-native supporting evidence
+```
+
+External URLs returned by a provider are recorded separately.
+
+Evidence-reference fidelity is a quality/audit signal. Unknown references can be warned about/filtered rather than causing useful model output to become source evidence.
+
+## Missing evidence
+
+Missing information remains missing information.
+
+```text
+no supplied evidence
+!= Low
+!= Moderate
+!= High
+```
+
+Framework gaps can increase uncertainty/completeness concerns without automatically changing the governed source-level overall risk.
+
+## Privacy boundary
+
+When institution-scoped/private assessment evidence is present, public web-search tooling is suppressed for that synthesis call.
+
+The configured AI provider may still receive the assessment prompt. Provider selection/data handling remains an institutional deployment decision.
+
+## TPM-aware prompt budgeting
+
+Provider config can declare:
 
 ```json
-"external_research": {
-  "allowed_domains": [],
-  "blocked_domains": []
+{
+  "ai": {
+    "tokens_per_minute": 10000,
+    "max_output_tokens": 1200
+  }
 }
 ```
 
-There is no active `web_research.enabled` gate. If the configured provider exposes web/search capability, the application makes it available and the provider/model decides whether to use it.
+For structured overall synthesis, the runtime may reserve a larger output allowance than the generic helper setting so valid JSON is not cut off mid-object. The prompt budget shrinks correspondingly.
 
-## Validate configuration
+Current policy:
 
-```powershell
-python -m preservation_risk_manager.ai info `
-  --config config\ai.local.json
-```
+- structured output floor: up to 20% of TPM, capped at 2,000 tokens;
+- per-request output ceiling: 25% of TPM;
+- safety reserve: 15% of TPM, minimum 500 tokens;
+- remaining allowance: estimated prompt budget.
 
-Provider smoke test:
-
-```powershell
-python -m preservation_risk_manager.ai query `
-  --config config\ai.local.json `
-  --prompt "Reply with a short confirmation."
-```
-
-## Human-question routing
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What are the software dependency risks of PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
-```
-
-For natural-language routing, AI maps the request to a controlled application action. The canonical request is then executed by application code.
-
-## Overall synthesis: `--ai-mode synthesize`
-
-This is the main AI-assisted overall-risk path.
-
-The AI receives:
-
-- resolved format identity;
-- all relevant registry/source evidence;
-- source-native assessments;
-- criterion claims;
-- the deterministic/config synthesized risk;
-- the versioned synthesis configuration;
-- the QNL preservation-risk framework.
-
-The deterministic result is an auditable baseline, not a required AI answer.
-
-The AI may agree or disagree. If it differs, the structured output records the relationship to the governed baseline plus rationale, confidence and uncertainty.
-
-### Capability-driven behavior
-
-The application does not prescribe a mandatory research sequence.
+For 10,000 TPM / `max_output_tokens=1200` this normally gives:
 
 ```text
-AI provider available
-        |
-        +-- web/search supported -> capability made available automatically
-        |                         -> provider/model may use it or decline it
-        |
-        +-- web/search unsupported -> continue from supplied evidence
+generic helper output       1,200
+structured synthesis output 2,000
+safety reserve              1,500
+prompt budget               6,500
 ```
 
-A web capability failure does not automatically cancel the AI analysis. The model can still synthesize from the supplied context.
+The prompt builder prioritizes:
 
-See [`AI_RESEARCH_ASSISTED_SYNTHESIS.md`](AI_RESEARCH_ASSISTED_SYNTHESIS.md).
+1. governed/config-normalized source risk;
+2. governed criterion claims;
+3. source-native risk assessments;
+4. source-native sustainability/documentation evidence;
+5. other descriptive evidence.
 
-## Evidence and external-information separation
+Budget metadata records evidence supplied/omitted and whether compaction occurred.
 
-Source-native records remain source-native records. AI must not silently turn external/model information into a NARA, DPC, LOC or PRONOM statement.
+A static per-request budget cannot know other concurrent/shared provider usage, so it does not guarantee that a deployment will never return a rate-limit response.
 
-The result can record:
+## Response verbosity
 
-```text
-R... / C... / S...  supplied registry evidence refs
-W...                 external sources returned by provider capability
+Azure Responses verbosity is configurable:
+
+```json
+"response_verbosity": "medium"
 ```
 
-Evidence-reference use is preferred for audit but is not a hard acceptance gate. If the AI returns a useful assessment without explicitly referencing supplied registry refs, the result is returned with a quality warning so the consumer can decide whether it is sufficient.
+Allowed values in project config are `low`, `medium`, and `high`; provider/model support can differ. The default is `medium` because the validated deployment supports it.
 
-## Privacy boundary for public search
+The synthesis prompt separately asks for concise rationale/considerations.
 
-Institution-scoped/private operational evidence is excluded from the public-search capability context.
+## Exact AI input logging
 
-The final AI model call can still receive the full assessment context through the configured AI provider, but public web grounding receives only public/global format evidence and public format identity.
+Opt in with:
+
+```json
+"input_log_file": "logs/ai-inputs.jsonl"
+```
+
+The provider wrapper appends the actual post-budget request handed to the model, including messages, structured-output schema, token allowance and capability options.
+
+Credentials are not logged, but prompt/evidence content can be sensitive. Protect this file and do not commit it.
+
+## Quality warnings
+
+A useful model result is not automatically rejected because:
+
+- web capability was available but not used;
+- it omitted explicit database evidence refs;
+- it returned an unknown evidence ref alongside valid evidence;
+- prose was more cautious than its semantic level.
+
+The application retains quality warnings so the consumer can judge the result while preserving the governed baseline.
 
 ## `fill-gaps`
 
-`fill-gaps` remains a narrower question-level workflow:
+`fill-gaps` is the older/narrower question-level interpretation workflow:
 
-- deterministic derivation runs first;
-- unresolved/ambiguous questions may be interpreted by AI;
-- framework-declared answer IDs are used;
-- fabricated evidence references are rejected;
-- deterministic resolved answers are not silently replaced.
+```text
+deterministic framework derivation
+ -> only unresolved/ambiguous questions
+ -> bounded AI interpretation
+```
 
-This workflow is distinct from capability-driven overall synthesis.
+It does not replace already-resolved deterministic answers and is not the primary periodic overall-risk synthesis mode.
 
 ## `review-all`
 
-`review-all` is for calibration and QA. It presents a raw-source-oriented review view and compares controlled AI answers with deterministic answers.
+`review-all` is a calibration/QA mode that compares AI interpretation of supplied raw/source evidence with deterministic framework answers. Divergence is a review signal, not an automatic policy/mapping change.
 
-A divergence is a review signal; it does not automatically change mappings, deterministic scoring or policy.
-
-## Data-integrity rules
+## Authority boundary
 
 AI-assisted analysis does not automatically:
 
-1. rewrite canonical registry data;
-2. rewrite NARA/DPC/LOC/PRONOM source-native records;
-3. change reviewed source mappings;
-4. persist new external findings as approved evidence;
-5. overwrite the deterministic/config baseline;
-6. convert missing evidence into Low risk.
+1. rewrite canonical identity;
+2. rewrite source-native records;
+3. approve/change mappings;
+4. persist web/model findings as source evidence;
+5. overwrite governed synthesis;
+6. convert missing evidence into Low risk;
+7. write institutional policy.
 
-The AI-assisted result is returned alongside the governed baseline for the consumer to evaluate.
-
-## Example overall-risk command
+## Main command
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -177,34 +238,10 @@ python -m preservation_risk_manager ask `
   --ai-mode synthesize
 ```
 
-Expected output distinguishes:
+## Related documentation
 
-```text
-AI-assisted synthesized risk
-Governed/config baseline
-source assessments
-AI rationale
-capabilities available
-capabilities actually used
-external sources if returned
-quality warnings
-uncertainty
-```
-
-## Choosing a mode
-
-| Need | Mode |
-| --- | --- |
-| Natural-language routing only | `ask` with AI mode off |
-| AI-assisted overall synthesized risk | `--ai-mode synthesize` |
-| Interpret unresolved framework questions | `--ai-mode fill-gaps` |
-| Calibration/QA review | `--ai-mode review-all` |
-| Deterministic engine only | `query-json` / `analyze-format` without AI |
-
-## Related docs
-
-- [`AI_RESEARCH_ASSISTED_SYNTHESIS.md`](AI_RESEARCH_ASSISTED_SYNTHESIS.md)
-- [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
-- [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
-- [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
-- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- Operator/provider setup: [`../../docs/AI_PROVIDERS.md`](../../docs/AI_PROVIDERS.md)
+- Risk terminology/governance: [`RISK_SYNTHESIS_AND_TERMINOLOGY.md`](RISK_SYNTHESIS_AND_TERMINOLOGY.md)
+- AI provider developer contract: [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
+- Input logging: [`AI_INPUT_LOGGING.md`](AI_INPUT_LOGGING.md)
+- Monitoring/batch reports: [`RISK_MONITORING_AND_REPORTING.md`](RISK_MONITORING_AND_REPORTING.md)
