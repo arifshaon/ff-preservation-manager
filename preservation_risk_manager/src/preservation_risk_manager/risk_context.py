@@ -4,17 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from preservation_risk_manager.data_access import RegistryReader
-
-
-_SCOPE_SPECIFICITY = {
-    "exact_format": 5,
-    "format_family": 4,
-    "family": 4,
-    "format_group": 3,
-    "group": 3,
-    "content_type": 2,
-    "contextual": 1,
-}
+from preservation_risk_manager.synthesis_policy import SynthesisPolicy, load_synthesis_policy, synthesize_assessments
 
 
 def _is_current(row: dict[str, Any]) -> bool:
@@ -69,23 +59,21 @@ def _compact_assessment(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in result.items() if value is not None}
 
 
-def _scope_rank(row: dict[str, Any]) -> int:
-    return _SCOPE_SPECIFICITY.get(str(row.get("scope_type") or "").lower(), 0)
-
-
 def build_external_risk_context(
     reader: RegistryReader,
     format_doc: dict[str, Any],
+    *,
+    synthesis_policy: SynthesisPolicy | None = None,
 ) -> dict[str, Any]:
-    """Return governed external risk assessments without changing framework scoring.
+    """Return source-native risk assessments plus config-driven synthesis.
 
-    ``risk_assessment_claims`` are source-native assessments such as NARA and DPC.
-    They are intentionally exposed alongside the QNL framework result rather than
-    converted into framework question answers or averaged into the framework score.
-    Scope is preserved so an exact-format assessment can coexist with broader
-    family/group context without either silently overriding the other.
+    ``risk_assessment_claims`` remain source-native governed evidence. They are
+    never converted into framework-question answers or numerically averaged. The
+    versioned synthesis policy controls normalization, scope precedence, missing
+    evidence handling, same-scope aggregation and broader-scope context behavior.
     """
 
+    policy = synthesis_policy or load_synthesis_policy()
     claims: list[dict[str, Any]] = []
     seen: set[str] = set()
     canonical_ids = reader.criterion_claim_canonical_ids(format_doc)
@@ -100,9 +88,10 @@ def build_external_risk_context(
             claims.append(row)
 
     assessments = [_compact_assessment(row) for row in claims]
+    unspecified_rank = len(policy.synthesis["scope_precedence"])
     assessments.sort(
         key=lambda row: (
-            -_scope_rank(row),
+            policy.scope_rank.get(str(row.get("scope_type") or ""), unspecified_rank),
             str(row.get("source_label") or row.get("source_id") or ""),
             str(row.get("source_record_id") or ""),
         )
@@ -119,9 +108,12 @@ def build_external_risk_context(
         if row.get("scope_type")
     })
 
-    synthesized = format_doc.get("synthesized_risk")
-    if not isinstance(synthesized, dict):
-        synthesized = {}
+    registry_synthesized = format_doc.get("synthesized_risk")
+    if not isinstance(registry_synthesized, dict):
+        registry_synthesized = {}
+    policy_synthesized = synthesize_assessments(assessments, policy)
+    registry_level = registry_synthesized.get("semantic_level")
+    policy_level = policy_synthesized.get("semantic_level")
 
     return {
         "assessment_count": len(assessments),
@@ -130,7 +122,20 @@ def build_external_risk_context(
         "semantic_levels": semantic_levels,
         "scope_types": scope_types,
         "scoped_divergence": len(semantic_levels) > 1,
-        "registry_synthesized_risk": deepcopy(synthesized),
-        "scoring_effect": "context_only",
-        "aggregation_policy": "do_not_average_external_assessments",
+        "synthesis_policy": policy.summary(),
+        "policy_synthesized_risk": policy_synthesized,
+        "registry_synthesized_risk": deepcopy(registry_synthesized),
+        "registry_synthesis_parity": {
+            "registry_level": registry_level,
+            "policy_level": policy_level,
+            "semantic_level_match": registry_level == policy_level,
+        },
+        "scoring_effect": "separate_overall_source_risk",
+        "aggregation_policy": {
+            "missing_assessment_policy": policy.synthesis["missing_assessment_policy"],
+            "scope_selection": policy.synthesis["scope_selection"],
+            "same_scope_aggregation": policy.synthesis["same_scope_aggregation"],
+            "broader_scope_policy": policy.synthesis["broader_scope_policy"],
+            "numeric_aggregation": policy.synthesis["numeric_aggregation"],
+        },
     }
