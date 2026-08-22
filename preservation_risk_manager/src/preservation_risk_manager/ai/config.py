@@ -41,29 +41,6 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _effective_output_tokens(
-    requested: int | None,
-    tokens_per_minute: int | None,
-) -> int | None:
-    """Return a TPM-aware output allowance suitable for structured synthesis.
-
-    Very small output caps can truncate an otherwise valid JSON-schema response
-    mid-string. When a provider TPM limit is known, reserve up to 20% of the
-    minute budget for structured output (capped at 2,000 tokens) while keeping a
-    hard ceiling of 25% of TPM for any one response. The input budgeter then
-    shrinks prompt context to compensate, so the combined request still respects
-    the configured deployment quota.
-    """
-    if tokens_per_minute is None:
-        return requested
-
-    tpm = int(tokens_per_minute)
-    requested_tokens = int(requested or 1200)
-    structured_floor = min(2000, max(600, int(tpm * 0.20)))
-    per_request_ceiling = max(256, int(tpm * 0.25))
-    return min(max(requested_tokens, structured_floor), per_request_ceiling)
-
-
 @dataclass(frozen=True)
 class AIProviderConfig:
     provider: str
@@ -100,14 +77,13 @@ class AIProviderConfig:
         if tokens_per_minute is not None and tokens_per_minute <= 0:
             raise AIConfigurationError("AI configuration 'tokens_per_minute' must be greater than zero.")
 
-        requested_max_output_tokens = (
+        max_output_tokens = (
             int(data["max_output_tokens"])
             if data.get("max_output_tokens") is not None
             else None
         )
-        if requested_max_output_tokens is not None and requested_max_output_tokens <= 0:
+        if max_output_tokens is not None and max_output_tokens <= 0:
             raise AIConfigurationError("AI configuration 'max_output_tokens' must be greater than zero.")
-        max_output_tokens = _effective_output_tokens(requested_max_output_tokens, tokens_per_minute)
 
         # ``human_ai_format_limit`` was the first name introduced for this
         # setting. Preserve it as a compatibility alias, but the setting now
@@ -162,6 +138,23 @@ class AIProviderConfig:
         return self.human_format_assessment_limit
 
     @property
+    def synthesis_max_output_tokens(self) -> int | None:
+        """TPM-aware response allowance used only for structured overall synthesis.
+
+        A small generic ``max_output_tokens`` remains appropriate for request
+        routing and other AI helpers. Structured synthesis needs enough room to
+        finish valid JSON, so when TPM is known it may reserve a larger response
+        allowance and let the synthesis prompt budget shrink correspondingly.
+        """
+        if self.tokens_per_minute is None:
+            return self.max_output_tokens
+        tpm = int(self.tokens_per_minute)
+        requested = int(self.max_output_tokens or 1200)
+        structured_floor = min(2000, max(600, int(tpm * 0.20)))
+        per_request_ceiling = max(256, int(tpm * 0.25))
+        return min(max(requested, structured_floor), per_request_ceiling)
+
+    @property
     def external_research_allowed_domains(self) -> tuple[str, ...]:
         """Current-name alias for the retained web_research compatibility field."""
         return self.web_research_allowed_domains
@@ -204,6 +197,7 @@ class AIProviderConfig:
             "model": self.model,
             "temperature": self.temperature,
             "max_output_tokens": self.max_output_tokens,
+            "synthesis_max_output_tokens": self.synthesis_max_output_tokens,
             "tokens_per_minute": self.tokens_per_minute,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
