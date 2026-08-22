@@ -8,15 +8,16 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from preservation_risk_manager import integration_cli as base
+from preservation_risk_manager.web_batch_service import run_batch_web_job
 from preservation_risk_manager.web_jobs import JobManager
 from preservation_risk_manager.web_reports import combine_format_id_inputs
-from preservation_risk_manager.web_service import WebRuntimeConfig, run_batch_web_job, run_human_web_job
-from preservation_risk_manager.web_ui import INDEX_HTML
+from preservation_risk_manager.web_service import WebRuntimeConfig, run_human_web_job
+from preservation_risk_manager.web_ui_curator import INDEX_HTML
 
 
 class HumanJobRequest(BaseModel):
     question: str = Field(min_length=1, max_length=8000)
-    ai_mode: Literal["off", "fill-gaps", "review-all"] = "fill-gaps"
+    ai_mode: Literal["off", "synthesize", "fill-gaps", "review-all"] = "synthesize"
     enable_ai_identification: bool = True
     scope: Literal["global", "institution"] = "global"
     institution_id: str | None = None
@@ -27,7 +28,7 @@ class BatchJobRequest(BaseModel):
     ids_text: str = ""
     uploaded_text: str = ""
     uploaded_filename: str | None = None
-    ai_mode: Literal["off", "fill-gaps"] = "off"
+    ai_mode: Literal["off", "synthesize", "fill-gaps"] = "off"
     scope: Literal["global", "institution"] = "global"
     institution_id: str | None = None
 
@@ -50,7 +51,7 @@ def create_app(
     job_manager = manager or JobManager(config.jobs_dir, max_workers=config.max_workers)
     app = FastAPI(
         title="QNL Preservation Risk Manager",
-        version="0.1.0",
+        version="0.2.0",
         docs_url="/api/docs",
         redoc_url=None,
     )
@@ -73,6 +74,7 @@ def create_app(
         if config.ai_config:
             ai_cfg = base.load_ai_config(base._require_file(config.ai_config, label="AI config file"))
             human_limit = int(ai_cfg.human_format_assessment_limit)
+        policy = base.load_synthesis_policy()
         return {
             "framework": Path(config.framework).name,
             "framework_id": framework.framework_id,
@@ -84,6 +86,7 @@ def create_app(
             "human_format_assessment_limit": human_limit,
             "batch_max_formats": int(config.batch_max_formats),
             "max_workers": int(config.max_workers),
+            "synthesis_policy": policy.summary(),
         }
 
     @app.get("/api/jobs")
@@ -133,7 +136,7 @@ def create_app(
         ):
             raise HTTPException(status_code=400, detail="Institution scope requires an institution ID.")
         if payload["ai_mode"] != "off" and not config.ai_config:
-            raise HTTPException(status_code=400, detail="AI fill-gaps is not configured for this web application.")
+            raise HTTPException(status_code=400, detail="AI synthesis is not configured for this web application.")
         worker_payload = {
             "format_ids": format_ids,
             "ai_mode": payload["ai_mode"],
@@ -165,6 +168,7 @@ def create_app(
         media = {
             ".csv": "text/csv",
             ".json": "application/json",
+            ".html": "text/html",
             ".txt": "text/plain",
             ".zip": "application/zip",
         }.get(path.suffix.lower(), "application/octet-stream")
