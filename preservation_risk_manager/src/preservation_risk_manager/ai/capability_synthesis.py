@@ -23,7 +23,9 @@ _USER_INSTRUCTION = (
     "Using the supplied evidence, methodology, deterministic baseline, and any capabilities available to you, return "
     "your synthesized preservation-risk analysis. The deterministic baseline is context, not a required answer: if "
     "you differ, explain why. If you obtain information externally, distinguish it clearly from supplied registry "
-    "evidence. Do not invent evidence for missing sources."
+    "evidence. Do not invent evidence for missing sources. Keep the structured response concise: use no more than five "
+    "material considerations, keep each finding to one sentence, keep the rationale to at most four short sentences, "
+    "and keep uncertainty to at most two short sentences."
 )
 
 _EVIDENCE_KEYS = (
@@ -231,22 +233,23 @@ def _token_budget(provider: AIProvider) -> dict[str, Any]:
     config = _provider_config(provider)
     configured_tpm = getattr(config, "tokens_per_minute", None) if config is not None else None
     configured_output = getattr(config, "max_output_tokens", None) if config is not None else None
+    synthesis_output = (
+        getattr(config, "synthesis_max_output_tokens", configured_output)
+        if config is not None
+        else configured_output
+    )
     if configured_tpm is None:
         return {
             "configured_tokens_per_minute": None,
             "configured_max_output_tokens": configured_output,
-            "effective_max_output_tokens": configured_output,
+            "effective_max_output_tokens": synthesis_output,
             "safety_reserve_tokens": None,
             "prompt_budget_tokens": None,
             "estimation_method": "conservative_character_estimate_3_chars_per_token",
         }
 
     tpm = int(configured_tpm)
-    requested_output = int(configured_output or 1200)
-    # Do not allow one response reservation to consume an excessive portion of
-    # a low-TPM deployment. This affects only the AI response allowance; it does
-    # not change source data or deterministic assessment behavior.
-    effective_output = min(requested_output, max(256, int(tpm * 0.20)))
+    effective_output = int(synthesis_output or configured_output or 1200)
     safety = max(500, int(tpm * 0.15))
     prompt_budget = tpm - effective_output - safety
     if prompt_budget < 800:
