@@ -46,19 +46,34 @@ class _RateLimitCircuitProvider:
     def capabilities(self):
         return getattr(self.delegate, "capabilities", None)
 
+    @property
+    def config(self):
+        return getattr(self.delegate, "config", None)
+
     def describe(self):
         return self.delegate.describe()
 
-    def generate(self, request):
+    def _call_with_rate_limit_guard(self, method, *args, **kwargs):
         if self.rate_limited:
             raise AIProviderError("AI rate-limit circuit is open for this human request.")
         try:
-            return self.delegate.generate(request)
+            return method(*args, **kwargs)
         except AIProviderError as exc:
             if _is_rate_limit_error(exc):
                 self.rate_limited = True
                 self.rate_limit_error = "429 Too Many Requests"
             raise
+
+    def generate(self, request):
+        return self._call_with_rate_limit_guard(self.delegate.generate, request)
+
+    def research_web(self, prompt, *, allowed_domains=(), blocked_domains=()):
+        return self._call_with_rate_limit_guard(
+            self.delegate.research_web,
+            prompt,
+            allowed_domains=allowed_domains,
+            blocked_domains=blocked_domains,
+        )
 
 
 def _programmatic_simple_risk_route(
