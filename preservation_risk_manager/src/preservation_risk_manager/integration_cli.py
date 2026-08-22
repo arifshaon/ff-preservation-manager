@@ -11,6 +11,7 @@ from preservation_risk_manager.ai import (
     derive_answers_with_ai,
     load_ai_config,
     review_answers_with_ai,
+    synthesize_with_ai,
 )
 from preservation_risk_manager.ai.request_router import route_natural_language_request
 from preservation_risk_manager.answer_derivation import derive_answers
@@ -27,6 +28,7 @@ from preservation_risk_manager.human_renderer import render_human_response
 from preservation_risk_manager.request_api import RequestValidationError, execute_request, normalize_request
 from preservation_risk_manager.scoring import score_answers
 from preservation_risk_manager.source_evidence import build_ai_source_evidence
+from preservation_risk_manager.synthesis_policy import load_synthesis_policy
 
 
 def _require_file(path: str | Path, *, label: str) -> Path:
@@ -107,19 +109,20 @@ def _add_identification_args(parser: argparse.ArgumentParser, *, machine_mode: b
 def _add_ai_risk_args(parser: argparse.ArgumentParser, *, machine_mode: bool) -> None:
     parser.add_argument(
         "--ai-mode",
-        choices=("off", "fill-gaps", "review-all"),
+        choices=("off", "synthesize", "fill-gaps", "review-all"),
         default="off",
         help=(
-            "Optional AI-assisted risk assessment after canonical format resolution. 'fill-gaps' interprets only "
-            "unresolved/ambiguous evidence; 'review-all' independently reviews raw evidence without replacing "
-            "deterministic scoring inputs. Default: off."
+            "Optional AI assistance after canonical format resolution. 'synthesize' performs only policy-guided "
+            "overall risk synthesis; 'fill-gaps' also interprets unresolved framework questions; 'review-all' "
+            "independently reviews framework evidence. All enabled modes use the versioned synthesis policy and "
+            "bounded registry evidence. Default: off."
         ),
     )
     parser.add_argument(
         "--max-ai-evidence-items",
         type=_positive_int,
         default=20,
-        help="Maximum evidence items supplied to AI per framework question. Default: 20.",
+        help="Maximum evidence items supplied to AI per framework question. Overall synthesis receives a bounded multiple of this value. Default: 20.",
     )
     if machine_mode:
         parser.add_argument(
@@ -368,7 +371,7 @@ def _apply_ai_risk_assessment(
     ai_mode: str,
     max_evidence_items: int,
 ) -> dict[str, Any]:
-    """Attach AI-assisted risk analysis after a canonical single-format assessment."""
+    """Attach policy-guided AI synthesis and optional question-level AI analysis."""
     if ai_mode == "off" or response.get("status") != "ok":
         return response
     if str(request.get("action") or "").strip() != "assess_format":
@@ -418,6 +421,48 @@ def _apply_ai_risk_assessment(
     )
     pack["ai_source_evidence"] = source_evidence
 
+    result_payload = response.get("result") if isinstance(response.get("result"), dict) else {}
+    external_context = result_payload.get("external_risk_context") if isinstance(result_payload, dict) else {}
+    if not isinstance(external_context, dict):
+        external_context = {}
+
+    policy = load_synthesis_policy()
+    try:
+        ai_synthesis = synthesize_with_ai(
+            provider,
+            format_context=pack.get("format") or {},
+            policy=policy,
+            risk_assessments=[
+                dict(item) for item in external_context.get("assessments") or [] if isinstance(item, dict)
+            ],
+            criterion_claims=[dict(item) for item in claims if isinstance(item, dict)],
+            source_evidence=[dict(item) for item in source_evidence if isinstance(item, dict)],
+            max_evidence_items=max(40, max_items * 4),
+        )
+        response["ai_synthesis"] = ai_synthesis
+        if isinstance(result_payload, dict):
+            result_payload["overall_synthesized_risk"] = ai_synthesis.get("overall_synthesized_risk")
+    except Exception as exc:
+        response["ai_synthesis"] = {
+            "status": "error_config_synthesis_retained",
+            "ai_mode": ai_mode,
+            "provider": provider.describe(),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "overall_synthesized_risk": external_context.get("policy_synthesized_risk"),
+            "authority_boundary": "AI synthesis failed; the config-driven deterministic synthesis remains authoritative.",
+        }
+        if isinstance(result_payload, dict):
+            result_payload["overall_synthesized_risk"] = external_context.get("policy_synthesized_risk")
+
+    if ai_mode == "synthesize":
+        response["ai_risk_assessment"] = {
+            "status": "not_requested_synthesis_only",
+            "ai_mode": ai_mode,
+            "deterministic_analysis": deterministic_analysis,
+        }
+        return response
+
     try:
         if ai_mode == "review-all":
             ai_answers = review_answers_with_ai(
@@ -454,9 +499,10 @@ def _apply_ai_risk_assessment(
             "analysis": ai_analysis,
             "derived_answers": ai_answers,
             "authority_boundary": (
-                "Deterministic answers and scores use approved criterion evidence only. AI may additionally interpret "
-                "bounded source-native evidence for unresolved questions; it cannot replace deterministically resolved "
-                "answers, change framework governance, or create policy."
+                "Question-level deterministic answers and scores use approved criterion evidence only. AI may "
+                "additionally interpret bounded source-native evidence for unresolved questions; it cannot replace "
+                "deterministically resolved answers, change framework governance, or create policy. Overall source "
+                "risk synthesis is handled separately through the versioned synthesis policy."
             ),
         }
     except Exception as exc:
