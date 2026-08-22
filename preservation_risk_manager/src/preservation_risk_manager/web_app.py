@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,7 @@ from preservation_risk_manager import integration_cli as base
 from preservation_risk_manager.web_batch_service import run_batch_web_job
 from preservation_risk_manager.web_human_service import run_human_web_job
 from preservation_risk_manager.web_jobs import JobManager
+from preservation_risk_manager.web_lookup_service import lookup_web_puids
 from preservation_risk_manager.web_reports import combine_format_id_inputs
 from preservation_risk_manager.web_service import WebRuntimeConfig
 from preservation_risk_manager.web_ui_curator import INDEX_HTML
@@ -41,20 +43,44 @@ def _job_or_404(manager: JobManager, job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found") from exc
 
 
+def _human_match_limit(config: WebRuntimeConfig) -> int:
+    """Return the configured human/lookup result limit.
+
+    Human broad-format assessment already uses AIProviderConfig's
+    ``human_format_assessment_limit``. Reuse that setting for the web lookup so
+    "PDF" behaves consistently across the Ask and PUID Lookup workflows. A web
+    app without AI configured still gets the same default of ten lookup rows.
+    """
+    if not config.ai_config:
+        return 10
+    ai_cfg = base.load_ai_config(base._require_file(config.ai_config, label="AI config file"))
+    return max(1, int(ai_cfg.human_format_assessment_limit))
+
+
 def create_app(
     config: WebRuntimeConfig,
     *,
     manager: JobManager | None = None,
     human_runner: Callable[..., dict[str, Any]] = run_human_web_job,
     batch_runner: Callable[..., dict[str, Any]] = run_batch_web_job,
+    lookup_runner: Callable[..., dict[str, Any]] = lookup_web_puids,
 ) -> FastAPI:
     config.validate()
     job_manager = manager or JobManager(config.jobs_dir, max_workers=config.max_workers)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            job_manager.shutdown(wait=False)
+
     app = FastAPI(
         title="QNL Preservation Risk Manager",
-        version="0.2.0",
+        version="0.3.0",
         docs_url="/api/docs",
         redoc_url=None,
+        lifespan=lifespan,
     )
     app.state.job_manager = job_manager
     app.state.runtime_config = config
@@ -70,11 +96,8 @@ def create_app(
     @app.get("/api/config")
     def safe_config() -> dict[str, Any]:
         framework = base.load_framework(base._require_file(config.framework, label="Framework file"))
-        human_limit = 10
         ai_configured = bool(config.ai_config)
-        if config.ai_config:
-            ai_cfg = base.load_ai_config(base._require_file(config.ai_config, label="AI config file"))
-            human_limit = int(ai_cfg.human_format_assessment_limit)
+        human_limit = _human_match_limit(config)
         policy = base.load_synthesis_policy()
         return {
             "framework": Path(config.framework).name,
@@ -85,10 +108,22 @@ def create_app(
             "registry_backend": "mongo/storage" if config.storage_config else "registry-json",
             "ai_configured": ai_configured,
             "human_format_assessment_limit": human_limit,
+            "puid_lookup_limit": human_limit,
             "batch_max_formats": int(config.batch_max_formats),
             "max_workers": int(config.max_workers),
             "synthesis_policy": policy.summary(),
         }
+
+    @app.get("/api/formats/lookup")
+    def lookup_formats(
+        q: str = Query(min_length=1, max_length=500, description="Format name, PRONOM PUID, MIME type, extension, or identifier"),
+    ) -> dict[str, Any]:
+        try:
+            return lookup_runner(config, q, limit=_human_match_limit(config))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"PUID lookup failed: {exc}") from exc
 
     @app.get("/api/jobs")
     def list_jobs(limit: int = 25) -> list[dict[str, Any]]:
@@ -174,9 +209,5 @@ def create_app(
             ".zip": "application/zip",
         }.get(path.suffix.lower(), "application/octet-stream")
         return FileResponse(path, filename=path.name, media_type=media)
-
-    @app.on_event("shutdown")
-    def shutdown_jobs() -> None:
-        job_manager.shutdown(wait=False)
 
     return app
