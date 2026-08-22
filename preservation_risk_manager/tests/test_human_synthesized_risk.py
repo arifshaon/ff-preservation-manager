@@ -99,31 +99,50 @@ def test_normal_risk_question_leads_with_source_synthesis_not_missing_framework_
     assert "matches the existing locked MongoDB synthesis" in text
 
 
-def test_synthesis_only_mode_reports_real_ai_synthesis_not_question_ai_placeholder():
+def test_synthesis_only_mode_reports_ai_result_and_capability_use_separately_from_baseline():
     response = _base_response()
-    response["result"]["overall_synthesized_risk"] = {
-        **response["result"]["external_risk_context"]["policy_synthesized_risk"],
-        "ai_consulted": True,
-        "ai_assisted": False,
-        "ai_rationale": "Configured source mappings already determine the result.",
+    governed = response["result"]["external_risk_context"]["policy_synthesized_risk"]
+    ai_result = {
+        "assessed": True,
+        "semantic_level": "moderate",
+        "semantic_label": "Moderate concern",
+        "method": "ai_capability_driven_synthesis",
+        "ai_assisted": True,
+        "confidence": 0.75,
+        "governed_baseline": governed,
+        "governed_baseline_relation": "higher_concern",
+        "capabilities_available": {"web_search": True},
+        "capabilities_used": {"web_search": False},
+        "rationale": "The AI considered the supplied registry evidence and methodology context.",
+        "considerations": [],
+        "quality_warnings": [],
+        "uncertainty": "No external search was used.",
     }
+    response["result"]["overall_synthesized_risk"] = ai_result
     response["ai_synthesis"] = {
         "status": "ok",
+        "mode": "capability_driven_ai_synthesis",
         "provider": {"provider": "azure_openai", "model": "test"},
-        "ai_interpreted_assessments": [],
-        "ai": {"proposed_overall_level": "low"},
-        "overall_synthesized_risk": response["result"]["overall_synthesized_risk"],
-        "authority_boundary": "Configured mappings remain binding.",
+        "overall_synthesized_risk": ai_result,
+        "external_capability": {
+            "capability_available": True,
+            "capability_invoked": True,
+            "web_search_used": False,
+            "sources": [],
+        },
+        "authority_boundary": "The consumer decides how to use the AI result; the governed baseline remains auditable.",
     }
     response["ai_risk_assessment"] = {
-        "status": "not_requested_synthesis_only",
+        "status": "synthesis_only",
         "ai_mode": "synthesize",
     }
 
     text = render_human_response(response)
 
-    assert "AI consulted: yes" in text
-    assert "AI synthesis\n- Status: ok." in text
-    assert "AI was consulted, but no configured source assessment required AI interpretation" in text
-    assert "Final policy-governed overall level: low." in text
+    assert "Overall synthesized preservation risk\nModerate concern" in text
+    assert "Governed config baseline: Low concern" in text
+    assert "AI web-search capability: available; not used by the model" in text
+    assert "AI-assisted synthesis\n- Status: ok." in text
+    assert "AI-assisted synthesized level: moderate." in text
+    assert "Web search capability was available to the AI client; the model did not use it." in text
     assert "not_requested_synthesis_only" not in text
