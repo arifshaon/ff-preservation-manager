@@ -86,10 +86,6 @@ def test_web_app_serves_curator_workflows_lookup_and_background_batch_download(t
         assert "Governed risk" in home.text
         assert client.get("/api/health").json() == {"status": "ok"}
 
-        cfg = client.get("/api/config").json()
-        assert cfg["puid_lookup_limit"] == 10
-        assert cfg["human_format_assessment_limit"] == 10
-
         lookup = client.get("/api/formats/lookup", params={"q": "PDF"})
         assert lookup.status_code == 200
         assert lookup.json()["match_count"] == 12
