@@ -76,6 +76,7 @@
     "numeric_aggregation": "forbidden_across_source_scales"
   },
   "ai": {
+    "version": "2.0",
     "enabled_when_ai_mode_is_on": true,
     "strategy": "capability_driven_contextual_synthesis",
     "registry_evidence_role": "primary_supplied_context",
