@@ -1,145 +1,110 @@
-# AI Research-Assisted Preservation-Risk Synthesis
+# AI Capability-Driven Preservation-Risk Synthesis
 
 ## Purpose
 
-When AI web research is enabled, the Preservation Risk Manager does **not** ask the model to independently determine the preservation risk of a format from scratch.
+When AI mode is enabled, the Preservation Risk Manager gives the AI client the preservation context already assembled by the application:
 
-The collected registry evidence remains the primary evidence base. AI web research is an augmentation layer used to verify, qualify, update, or supplement that evidence before producing an AI-assisted synthesis.
+- resolved canonical format identity;
+- governed source-level risk assessments;
+- source-native evidence;
+- approved criterion claims;
+- the deterministic/config synthesis;
+- the QNL synthesis configuration;
+- the preservation-risk question framework.
 
-The workflow is:
+The application does **not** prescribe a mandatory research sequence and does not require the AI to reproduce the deterministic result.
+
+The AI client may use whatever capabilities it actually exposes. If web search is available, the capability is made available automatically and the provider/model decides whether to use it. If web search is unavailable, unsupported, fails, or is simply not useful, the AI can still analyse the supplied evidence.
+
+## Workflow
 
 ```text
 MongoDB / governed registry evidence
         |
         v
-Config-driven normalization and synthesis
+Config-driven deterministic synthesis
         |
-        |  governed baseline
+        |  auditable baseline
         v
-AI web research (explicit opt-in)
+Complete AI context
+  - registry evidence
+  - source-native findings
+  - framework
+  - synthesis configuration
+  - deterministic baseline
         |
-        |-- verify source accuracy/currentness
-        |-- confirm or qualify existing findings
-        |-- find current supporting evidence for material gaps
-        |-- retain URLs/citations
         v
-Policy-guided AI synthesis
+Configured AI client
         |
+        |-- web/search capability available? make it available
+        |-- provider/model may use it or decline it
+        |-- other model capabilities may also inform analysis
         v
 AI-assisted synthesized risk
-+ governed baseline
-+ source-native assessments
-+ verification findings
-+ web citations
+        |
+        +-- confidence / rationale / uncertainty
+        +-- relation to governed baseline
+        +-- registry refs when supplied by model
+        +-- external sources when returned
+        +-- capability availability/use audit
 ```
 
-This is deliberately **not**:
+The deterministic/config result and AI-assisted result remain separate and visible so the consumer can decide how to use them.
 
-```text
-format name -> AI general knowledge -> independent risk opinion
-```
+## What is not prescribed
 
-and it is not a generic web search for "the risk of PDF".
+The application does not tell the AI that it must:
 
-## Governed baseline remains visible
+- browse the web;
+- run a fixed set of searches;
+- cite both a registry ref and a web ref before its result can be returned;
+- agree with the deterministic/config result;
+- apply the deterministic source mappings as binding rules on its own synthesized conclusion.
 
-Before any web research, the normal versioned synthesis policy is applied to the source assessments already available in the registry.
+Instead, those mappings and rules are supplied as methodology context. If the AI differs from the governed baseline, it should explain why.
 
-That baseline continues to preserve the established rules:
+## Data-integrity boundaries
 
-- missing sources contribute nothing;
-- source-native values are retained;
-- configured source mappings are binding;
-- the most-specific populated assessment scope determines the baseline headline;
-- same-scope disagreement uses the configured conservative semantic upper bound;
-- broader scopes remain context;
-- heterogeneous native numeric scales are never averaged.
+AI freedom does not mean source data is rewritten.
 
-The web-researched result may be different from the governed baseline when current cited evidence materially confirms, contradicts, qualifies, updates, or supplements the evidence base. The baseline is retained in the result so the change remains auditable.
+The AI-assisted workflow does not automatically modify:
 
-## What web research should investigate
-
-The research prompt begins with the actual public/global evidence available for the resolved canonical format. It may investigate current authoritative evidence concerning:
-
-- accuracy and currentness of existing source findings;
-- specification disclosure and governance;
-- active software, viewers, validators, extractors, and open-source tooling;
-- adoption and community/ecosystem support;
-- platform, hardware, external-asset, plugin, or runtime dependencies;
-- migration and conversion pathways;
-- intellectual-property, encryption, DRM, or technical-protection constraints;
-- metadata and self-documentation characteristics.
-
-The research should prefer primary and authoritative sources such as standards bodies, specification owners, official software/tool projects, national archives and libraries, preservation organizations, and authoritative technical documentation.
-
-Failure to find evidence is not interpreted as Low risk.
-
-## Evidence classes
-
-The research-assisted result keeps database and web evidence distinct.
-
-### Database evidence
-
-Existing registry evidence receives stable references such as:
-
-```text
-R001  governed source-level risk assessment
-C001  governed criterion claim
-S001  linked source-native evidence
-```
-
-### Web evidence
-
-Cited web sources receive stable run-local references:
-
-```text
-W001
-W002
-...
-```
-
-Each material verification finding states whether it:
-
-- confirms the database evidence;
-- contradicts it;
-- qualifies or updates it;
-- supplements it; or
-- remains unclear.
-
-It also records the preservation-risk effect as raising concern, reducing concern, neutral, or uncertain.
-
-## Source integrity boundary
-
-Web research does not rewrite:
-
-- NARA, DPC, LOC, PRONOM, or other source-native statements;
-- reviewed source-to-semantic mappings;
+- NARA, DPC, LOC, PRONOM, or other source-native records;
+- configured source mappings;
 - canonical format identity;
 - MongoDB source records;
-- approved criterion claims.
+- approved criterion claims;
+- the deterministic/config synthesis.
 
-A web finding can affect the AI-assisted synthesized result, but it is retained as separate researched evidence with citations. The current workflow does not persist these findings to MongoDB.
+AI output is returned to the consumer and is not automatically persisted as approved registry evidence.
 
-## Privacy and institution-scoped evidence
+## Missing evidence
 
-The public-web grounding step is intentionally limited to public/global format evidence.
+Missing information remains missing information. It is not converted to Low, Moderate, or High simply because a source is silent.
 
-Before the web-search request is created, the application excludes:
+The deterministic policy continues to use:
 
-- claims carrying an `institution_id`;
-- evidence marked `source_independence=institution_scoped`;
-- institution-level risk assessments such as `scope_type=institutional_format`;
-- private/local evidence embedded in the format record outside the public identity fields.
+```text
+missing source assessment -> contributes nothing
+```
 
-Only public format identity values such as canonical ID, PUID, LOC/NARA identifiers, version, extension and MIME type are passed as format context.
+The AI receives that policy and the available evidence as context.
 
-The governed baseline supplied to the web-search prompt is also sanitized so institution-scoped contributors and local details are not included.
+## External capabilities
 
-Institution/local evidence can still participate in non-web institution-scoped application logic, but it is not sent to the public search grounding service.
+There is no `web_research.enabled` decision switch in the active model.
 
-## Explicit opt-in
+Provider capability determines availability:
 
-Web research is disabled by default and must be enabled in the AI provider configuration:
+```text
+AI enabled
+    |
+    +-- provider supports web search -> expose it with provider/model automatic choice
+    |
+    +-- provider does not support web search -> continue without it
+```
+
+Optional administrative domain controls remain available:
 
 ```json
 {
@@ -147,8 +112,7 @@ Web research is disabled by default and must be enabled in the AI provider confi
     "provider": "azure_openai",
     "endpoint": "https://<resource>.openai.azure.com/",
     "deployment": "<deployment>",
-    "web_research": {
-      "enabled": true,
+    "external_research": {
       "allowed_domains": [],
       "blocked_domains": []
     }
@@ -156,66 +120,39 @@ Web research is disabled by default and must be enabled in the AI provider confi
 }
 ```
 
-An empty `allowed_domains` list allows the provider's normal public-web search scope. Organizations can instead restrict research to approved domains and/or block selected domains.
+The historical `web_research.enabled` property is accepted for backward compatibility but no longer controls capability availability.
 
-Web grounding is an external service with separate cost, data-processing, compliance-boundary, and availability considerations, so it must not be enabled implicitly.
+## Azure OpenAI
 
-## Azure OpenAI implementation
+For Azure OpenAI, the provider exposes the Responses API `web_search` tool with automatic tool choice. The model may call it or decline it.
 
-Normal structured AI requests continue to use Azure OpenAI Chat Completions.
+The runtime records:
 
-When web research is enabled, the Azure provider additionally uses the Azure OpenAI Responses API with the `web_search` tool. The implementation requires:
+- whether web search capability was available;
+- whether the capability request could be made;
+- whether the model actually used web search;
+- search queries and URLs when returned;
+- external citations when returned;
+- any capability error.
 
-- an Azure OpenAI deployment that supports the Responses API and web search;
-- web search/grounding to be available and permitted for the subscription/resource;
-- a recent OpenAI Python SDK exposing `client.responses`;
-- outbound access required by the Azure service configuration.
+A web-search failure does not automatically discard the AI analysis. The final structured synthesis can still be produced from the supplied application context.
 
-The application requests `web_search_call.action.sources` and extracts both the search actions and `url_citation` annotations. The application requires an actual `web_search_call`. If the provider returns an ungrounded response, the research step fails closed and the deterministic config-driven synthesis is retained.
+## Privacy boundary
 
-## Failure behavior
+Institution-scoped/private operational evidence is not included in the public-search capability prompt.
 
-If web search or the subsequent AI synthesis fails:
+The final AI synthesis may still receive the full assessment context through the configured AI provider, but public web grounding receives only public/global format evidence and public format identity.
 
-```text
-AI research/synthesis failed
-        -> governed config synthesis retained unchanged
-```
+## Quality warnings rather than hard rejection
 
-The failure is reported in the response rather than silently changing the risk.
+If the model returns a useful assessment but does not explicitly reference the supplied registry refs, the application returns the result and records a quality warning rather than rejecting the analysis.
 
-## Example
-
-For PDF 1.7 (`fmt/276`) the governed baseline may remain:
+Likewise:
 
 ```text
-NARA exact format: Low concern
-DPC PDF group: Moderate concern (broader context)
-Governed baseline: Low concern
+web capability available + web not used
 ```
 
-With web research enabled, AI receives those findings and related public LOC/PRONOM evidence first. It then verifies or supplements material preservation facts using cited current sources.
+is normal audit information, not an error.
 
-A final output may therefore be:
-
-```text
-Overall AI-assisted synthesized risk: Low concern
-Governed baseline: Low concern
-
-Web verification:
-- current specification/tooling evidence confirms the existing low-risk indicators
-- current migration support supplements the registry evidence
-```
-
-or, where current cited evidence materially qualifies the baseline:
-
-```text
-Overall AI-assisted synthesized risk: Moderate concern
-Governed baseline: Low concern
-
-Web verification:
-- cited current evidence qualifies an older source assessment
-- the researched synthesis therefore raises the overall concern
-```
-
-In either case, the original source assessments remain visible and unchanged.
+The consumer decides whether the AI result is sufficient for its purpose.
