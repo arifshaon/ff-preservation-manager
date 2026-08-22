@@ -32,7 +32,7 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     elif isinstance(value, (list, tuple, set)):
         values = list(value)
     else:
-        raise AIConfigurationError("AI web-search domain filters must be strings or arrays of strings.")
+        raise AIConfigurationError("AI external-research domain filters must be strings or arrays of strings.")
     result: list[str] = []
     for item in values:
         text = str(item or "").strip()
@@ -55,9 +55,8 @@ class AIProviderConfig:
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
-    web_research_enabled: bool = False
-    web_research_allowed_domains: tuple[str, ...] = ()
-    web_research_blocked_domains: tuple[str, ...] = ()
+    external_research_allowed_domains: tuple[str, ...] = ()
+    external_research_blocked_domains: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AIProviderConfig":
@@ -68,10 +67,6 @@ class AIProviderConfig:
         if max_retries < 0:
             raise AIConfigurationError("AI configuration 'max_retries' must be zero or greater.")
 
-        # ``human_ai_format_limit`` was the first name introduced for this
-        # setting. Preserve it as a compatibility alias, but the setting now
-        # caps total human-query assessments (deterministic + optional AI), not
-        # merely the subset sent to AI.
         raw_human_limit = data.get(
             "human_format_assessment_limit",
             data.get("human_ai_format_limit", 10),
@@ -82,13 +77,19 @@ class AIProviderConfig:
                 "AI configuration 'human_format_assessment_limit' must be greater than zero."
             )
 
-        web_research = data.get("web_research") or {}
-        if not isinstance(web_research, dict):
-            raise AIConfigurationError("AI configuration 'web_research' must be an object.")
-        allowed_domains = _string_tuple(web_research.get("allowed_domains"))
-        blocked_domains = _string_tuple(web_research.get("blocked_domains"))
+        # External/web research is capability-driven. The historical
+        # web_research.enabled switch is intentionally ignored: when AI is enabled,
+        # provider capabilities are made available automatically and the provider/model
+        # decides whether to use them. Domain filters remain administrative controls.
+        external_research = data.get("external_research")
+        if external_research is None:
+            external_research = data.get("web_research") or {}
+        if not isinstance(external_research, dict):
+            raise AIConfigurationError("AI configuration 'external_research' must be an object.")
+        allowed_domains = _string_tuple(external_research.get("allowed_domains"))
+        blocked_domains = _string_tuple(external_research.get("blocked_domains"))
         if len(allowed_domains) > 100:
-            raise AIConfigurationError("AI web research supports at most 100 allowed domains.")
+            raise AIConfigurationError("AI external research supports at most 100 allowed domains.")
 
         return cls(
             provider=provider,
@@ -107,15 +108,29 @@ class AIProviderConfig:
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
             human_format_assessment_limit=human_format_assessment_limit,
-            web_research_enabled=bool(web_research.get("enabled", False)),
-            web_research_allowed_domains=allowed_domains,
-            web_research_blocked_domains=blocked_domains,
+            external_research_allowed_domains=allowed_domains,
+            external_research_blocked_domains=blocked_domains,
         )
 
     @property
     def human_ai_format_limit(self) -> int:
         """Backward-compatible alias for the former setting name."""
         return self.human_format_assessment_limit
+
+    @property
+    def web_research_enabled(self) -> bool:
+        """Backward-compatible capability policy: research is available when provider supports it."""
+        return True
+
+    @property
+    def web_research_allowed_domains(self) -> tuple[str, ...]:
+        """Backward-compatible alias for external research domain controls."""
+        return self.external_research_allowed_domains
+
+    @property
+    def web_research_blocked_domains(self) -> tuple[str, ...]:
+        """Backward-compatible alias for external research domain controls."""
+        return self.external_research_blocked_domains
 
     def resolve_api_key(self, *, required: bool = True) -> str | None:
         if self.api_key_env:
@@ -153,10 +168,10 @@ class AIProviderConfig:
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "human_format_assessment_limit": self.human_format_assessment_limit,
-            "web_research": {
-                "enabled": self.web_research_enabled,
-                "allowed_domains": list(self.web_research_allowed_domains),
-                "blocked_domains": list(self.web_research_blocked_domains),
+            "external_research": {
+                "policy": "provider_capability_auto",
+                "allowed_domains": list(self.external_research_allowed_domains),
+                "blocked_domains": list(self.external_research_blocked_domains),
             },
         }
 
