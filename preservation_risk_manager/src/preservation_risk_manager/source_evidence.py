@@ -202,6 +202,53 @@ def _native_sustainability_items(source_record: dict[str, Any], link_basis: dict
     return items
 
 
+def _source_native_risk_items(source_record: dict[str, Any], link_basis: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose source-native risk findings without treating them as governed mappings.
+
+    These items are AI-only evidence. A new adapter/source may therefore provide a
+    native risk assessment before a reviewed normalization rule exists. The AI may
+    interpret it when enabled, but deterministic synthesis still requires policy
+    mapping or an already normalized governed claim.
+    """
+    candidates: list[dict[str, Any]] = []
+    for assessment in source_record.get("risk_assessments") or []:
+        if not isinstance(assessment, dict):
+            continue
+        candidates.append(dict(assessment))
+    hazard = source_record.get("hazard")
+    if isinstance(hazard, dict):
+        candidates.append(dict(hazard))
+
+    items: list[dict[str, Any]] = []
+    for assessment in candidates:
+        if not any(
+            assessment.get(key) is not None
+            for key in ("native_label", "risk_level", "band", "classification", "native_score", "rating", "semantic_level")
+        ):
+            continue
+        item: dict[str, Any] = {
+            "evidence_section": "ai_source_evidence",
+            "evidence_kind": "source_native_risk_assessment",
+            "source_id": source_record.get("source_id") or assessment.get("source_id"),
+            "source_type": source_record.get("source_type") or assessment.get("source_type"),
+            "source_record_id": source_record.get("source_record_id") or assessment.get("source_record_id"),
+            "source_name": source_record.get("name") or assessment.get("source_label"),
+            "native_label": assessment.get("native_label") or assessment.get("risk_level") or assessment.get("band") or assessment.get("classification"),
+            "native_score": assessment.get("native_score") if assessment.get("native_score") is not None else assessment.get("rating"),
+            "native_scale": assessment.get("native_scale"),
+            "semantic_level": assessment.get("semantic_level"),
+            "scope_type": assessment.get("scope_type"),
+            "scope_name": assessment.get("scope_name"),
+            "source_value": deepcopy(assessment),
+            "link_basis": deepcopy(link_basis),
+        }
+        url = _source_url(source_record)
+        if url:
+            item["source_url"] = url
+        items.append({key: value for key, value in item.items() if value is not None})
+    return items
+
+
 def _generic_source_item(source_record: dict[str, Any], link_basis: dict[str, Any]) -> dict[str, Any] | None:
     description = source_record.get("description")
     if not description:
@@ -279,7 +326,8 @@ def build_ai_source_evidence(
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for _, _, _, source_record, link in linked[:max_source_records]:
-        candidates = _native_sustainability_items(source_record, link)
+        candidates = _source_native_risk_items(source_record, link)
+        candidates.extend(_native_sustainability_items(source_record, link))
         generic = _generic_source_item(source_record, link)
         if generic is not None:
             candidates.append(generic)
