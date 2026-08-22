@@ -8,8 +8,6 @@ from preservation_risk_manager.ai.base import (
     AIRequest,
     AIResponse,
     AIUsage,
-    AIWebCitation,
-    AIWebResearchResponse,
 )
 from preservation_risk_manager.ai.config import AIProviderConfig
 from preservation_risk_manager.ai.providers.azure_openai import AzureOpenAIProvider
@@ -107,31 +105,14 @@ class _FakeCapabilityProvider(AIProvider):
 
     def __init__(self, *, use_web: bool):
         self.use_web = use_web
-        self.research_prompts: list[str] = []
-        self.synthesis_requests: list[AIRequest] = []
+        self.capability_requests: list[AIRequest] = []
 
     @property
     def model_name(self) -> str:
         return "fake-capability-model"
 
-    def research_web(self, prompt: str, *, allowed_domains=(), blocked_domains=()):
-        self.research_prompts.append(prompt)
-        citations = (
-            (AIWebCitation("https://example.org/current-tooling", "Current tooling"),)
-            if self.use_web else ()
-        )
-        return AIWebResearchResponse(
-            provider=self.provider_name,
-            model=self.model_name,
-            text="The supplied registry evidence was analysed with the capabilities available to the model.",
-            citations=citations,
-            search_queries=("current PDF tooling",) if self.use_web else (),
-            consulted_urls=("https://example.org/current-tooling",) if self.use_web else (),
-            metadata={"web_search_used": self.use_web},
-        )
-
-    def generate(self, request: AIRequest) -> AIResponse:
-        self.synthesis_requests.append(request)
+    def generate_with_capabilities(self, request: AIRequest) -> AIResponse:
+        self.capability_requests.append(request)
         return AIResponse(
             provider=self.provider_name,
             model=self.model_name,
@@ -140,14 +121,12 @@ class _FakeCapabilityProvider(AIProvider):
                 "confidence": 0.82,
                 "rationale": "The supplied evidence and available external context support moderate concern.",
                 "database_evidence_refs": ["R001", "C001"],
-                "external_source_refs": ["W001"] if self.use_web else [],
                 "considerations": [
                     {
                         "finding": "Current tooling remains available.",
                         "basis": "mixed" if self.use_web else "registry_evidence",
                         "risk_effect": "reduces_concern",
                         "database_evidence_refs": ["R001"],
-                        "external_source_refs": ["W001"] if self.use_web else [],
                     }
                 ],
                 "config_rules_considered": ["most_specific_available"],
@@ -155,7 +134,19 @@ class _FakeCapabilityProvider(AIProvider):
                 "uncertainty": "The AI result is advisory to the consumer.",
             },
             usage=AIUsage(input_tokens=200, output_tokens=100, total_tokens=300),
+            metadata={
+                "responses_api": True,
+                "web_search_used": self.use_web,
+                "search_queries": ["current PDF tooling"] if self.use_web else [],
+                "consulted_urls": ["https://example.org/current-tooling"] if self.use_web else [],
+                "external_sources": [
+                    {"url": "https://example.org/current-tooling", "title": "Current tooling"}
+                ] if self.use_web else [],
+            },
         )
+
+    def generate(self, request: AIRequest) -> AIResponse:
+        raise AssertionError("Global capability synthesis should use generate_with_capabilities")
 
 
 def test_capability_synthesis_keeps_registry_and_baseline_context_but_model_may_differ():
@@ -193,14 +184,14 @@ def test_capability_synthesis_keeps_registry_and_baseline_context_but_model_may_
         source_evidence=[],
     )
 
-    assert provider.research_prompts
-    assert "NF00369" in provider.research_prompts[0]
+    assert len(provider.capability_requests) == 1
+    assert "NF00369" in (provider.capability_requests[0].messages[1].content or "")
     overall = result["overall_synthesized_risk"]
     assert overall["semantic_level"] == "moderate"
     assert overall["governed_baseline"]["semantic_level"] == "low"
     assert overall["capabilities_available"]["web_search"] is True
     assert overall["capabilities_used"]["web_search"] is True
-    assert overall["external_source_refs"] == ["W001"]
+    assert overall["external_sources"][0]["url"] == "https://example.org/current-tooling"
     assert result["mode"] == "capability_driven_ai_synthesis"
 
 
