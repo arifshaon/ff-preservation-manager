@@ -1,457 +1,273 @@
 # Risk monitoring and periodic reporting
 
-This guide describes how to operate the repository as a **continuous preservation-risk monitoring service**, not only as an interactive command-line tool.
+This guide describes the supported recurring preservation-risk workflow. It uses the same registry, governed synthesis policy and optional AI synthesis as interactive queries; scheduled jobs must not implement a second risk engine.
 
-The monitoring model has three separate jobs:
+## Operating model
 
 ```text
-1. Refresh evidence
+1. Refresh selected evidence sources
    qnl_format_registry_builder
-        -> reacquire/update configured sources
-        -> normalize/reconcile/map
-        -> persist current registry evidence
+        ↓
+   snapshots / source evidence / mappings / change detection
+        ↓
+   current MongoDB registry view
 
-2. Reassess risk
-   preservation_risk_manager
-        -> query selected formats/families/all formats
-        -> deterministic assessment
-        -> canonical JSON
+2. Assess a watchlist
+   preservation_risk_manager batch-report
+        ↓
+   governed overall risk for every resolved format
+        ↓ optional
+   AI-assisted overall synthesis
 
-3. Produce/distribute reports
-   operator script / scheduler / external service
-        -> retain JSON snapshots
-        -> compare with previous reports
-        -> create email/dashboard/PDF/ticket/report as required
+3. Review/download
+   HTML curator report
+   CSV summary
+   canonical JSON audit record
+   ZIP bundle
 ```
 
-The repository does **not** require the same process to perform all three jobs. An external reporting or orchestration service can call the registry builder and/or the risk-manager machine interface and use the returned JSON to generate its own reports.
+Source refresh and risk reporting can run on different cadences. A report can also be run without refreshing sources first when the purpose is to reassess the current stored evidence.
 
-## 1. Periodically refresh evidence sources
+## 1. Refresh only the source that needs updating
 
-For an integrated MongoDB-backed run with criterion mapping enabled:
+The registry builder already supports incremental source updates. The normal production operation is **not** a fresh installation or full rebuild.
+
+Use the selected-source refresh command:
 
 ```powershell
 cd qnl_format_registry_builder
-python -m registry_builder run `
-  --config config\sources.criterion-mapping.mongodb.example.json `
+
+python -m registry_builder.refresh `
+  --config config\sources.qnl.json `
+  --source nara_digital_preservation_framework `
+  --workdir work `
+  --out output `
+  --report monitoring\nara-refresh.json
+```
+
+Refresh more than one configured source by repeating `--source`:
+
+```powershell
+python -m registry_builder.refresh `
+  --config config\sources.qnl.json `
+  --source pronom `
+  --source loc_fdd_xml_reviewed `
   --workdir work `
   --out output
 ```
 
-The example integrated configuration includes QNL seed evidence, NARA, PRONOM and LOC FDD. For production, copy it to a reviewed local/production configuration and enable the sources that form the institution's approved evidence baseline.
+The command creates a temporary selection of the existing reviewed configuration, forces `incremental_source_updates=true`, and invokes the normal pipeline. The production configuration itself is not rewritten.
 
-### Pinned baseline versus follow-latest monitoring
+A successful selected-source refresh:
 
-**Rerunning a source does not necessarily mean following its newest upstream release.** The source configuration controls that behavior.
+1. reacquires/extracts/normalizes the selected source(s);
+2. treats only successfully completed selected sources as refreshed;
+3. reuses the latest successfully stored source records from all other sources;
+4. reconciles the complete active evidence set;
+5. reruns normal validation, criterion mapping, risk-claim materialization and change detection;
+6. persists the updated current registry view and run provenance.
 
-For example, the committed integrated example intentionally configures NARA as:
+If a selected optional source fails, its previous successful evidence is retained by the incremental pipeline. Required-source failures still fail the run.
 
-```json
-{
-  "release_mode": "pinned",
-  "release_date": "20260320"
-}
-```
+### Pinned versus follow-latest
 
-That is appropriate for reproducible/audit baselines, but rerunning it unchanged will continue to use that NARA release.
+Refreshing does not automatically mean "use the newest possible release." Each adapter's reviewed source configuration controls release/retrieval behavior.
 
-For a NARA monitoring configuration that should discover the newest complete NARA release, use the supported `latest` mode:
+For example, a pinned NARA configuration remains pinned when refreshed. A separately reviewed monitoring configuration can use NARA `release_mode=latest` to discover the newest complete release. Review newly discovered evidence/mapping effects before changing a pinned production baseline when that is the governance model.
 
-```json
-{
-  "id": "nara_digital_preservation_framework",
-  "type": "nara_digital_preservation_framework",
-  "enabled": true,
-  "required": true,
-  "retrieval_mode": "published_csv",
-  "release_mode": "latest",
-  "github_ref": "master"
-}
-```
+`--offline` replays cached snapshots and cannot discover upstream material that has never been acquired.
 
-Online `latest` mode discovers the highest release date for which the required NARA files exist and records the resolved release metadata. See the registry-builder NARA documentation for exact semantics.
+## 2. Batch report from the current database: AI off
 
-A practical deployment can therefore maintain two configurations:
-
-```text
-production-baseline.json
-  -> pinned/reviewed versions for reproducibility
-
-monitor-latest.json
-  -> selected upstream sources configured to discover newer releases
-```
-
-When monitoring discovers a new release, review source/mapping effects before changing the institution's pinned production baseline if that is the local governance model.
-
-For every other source, check the adapter's retrieval/release configuration and do not assume that an online rerun automatically advances to a newer version.
-
-### Online versus offline
-
-A scheduled upstream monitoring run should normally run **online** so configured follow-latest/current sources can discover changes.
-
-`--offline` is for replay/recovery using cached snapshots. It can reproduce previously acquired evidence, but it cannot discover a source release that has never been acquired.
-
-### What a refresh preserves
-
-The builder keeps source snapshots and source records for provenance/history while recomputing the active canonical view from current source contributions. Change detection records differences between registry states.
-
-A monitoring service should retain or archive at least:
-
-- the builder run report;
-- source acquisition status for each source;
-- resolved source/release metadata;
-- source snapshot hashes;
-- mapping version(s);
-- canonical/criterion-claim counts;
-- reported change events;
-- the date/time and configuration version used for the run.
-
-Do not treat a failed optional source as equivalent to "no change". Report source failures separately from preservation-risk results.
-
-## 2. Choose a monitoring cadence
-
-Cadence is an operational policy, not hard-coded application behavior.
-
-Example patterns:
-
-| Monitoring object | Example cadence | Reason |
-| --- | --- | --- |
-| Authoritative external sources | monthly or quarterly | detect new formats, changed guidance, signatures and evidence |
-| Institution-authored evidence | after review/change, plus periodic verification | local capability and policy can change independently of external sources |
-| High-risk/watchlist formats | monthly | maintain a current intervention queue |
-| Broad whole-registry ranking | monthly/quarterly | identify newly elevated risks and evidence gaps |
-| Critical collection-specific formats | after each source refresh or more frequently | higher operational consequence |
-
-The key requirement is that **source refresh and risk reporting are repeatable commands** and can therefore be scheduled externally.
-
-## 3. Report selected file formats
-
-For a fixed watchlist, run one structured request per format and retain each canonical JSON response.
-
-Example for PDF without creating a request file:
+For a fixed watchlist:
 
 ```powershell
 cd preservation_risk_manager
-python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"fmt-pdf","scope":"global"}' `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+
+python -m preservation_risk_manager batch-report `
+  --id fmt/18 `
+  --id fmt/19 `
+  --id fmt/276 `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --output monitoring-reports\2026-08-22 `
+  --ai-mode off
 ```
 
-An external service can loop over a watchlist such as:
+Or use a TXT/CSV watchlist:
+
+```powershell
+python -m preservation_risk_manager batch-report `
+  --input monitoring\watchlist.csv `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --output monitoring-reports\2026-08-22 `
+  --ai-mode off
+```
+
+CSV may contain `puid`, `pronom_puid`, `pronom_id`, `format_id`, `format` or `id`.
+
+With `--ai-mode off`, the headline report is produced from governed source-risk evidence already present in the registry. Silent/missing sources contribute nothing. Question-framework completeness remains visible as supporting diagnostic information and is not substituted for the governed overall risk.
+
+## 3. Batch report with AI-assisted synthesis
+
+```powershell
+python -m preservation_risk_manager batch-report `
+  --input monitoring\watchlist.csv `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --output monitoring-reports\2026-08-22-ai `
+  --ai-mode synthesize `
+  --ai-config config\ai.local.json
+```
+
+For every successfully resolved format the report retains two different results:
 
 ```text
-fmt-pdf
-fmt-tiff
-fmt-jpeg
-fmt-wav
-fmt-mp4
-...
+Governed config synthesis
+AI-assisted synthesis
 ```
 
-and write each response to a dated report folder.
+The AI receives the collected database evidence, configured methodology, governed baseline and framework. Provider capabilities such as web search are exposed when allowed; the model decides whether to use them. AI output does not rewrite source evidence or MongoDB.
 
-### Institution-scoped watchlist
+If an AI call fails or is rate-limited, the governed database result remains available for that format.
 
-```json
-{
-  "action": "assess_format",
-  "format": "fmt-pdf",
-  "scope": "institution",
-  "institution_id": "qnl"
-}
-```
+`fill-gaps` remains available as a legacy/question-level mode for unresolved framework questions, but `synthesize` is the primary AI mode for periodic overall-risk reporting.
 
-Institution scope includes global evidence plus matching institution-scoped claims. It must not promote QNL-specific observations into global facts.
+## 4. Curator report artifacts
 
-## 4. Report all High-risk formats
-
-Once a framework has approved/calibrated risk banding, a machine request can return High-risk formats:
-
-```json
-{
-  "action": "list_at_risk_formats",
-  "filters": {
-    "risk_bands": ["High"]
-  },
-  "scope": "global",
-  "limit": 5000
-}
-```
-
-Current ranking order is:
+Each `batch-report` run writes:
 
 ```text
-High -> Moderate -> Low
-then descending score
-then format label
+risk-report.html
+risk-report.csv
+risk-report.json
+risk-report.zip
 ```
 
-With `risk_bands: ["High"]`, the returned `results` array is therefore a deterministic ranked High-risk queue among the assessed candidates.
+The HTML report is intended for curator review. It provides:
 
-## 5. Produce a Top 10 highest-risk report
+- search/filter over the selected formats;
+- governed overall risk and selected scope;
+- headline and broader-context source assessments;
+- AI-assisted risk, confidence and relation to the governed baseline;
+- AI rationale/uncertainty and material considerations;
+- external URLs returned/consulted when AI used web search;
+- full machine record per format for audit/drill-down.
 
-**Do not use `limit: 10` when the intention is "find the ten highest-risk formats in the whole registry."**
+The CSV is the compact management/analysis view. The JSON is the canonical detailed run artifact. The ZIP contains HTML, CSV and JSON.
 
-The current request layer applies `limit` to the candidate format set before all candidates are scored. A whole-registry Top 10 workflow should therefore:
+There is deliberately no hidden third "combined AI + database" score. The curator sees governed and AI-assisted results separately.
 
-1. request a candidate limit large enough to cover the registry (current maximum: `5000`);
-2. request the required risk bands;
-3. use the already ranked `results` array;
-4. take the first 10 results in the external reporting layer.
+## 5. What should draw curator attention
 
-Example request:
+The report should be reviewed for more than just a High/Critical label. Useful attention signals include:
 
-```json
-{
-  "action": "list_at_risk_formats",
-  "filters": {
-    "risk_bands": ["High", "Moderate"]
-  },
-  "scope": "global",
-  "limit": 5000
-}
+- governed `critical`, `high` or `moderate` risk;
+- AI result higher than governed risk;
+- source disagreement at the selected scope;
+- broader-scope warnings such as a vulnerable format family;
+- material AI uncertainty;
+- AI quality warnings;
+- unresolved or unmapped source assessments;
+- evidence/framework incompleteness;
+- a format that failed to resolve.
+
+Missing evidence is not automatically a higher risk rating. It is a separate completeness/uncertainty signal.
+
+## 6. Institution-scoped watchlists
+
+Add:
+
+```powershell
+--institution qnl
 ```
 
-External reporting logic:
+Institution-scoped evidence remains distinct from global evidence. Public web-search capability is suppressed for an AI synthesis call when institution/private assessment evidence is present.
 
-```text
-response.results[0:10]
-```
+## 7. Scheduling
 
-If the operational registry grows beyond the request-layer maximum, the external service must page/partition the registry and rank the combined deterministic results. Do not silently report the first ten candidates as the highest ten risks.
-
-## 6. Produce a family-specific risk report
-
-Example: PDF-family formats that are Moderate or High risk:
-
-```json
-{
-  "action": "list_at_risk_formats",
-  "filters": {
-    "family": "PDF",
-    "risk_bands": ["Moderate", "High"]
-  },
-  "scope": "global",
-  "limit": 500
-}
-```
-
-The family search is deliberately conservative. Explicit family metadata is preferred; otherwise names/aliases are used. Extension or MIME overlap alone does not prove family membership.
-
-## 7. Produce an evidence-gap monitoring report
-
-Risk monitoring must also surface formats that **cannot yet be reliably assessed**.
-
-A report that only lists High/Moderate results can create false reassurance if many formats are unbanded because evidence is missing.
-
-Family example:
-
-```json
-{
-  "action": "list_evidence_gaps",
-  "filters": {
-    "family": "PDF"
-  },
-  "scope": "global",
-  "limit": 500
-}
-```
-
-For actionable remediation planning:
-
-```json
-{
-  "action": "plan_evidence_remediation",
-  "filters": {
-    "family": "PDF"
-  },
-  "scope": "global",
-  "limit": 500
-}
-```
-
-A periodic management report should normally show both:
-
-```text
-A. assessed/ranked risk
-B. unbanded / insufficient-evidence population
-```
-
-## 8. Framework/calibration warning
-
-The broad working framework:
-
-```text
-examples/qnl_preservation_risk_questions.framework.draft.json
-```
-
-currently has:
-
-```text
-calibration_status = draft_unvalidated
-banding_enabled = false
-```
-
-It is suitable for question-level evidence assessment, evidence-gap monitoring and framework development, but **not yet for an operational Top 10 High-risk ranking based on Low/Moderate/High bands**.
-
-The small:
-
-```text
-examples/qnl_sustainability.framework.example.json
-```
-
-has working bands for testing the assessment architecture, but it is only a three-question example and must not be presented as the final QNL preservation-risk model.
-
-A production risk-ranking report should identify the framework ID/version and use an approved/calibrated framework.
-
-## 9. Recommended report metadata
-
-Every generated report or saved JSON snapshot should record enough context to reproduce it:
-
-```text
-report generated_at
-registry refresh/run reference
-source refresh status
-resolved upstream release/version where available
-framework_id
-framework_version
-calibration_status
-banding_enabled
-scope
-institution_id when applicable
-request/action/filters
-candidate_count
-result_count
-evidence hashes from returned assessments
-```
-
-When a report is transformed into PDF, email, dashboard cards or tickets, retain the canonical JSON as the machine audit record.
-
-## 10. External scheduler/reporting-service pattern
-
-The application is intentionally suitable for orchestration by another service.
-
-Examples include:
+The batch command is intentionally scheduler-friendly. It can be called by:
 
 - Windows Task Scheduler;
-- cron/systemd timers;
-- CI/CD schedulers;
-- Azure Automation / Functions;
-- Airflow or another workflow orchestrator;
-- a repository dashboard/backend service;
-- an institutional reporting service.
+- cron/systemd;
+- CI/CD scheduling;
+- Azure Automation/Functions;
+- Airflow or another workflow orchestrator.
 
-Recommended sequence:
-
-```text
-SCHEDULE TRIGGER
-   |
-   +--> run registry refresh
-   |      |
-   |      +--> verify source/release/run status
-   |
-   +--> run one or more query-json requests
-   |      |
-   |      +--> save canonical JSON
-   |
-   +--> compare current vs prior saved report
-   |
-   +--> render/distribute report
-          PDF | dashboard | email | ticket | API response
-```
-
-The external service should call `query-json` or, in a future HTTP wrapper, the same canonical request executor. It should **not** reproduce preservation scoring logic itself.
-
-## 11. Example PowerShell monitoring wrapper
-
-Create a machine request once, for example `monitoring\at-risk.json`:
-
-```json
-{
-  "action": "list_at_risk_formats",
-  "filters": {
-    "risk_bands": ["High", "Moderate"]
-  },
-  "scope": "global",
-  "limit": 5000
-}
-```
-
-Then a simple wrapper can be scheduled:
+Example PowerShell pattern:
 
 ```powershell
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $reportDir = "monitoring-reports\$stamp"
-New-Item -ItemType Directory -Force -Path $reportDir | Out-Null
 
-# 1. Refresh registry/evidence.
+# Refresh selected external evidence.
 Push-Location ..\qnl_format_registry_builder
-python -m registry_builder run `
-  --config config\monitor-latest.json `
+python -m registry_builder.refresh `
+  --config config\sources.qnl.json `
+  --source nara_digital_preservation_framework `
+  --source pronom `
   --workdir work `
   --out output `
-  | Out-File -Encoding utf8 "..\preservation_risk_manager\$reportDir\registry-run.json"
+  --report "..\preservation_risk_manager\$reportDir\registry-refresh.json"
 if ($LASTEXITCODE -ne 0) { throw "Registry refresh failed" }
 Pop-Location
 
-# 2. Run whole-registry at-risk request.
-python -m preservation_risk_manager query-json `
-  --request monitoring\at-risk.json `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  | Out-File -Encoding utf8 "$reportDir\at-risk.json"
-if ($LASTEXITCODE -ne 0) { throw "Risk query failed" }
-
-# 3. An external/reporting step can consume at-risk.json,
-#    take results[0:10], compare with the prior report, and render/distribute it.
+# Assess the controlled watchlist.
+python -m preservation_risk_manager batch-report `
+  --input monitoring\watchlist.csv `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --output $reportDir `
+  --ai-mode off
+if ($LASTEXITCODE -ne 0) { throw "Risk report failed" }
 ```
 
-`config\monitor-latest.json` above is an example *local production configuration name*; create it from a reviewed builder configuration and choose each source's release/retrieval behavior deliberately. It is not a committed example file.
+A separate scheduled run may use `--ai-mode synthesize` when AI-assisted review is required.
 
-In production, separate diagnostic/progress output from canonical JSON as appropriate for the calling service, and use a reviewed production framework rather than example scoring files.
+## 8. Recommended report/run metadata to retain
 
-## 12. Comparing reports over time
-
-The current canonical query layer returns current assessment results; it does not yet provide a complete built-in historical risk-report store.
-
-For periodic reporting today, the orchestration/reporting service should persist dated canonical JSON responses and compare fields such as:
+Retain at least:
 
 ```text
-risk_band
-score
-analysis_status
-evidence_completeness
-missing_count
-main_risk_factors
-evidence_hash
+registry refresh run_id
+selected/refreshed source IDs
+source changed/unchanged/failed status
+source snapshot/release metadata
+prior source records reused
+change-detection summary
+risk synthesis policy ID/version
+framework ID/version/calibration status
+scope/institution
+watchlist/input identifiers
+AI mode/provider configuration reference
+generated_at
+full risk-report.json
 ```
 
-A changed `evidence_hash` is a useful signal that the evidence package has changed, but the reporting service should still compare the actual assessment fields to explain what changed.
+AI input logging, when explicitly enabled in `ai.local.json`, can also retain the exact prompt sent to the AI. Those logs may contain sensitive assessment evidence and must be protected accordingly.
 
-The registry builder's source snapshots, release metadata and change history remain useful for tracing *why* upstream evidence changed.
+## 9. Evidence-gap/framework warning
 
-## 13. Minimum operational monitoring set
+The broad working framework `examples/qnl_preservation_risk_questions.framework.draft.json` remains `draft_unvalidated` with operational banding disabled. This does **not** prevent source-level governed synthesis (NARA/DPC/etc.) or AI-assisted synthesis from being reported.
 
-A practical recurring preservation monitoring package is:
+It does mean draft question-framework scores/bands must not be presented as an approved QNL risk-ranking model. The batch report therefore treats framework completeness/answers as supporting diagnostics alongside the governed overall source-risk synthesis.
+
+## 10. Historical comparison
+
+The batch command writes dated report artifacts but does not yet automatically persist a time-series of report-to-report changes in MongoDB.
+
+For periodic monitoring, retain dated report folders and compare fields such as:
 
 ```text
-1. Source health/version report
-   - which sources refreshed / failed / were unchanged
-   - which upstream release/version was used
-
-2. Top-risk report
-   - High first, then Moderate
-   - Top 10 or another management-sized list
-
-3. Watchlist report
-   - selected critical formats regardless of current band
-
-4. Evidence-gap report
-   - unbanded / insufficient-evidence formats
-
-5. Change report
-   - current report compared with previous saved snapshot
+governed_risk_level
+governed_selected_scope
+governed_headline_sources
+governed_context_sources
+ai_risk_level
+ai_confidence
+ai_relation_to_governed
+framework_evidence_completeness_pct
 ```
 
-This keeps "known high risk" separate from "we do not yet have enough evidence to know," and keeps a reproducible pinned baseline separate from discovery of newer upstream evidence.
+The registry builder's own change-detection records explain upstream evidence/registry changes and should be retained with the batch risk report.
