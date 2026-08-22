@@ -13,7 +13,7 @@ def _config(tmp_path):
     ai = tmp_path / "ai.json"
     framework.write_text("{}", encoding="utf-8")
     storage.write_text("{}", encoding="utf-8")
-    ai.write_text('{"provider":"mock"}', encoding="utf-8")
+    ai.write_text('{"provider":"mock","human_format_assessment_limit":10}', encoding="utf-8")
     return WebRuntimeConfig(
         framework=str(framework),
         storage_config=str(storage),
@@ -33,7 +33,7 @@ def _wait(client, job_id):
     return row
 
 
-def test_web_app_serves_ui_and_background_batch_download(tmp_path):
+def test_web_app_serves_curator_workflows_lookup_and_background_batch_download(tmp_path):
     config = _config(tmp_path)
     manager = JobManager(config.jobs_dir, max_workers=1)
     seen_modes = []
@@ -50,14 +50,50 @@ def test_web_app_serves_ui_and_background_batch_download(tmp_path):
             "preview": {"kind": "batch", "rows": [], "input_count": 2},
         }
 
-    app = create_app(config, manager=manager, batch_runner=fake_batch)
+    def fake_lookup(_config, query, *, limit):
+        assert query == "PDF"
+        assert limit == 10
+        return {
+            "query": query,
+            "match_count": 12,
+            "returned_count": 10,
+            "limit": 10,
+            "limit_applied": True,
+            "matches": [
+                {
+                    "puid": "fmt/276",
+                    "puids": ["fmt/276"],
+                    "canonical_id": "puid-fmt-276",
+                    "label": "Acrobat PDF 1.7",
+                    "version": "1.7",
+                    "extensions": ["pdf"],
+                    "mime_types": ["application/pdf"],
+                    "loc_ids": [],
+                    "nara_ids": [],
+                }
+            ],
+        }
+
+    app = create_app(config, manager=manager, batch_runner=fake_batch, lookup_runner=fake_lookup)
     with TestClient(app) as client:
         home = client.get("/")
         assert home.status_code == 200
         assert "QNL Preservation Risk Manager" in home.text
+        assert "Ask Risk" in home.text
+        assert "PUID Lookup" in home.text
+        assert "Run Report" in home.text
         assert "AI-assisted overall synthesis" in home.text
         assert "Governed risk" in home.text
         assert client.get("/api/health").json() == {"status": "ok"}
+
+        cfg = client.get("/api/config").json()
+        assert cfg["puid_lookup_limit"] == 10
+        assert cfg["human_format_assessment_limit"] == 10
+
+        lookup = client.get("/api/formats/lookup", params={"q": "PDF"})
+        assert lookup.status_code == 200
+        assert lookup.json()["match_count"] == 12
+        assert lookup.json()["matches"][0]["puid"] == "fmt/276"
 
         submitted = client.post(
             "/api/jobs/batch",
@@ -83,4 +119,3 @@ def test_web_app_serves_ui_and_background_batch_download(tmp_path):
         assert synth_job["status"] == "completed"
 
     assert seen_modes == ["off", "synthesize"]
-    manager.shutdown(wait=True)
