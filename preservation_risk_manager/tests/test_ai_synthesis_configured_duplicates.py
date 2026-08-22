@@ -35,6 +35,13 @@ class FakeProvider(AIProvider):
 
 
 def test_governed_nara_duplicate_from_source_records_is_not_an_ai_candidate():
+    """The legacy bounded helper must suppress governed source-record duplicates.
+
+    Overall product synthesis now uses the capability-driven path, which always
+    consults the configured AI provider. This lower-level helper is retained for
+    bounded mapping-gap workflows and correctly skips the provider when policy
+    already resolves all source-level risk.
+    """
     policy = load_synthesis_policy()
     provider = FakeProvider()
 
@@ -72,11 +79,11 @@ def test_governed_nara_duplicate_from_source_records_is_not_an_ai_candidate():
         ],
     )
 
-    assert result["status"] == "ok"
+    assert result["status"] == "skipped_no_ai_work_required"
+    assert provider.requests == []
     assert result["suppressed_configured_source_risk_duplicates"] == 1
     assert result["config_normalized_source_assessments"] == []
     assert result["ai_interpreted_assessments"] == []
     assert result["overall_synthesized_risk"]["semantic_level"] == "low"
     assert result["overall_synthesized_risk"]["ai_assisted"] is False
-    assert result["overall_synthesized_risk"]["ai_consulted"] is True
-    assert all(ref["kind"] != "source_native_risk_assessment" for ref in result["evidence_refs"])
+    assert result["overall_synthesized_risk"]["ai_consulted"] is False
