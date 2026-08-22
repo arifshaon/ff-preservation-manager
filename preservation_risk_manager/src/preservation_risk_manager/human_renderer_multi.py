@@ -71,6 +71,78 @@ def _render_source_assessment(item: dict[str, Any], *, role: str | None = None) 
     return lines
 
 
+def _render_ai_synthesis_disclosure(response: dict[str, Any]) -> list[str]:
+    synthesis = response.get("ai_synthesis")
+    if not isinstance(synthesis, dict):
+        return []
+
+    status = str(synthesis.get("status") or "unknown")
+    lines = ["AI synthesis", f"- Status: {status}."]
+    provider = synthesis.get("provider") or (synthesis.get("ai") or {}).get("provider")
+    if provider:
+        if isinstance(provider, dict):
+            provider_name = provider.get("provider") or provider.get("model") or provider
+        else:
+            provider_name = provider
+        lines.append(f"- Provider: {provider_name}.")
+
+    overall = synthesis.get("overall_synthesized_risk") or {}
+    if status == "ok":
+        interpreted = synthesis.get("ai_interpreted_assessments") or []
+        if interpreted:
+            lines.append(
+                f"- AI interpreted {len(interpreted)} previously unmapped source assessment(s); "
+                "the configured policy then recomputed the overall risk."
+            )
+        else:
+            lines.append(
+                "- AI was consulted, but no configured source assessment required AI interpretation; "
+                "the config-driven synthesis remained authoritative."
+            )
+        proposed = (synthesis.get("ai") or {}).get("proposed_overall_level")
+        if proposed:
+            lines.append(f"- AI proposed overall level: {proposed}.")
+        if overall.get("semantic_level"):
+            lines.append(f"- Final policy-governed overall level: {overall.get('semantic_level')}.")
+    elif status == "error_config_synthesis_retained":
+        lines.append("- AI synthesis failed; the config-driven deterministic synthesis was retained unchanged.")
+        if synthesis.get("error"):
+            lines.append(f"- Error: {synthesis.get('error')}")
+        if overall.get("semantic_level"):
+            lines.append(f"- Retained overall level: {overall.get('semantic_level')}.")
+
+    boundary = synthesis.get("authority_boundary")
+    if boundary:
+        lines.append(f"- Authority boundary: {boundary}")
+    return lines
+
+
+def _append_ai_disclosure(rendered: str, response: dict[str, Any]) -> str:
+    sections: list[str] = []
+    identification = base._render_identification_disclosure(response)
+    if identification:
+        sections.append("\n".join(identification))
+
+    synthesis = _render_ai_synthesis_disclosure(response)
+    if synthesis:
+        sections.append("\n".join(synthesis))
+
+    ai_risk = response.get("ai_risk_assessment")
+    synthesis_only = (
+        isinstance(ai_risk, dict)
+        and ai_risk.get("ai_mode") == "synthesize"
+        and ai_risk.get("status") == "not_requested_synthesis_only"
+    )
+    if not synthesis_only:
+        risk = base._render_ai_risk_disclosure(response)
+        if risk:
+            sections.append("\n".join(risk))
+
+    if not sections:
+        return rendered
+    return rendered + "\n\n" + "\n\n".join(sections)
+
+
 def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | None:
     payload = response.get("result") or {}
     if not isinstance(payload, dict):
@@ -106,7 +178,9 @@ def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | Non
                 f"Policy: {policy_id}" + (f" v{policy_version}" if policy_version else "")
             )
         if overall.get("ai_assisted"):
-            lines.append("AI assistance: yes — bounded by the configured synthesis policy and supplied evidence.")
+            lines.append("AI assistance: yes — an unmapped finding was interpreted within the configured policy boundary.")
+        elif overall.get("ai_consulted"):
+            lines.append("AI consulted: yes — no source mapping required AI interpretation; config remained authoritative.")
     else:
         lines.extend([
             "Overall synthesized preservation risk",
@@ -217,7 +291,7 @@ def _render_multi_puid(response: dict[str, Any]) -> str:
         for line in rendered.splitlines():
             lines.append(f"   {line}" if line else "")
 
-    return base._append_ai_disclosure("\n".join(lines), response)
+    return _append_ai_disclosure("\n".join(lines), response)
 
 
 def render_human_response(response: dict[str, Any]) -> str:
@@ -228,5 +302,5 @@ def render_human_response(response: dict[str, Any]) -> str:
     if action == "assess_format":
         rendered = _render_synthesized_single_assessment(response)
         if rendered is not None:
-            return base._append_ai_disclosure(rendered, response)
+            return _append_ai_disclosure(rendered, response)
     return base.render_human_response(response)
