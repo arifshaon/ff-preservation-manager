@@ -1,326 +1,455 @@
 # Repository architecture
 
-This document explains how the active modules fit together and where each responsibility belongs.
+This document is the canonical description of how File Format Preservation Manager works.
 
-## System purpose
-
-The repository supports a repeatable preservation-risk workflow:
+The system has two applications with a shared evidence boundary:
 
 ```text
-collect evidence
- -> normalize and preserve provenance
- -> reconcile format identities
- -> map source evidence to neutral criteria
- -> persist a queryable registry
- -> assess formats against explicit frameworks
- -> identify evidence gaps / remediation work
- -> present results to people or systems
+qnl_format_registry_builder
+    owns evidence acquisition and registry writes
+
+preservation_risk_manager
+    owns evidence consumption, risk synthesis and presentation
 ```
 
-The important architectural choice is separation of concerns. The registry builder produces and updates evidence. The preservation risk manager consumes that evidence and applies assessment frameworks. A storage backend such as MongoDB connects them, but MongoDB is not the application architecture itself.
+MongoDB normally connects them, but the architecture is not MongoDB-specific.
 
-## Top-level modules
-
-### `qnl_format_registry_builder`
-
-**Responsibility:** evidence ingestion and registry construction.
-
-It owns:
-
-- source configuration;
-- acquisition and content-addressed snapshots;
-- adapter-specific extraction;
-- normalization into common source records;
-- verified identifier claims;
-- conservative reconciliation into canonical formats;
-- preservation of raw/native source fields;
-- declarative criterion mapping;
-- generation and replacement/supersession of criterion claims;
-- institutional evidence and policy overlays;
-- persistence through `RegistryStore`;
-- run history and change detection;
-- optional JSON/JSONL/CSV/SQLite/Markdown exports.
-
-It does **not** own the final configurable risk framework used by the risk manager.
-
-### `preservation_risk_manager`
-
-**Responsibility:** evidence access, framework application, risk analysis, and presentation.
-
-It owns:
-
-- format resolution;
-- reading canonical formats and criterion claims;
-- global vs institution-scoped evidence selection;
-- evidence-pack construction;
-- framework loading and question definitions;
-- deterministic answer derivation;
-- deterministic scoring and band suppression;
-- targeted domain/question assessment;
-- evidence-gap diagnosis;
-- evidence-remediation planning;
-- local posture/policy proposal context;
-- natural-language request routing;
-- canonical structured request execution;
-- human-readable rendering;
-- bounded AI review/fill-gap workflows.
-
-It does **not** normally write or mutate the registry. Registry updates remain a registry-builder/storage workflow.
-
-## End-to-end data flow
+## 1. End-to-end architecture
 
 ```text
-                 SOURCE LAYER
- NARA   PRONOM   LOC FDD   QNL evidence   future sources
-   \       |        |          |              /
-    \      |        |          |             /
-             source adapters
-                    |
-                    v
-             source snapshots
-                    |
-                    v
-              RawFormatRecord
-                    |
-        normalize + reconcile identity
-                    |
-                    v
-             CanonicalFormat
-                    |
-      declarative criterion mappings
-                    |
-                    v
-              criterion_claims
-                    |
-                    v
-        RegistryStore / persistence layer
-          |          |           |
-        memory      file       MongoDB
-                    |
-                    v
-              RegistryReader
-                    |
-             FormatResolver
-                    |
-              evidence pack
-                    |
-             RiskFramework
-                    |
-      deterministic answer derivation
-                    |
-            deterministic scoring
-                    |
-       +------------+-------------+
-       |                          |
- canonical JSON                 human renderer
- system/API use                archivist-facing text
+                           SOURCE LAYER
+
+ PRONOM       LOC FDD        NARA        DPC        Wikidata       QNL/local
+    |             |             |          |            |              |
+    +-------------+-------------+----------+------------+--------------+
+                                  |
+                                  v
+                     qnl_format_registry_builder
+                                  |
+                     acquisition / SourceSnapshot
+                                  |
+                     source-specific extraction
+                                  |
+                           RawFormatRecord
+                                  |
+                  normalize identifiers and evidence
+                                  |
+                  authority-aware identity reconciliation
+                                  |
+                           CanonicalFormat
+                                  |
+             +--------------------+---------------------+
+             |                    |                     |
+             v                    v                     v
+       criterion_claims   risk_assessment_claims  relationship/context
+                                                   claims/evidence
+             |                    |                     |
+             +--------------------+---------------------+
+                                  |
+                                  v
+                         RegistryStore
+                  MongoDB | file | memory | plugin
+                                  |
+                                  v
+                         RegistryReader
+                                  |
+                         FormatResolver
+                                  |
+                         resolved format
+                                  |
+                  +---------------+----------------+
+                  |                                |
+                  v                                v
+          governed overall risk            framework diagnostics
+          source-risk synthesis            questions/completeness
+                  |                                |
+                  +---------------+----------------+
+                                  |
+                       preservation_risk_manager
+                                  |
+                   +--------------+---------------+
+                   |              |               |
+                   v              v               v
+              human CLI      batch reports     web/API
+                   |
+                   +---- optional AI-assisted synthesis
 ```
 
-## Registry identity model
+## 2. Registry Builder responsibility
 
-A source record is not automatically a canonical format. Adapters emit source-specific observations and identifier claims. Reconciliation combines records only when configured identifier evidence supports the relationship.
+`qnl_format_registry_builder` is the normal write/update owner.
 
-Examples of strong authority identifiers include verified PRONOM PUIDs, LOC FDD identifiers, and NARA identifiers. A copied PUID-like string from an institutional spreadsheet is useful evidence but is not treated as authority-verified merely because it resembles a PUID.
+It is responsible for:
 
-This separation allows the system to retain conflicting or incomplete upstream information without forcing unsafe merges.
+- source configuration and release policy;
+- online/local/offline acquisition;
+- content-addressed snapshots and hashes;
+- source adapters;
+- preservation of raw/native source values;
+- identifier claims and authority verification;
+- conservative canonical reconciliation;
+- source-native risk assessments;
+- declarative criterion mappings;
+- governed risk/criterion/relationship projections where configured/reviewed;
+- institution-scoped evidence/policy overlays;
+- incremental source replacement/reuse;
+- change detection and run provenance;
+- persistence and optional review exports.
 
-## Evidence model
+A source adapter should describe what the source actually says. It should not invent QNL policy or fill gaps merely to improve coverage.
 
-The architecture separates several concepts that should not be conflated:
+## 3. Preservation Risk Manager responsibility
+
+`preservation_risk_manager` is normally read-only with respect to registry evidence.
+
+It is responsible for:
+
+- resolving a user identifier/name to a canonical format;
+- reading current source evidence/claims;
+- applying the configured overall risk-synthesis policy;
+- preserving source-native labels/scales/scopes in output;
+- applying the separate question/framework model for evidence diagnostics;
+- evidence completeness/gap/remediation analysis;
+- optional AI-assisted synthesis;
+- human-readable output;
+- canonical JSON responses;
+- batch/watchlist monitoring and curator reports;
+- FastAPI web/API/Swagger presentation.
+
+It does not normally update MongoDB because an AI/model/user query reached a new conclusion.
+
+## 4. Identity is separate from evidence
+
+A source record is not automatically a canonical format.
 
 ```text
-source snapshot
-    raw acquired artifact retained for audit/replay
-
 source record
-    adapter-extracted representation of one upstream record
-
-canonical format
-    reconciled identity used as the registry's current format view
-
-criterion claim
-    normalized evidence statement mapped from source-native data
-
-institution evidence
-    institution-scoped evidence/context, e.g. QNL capability
-
-institution policy overlay
-    local decision/policy rather than universal format fact
-
-risk assessment
-    result of applying a selected framework to available claims
+    -> identifier claims
+    -> authority/reconciliation rules
+    -> canonical format
 ```
 
-The risk manager should not infer a source fact merely from a format name, extension, or common knowledge when the framework requires evidence. Missing evidence remains visible.
-
-## Common storage boundary
-
-The registry builder defines a generic `RegistryStore` interface. The minimum write/read operations are:
-
-```python
-upsert(collection, key, document)
-query(collection, filter)
-```
-
-Built-in implementations:
-
-- `memory`
-- `file` / `json_file`
-- `mongodb`
-
-A trusted external backend can be loaded through a `module:ClassName` plugin path if it subclasses `RegistryStore`.
-
-The risk manager deliberately depends on a smaller protocol: it needs `query(...)`. `RegistryReader` can instantiate a registry-builder backend from the same storage configuration or read a registry JSON export through `JsonRegistryStore`.
-
-Therefore assessment logic is backend-neutral.
-
-Read [`DATA_MODEL_AND_STORAGE_INTERFACE.md`](DATA_MODEL_AND_STORAGE_INTERFACE.md) for the full contract.
-
-## Common request/execution boundary
-
-The risk manager has another important interface: the canonical request API.
-
-Both human and machine entry points converge on the same controlled request:
+Strong identifier ownership is explicit:
 
 ```text
-Human:
-"What are the software dependency risks of PDF?"
+PRONOM -> PUID
+LOC    -> LOC FDD ID
+NARA   -> NARA ID
+Wikidata -> QID only
+```
+
+A PUID copied by Wikidata/NARA/LOC/local data remains a useful cross-reference claim but is not automatically authority-verified.
+
+This rule prevents a convenient copied identifier from silently merging the wrong records.
+
+## 5. Evidence layers are separate
+
+The architecture deliberately preserves several different objects:
+
+```text
+SourceSnapshot
+    exact acquired artifact / URI / hash / time
+
+source_record
+    source-specific extracted evidence
+
+canonical_format
+    reconciled current identity view
+
+criterion_claim
+    normalized preservation observation with mapping provenance
+
+risk_assessment_claim
+    source-native overall/summary risk assessment with scope/provenance
+
+source_relationship_claim
+    governed contextual/cross-registry relationship
+
+institution evidence/policy
+    local evidence/decision, scoped to an institution
+
+Risk Manager result
+    a read-time interpretation/synthesis, not a source fact
+```
+
+Do not collapse these layers into one generic risk record.
+
+## 6. Two different risk-analysis layers
+
+The current system intentionally has **two separate analysis layers**.
+
+### 6.1 Governed source-level overall risk synthesis
+
+This answers questions such as:
+
+```text
+What is the preservation risk of fmt/276?
+```
+
+Input is current governed source-level risk evidence, for example NARA and DPC.
+
+Rules are loaded from the versioned synthesis policy:
+
+```text
+preservation_risk_manager/src/preservation_risk_manager/config/
+  qnl_preservation_risk_synthesis.v1.json
+```
+
+The policy controls:
+
+- semantic risk vocabulary and rank;
+- source-native terminology mapping;
+- source roles;
+- scope precedence;
+- scope selection;
+- same-scope aggregation;
+- broader-scope treatment;
+- missing-assessment behavior;
+- numeric aggregation policy.
+
+The executor is generic: policy choices are selected by configuration rather than hard-coded NARA/DPC headline logic.
+
+Key invariant:
+
+```text
+missing source evidence != Low
+```
+
+### 6.2 Question/framework evidence assessment
+
+The 8-domain / 22-question draft framework asks preservation-relevant questions and reports evidence coverage, unanswered questions and diagnostic scoring.
+
+This is **not** the same object as governed source-level overall risk.
+
+The broad framework currently remains draft/unvalidated with operational banding disabled. Missing questions contribute to uncertainty/completeness diagnostics, not automatically to a higher/lower source-risk level.
+
+## 7. Scope-aware synthesis
+
+Source assessments can apply at different scopes:
+
+```text
+exact format / format version
+format family
+format group
+content type
+contextual
+institution-specific format
+```
+
+The active policy decides precedence and aggregation.
+
+Under the current QNL policy, more specific populated scope contributes the governed headline and broader assessments remain visible context.
+
+Example:
+
+```text
+PDF 1.7 / fmt/276
+
+NARA: exact PDF 1.7 -> Low
+DPC:  PDF group      -> Vulnerable / Moderate
+
+headline -> Low under configured exact-scope precedence
+context  -> DPC Vulnerable remains visible
+```
+
+The engine does not average heterogeneous source numeric scales.
+
+## 8. Configurable risk terminology
+
+A source may use its own vocabulary:
+
+```text
+NARA: Low Risk / native numeric matrix
+DPC: Vulnerable / Endangered / ...
+future source: another native vocabulary
+```
+
+The original native value is retained.
+
+A source-specific configured rule maps it to the semantic vocabulary understood by governed synthesis and AI integration:
+
+```text
+native term
+ -> source rule
+ -> semantic level
+```
+
+Unknown values remain unmapped rather than being guessed by keywords.
+
+See [`../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md`](../preservation_risk_manager/docs/RISK_SYNTHESIS_AND_TERMINOLOGY.md).
+
+## 9. AI-assisted synthesis
+
+AI is an optional second analysis result, not the evidence authority.
+
+The Risk Manager prepares one context containing:
+
+```text
+resolved format identity
++ collected registry/source evidence
++ governed source-level synthesis
++ active synthesis methodology
++ framework/context
+```
+
+Then:
+
+```text
+AI provider receives context
+ -> model uses available capabilities when useful
+ -> returns structured AI-assisted synthesis
+ -> application validates/normalizes audit metadata
+ -> result is displayed beside governed baseline
+```
+
+The AI may agree or disagree with the governed result.
+
+Application-owned integrity rules remain:
+
+- source-native evidence is not rewritten;
+- AI output is not automatically written to MongoDB;
+- external information must not be attributed to registry sources;
+- missing evidence stays missing;
+- governed baseline stays visible;
+- institution/private evidence suppresses public web-search tooling;
+- baseline-relation metadata is deterministically checked from semantic levels.
+
+### Provider capabilities
+
+Azure OpenAI has a native single-call Responses path with optional `web_search` exposed automatically.
+
+Generic OpenAI-compatible endpoints use a one-call structured Chat Completions path and do not assume vendor-hosted web search.
+
+See [`AI_PROVIDERS.md`](AI_PROVIDERS.md).
+
+## 10. Human, machine, batch and web interfaces
+
+All presentation modes should reuse the same core evidence/risk logic.
+
+```text
+one-format CLI `ask`
+       |
+machine `query-json`
+       |
+batch `batch-report`
+       |
+FastAPI background job
+       |
+       +--> same RegistryReader / resolver / governed synthesis / optional AI core
+```
+
+This avoids a dashboard or scheduler silently acquiring its own risk rules.
+
+## 11. Batch/periodic monitoring
+
+Periodic assessment is a normal application mode:
+
+```text
+controlled watchlist of PUIDs/IDs
+ -> resolve each format
+ -> governed risk from current registry
+ -> optional AI synthesis
+ -> HTML/CSV/JSON/ZIP report
+```
+
+The report leads with governed source-level risk; framework completeness and AI output are supporting/separate layers.
+
+The same batch core is used by CLI and web background jobs.
+
+## 12. Incremental source updates
+
+Normal source maintenance is not a reinstall.
+
+```text
+refresh selected source A
+       |
+       +--> new successful A evidence
+       +--> latest successful B/C/D evidence reused
        |
        v
-AI request router (intent only)
+reconcile complete active evidence set
        |
        v
-{
-  "action": "assess_format_questions",
-  "format": "PDF",
-  "filters": {
-    "domains": ["software_dependencies_environment"]
-  }
-}
-       |
-       +-------------------------+
-       |                         |
-       v                         v
-execute_request()           system sends JSON directly
-       |                         |
-       +------------+------------+
-                    v
-          deterministic result JSON
-             |              |
-             v              v
-       human renderer    API/integration consumer
+persist new current view + retain history
 ```
 
-The model is not allowed to substitute general AI knowledge for the registry result. It only selects a supported action/parameters for human prompts.
+A failed optional source is not treated as an empty source. Required-source failure fails the run.
 
-## Deterministic vs AI responsibilities
+Pinned release behavior remains controlled by source configuration.
 
-### Deterministic/application-owned
+Wikidata is a special guarded preflight/apply refresh rather than an ordinary broad crawl.
 
-- format identity and resolution rules;
-- framework questions and allowed answer IDs;
-- evidence-field declarations;
-- source-to-criterion mapping rules;
-- evidence scope;
-- scoring weights and score bands;
-- completeness thresholds;
-- final deterministic risk band;
-- evidence-gap classification;
-- remediation action categories/priorities;
-- local posture logic;
-- canonical JSON result.
+See [`OPERATIONS.md`](OPERATIONS.md).
 
-### Bounded AI responsibilities
+## 13. Storage boundary
 
-- translate human language into a supported structured request;
-- in `fill-gaps`, interpret evidence only for unresolved questions and choose an allowed framework answer when supported;
-- in `review-all`, independently review raw source evidence for calibration without changing deterministic answers;
-- provider/model plumbing through a provider-neutral interface.
+The Registry Builder defines `RegistryStore`; Risk Manager consumes a smaller query/read contract through `RegistryReader`.
 
-AI must not invent evidence, add unsupported formats, change stored policy, or silently override deterministic scoring.
+Supported storage modes include:
 
-## Human output vs machine output
+- memory;
+- file/JSON;
+- MongoDB;
+- trusted plugin backend.
 
-The underlying result is canonical JSON. Presentation differs by mode.
+MongoDB is the normal persistent implementation, not the definition of the data model.
 
-### Human mode
+Detailed physical schema/indexes: [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md).
 
-`ask` accepts a natural-language question and renders a detailed archivist-facing answer. It should include relevant conclusions, evidence coverage, supporting evidence, unresolved questions, and calibration/coverage cautions.
+## 14. Global versus institutional scope
 
-### Machine mode
-
-`query-json` accepts a controlled request and emits canonical JSON. This is the intended pattern for application integration, APIs, dashboards, scheduled processes, and automated evaluation.
-
-`ask --json` is available for debugging/auditing the human route, including AI router metadata.
-
-## Framework governance
-
-A framework is configuration, not hidden model behavior.
-
-The current repository contains:
-
-- a small calibrated example framework used to test deterministic scoring;
-- a broad 8-domain / 22-question draft framework used for operational evidence assessment.
-
-The broad framework has overall banding disabled until QNL validates question weights and Low/Moderate/High thresholds. This prevents a comprehensive-looking draft question set from being mistaken for approved institutional policy.
-
-## Global and institutional scope
-
-Evidence scope is part of the architecture.
-
-Global assessment:
+Global evidence and institution-specific evidence remain separate.
 
 ```text
-uses global/external evidence
-excludes institution-scoped evidence
+global assessment
+ -> global/external evidence only
+
+institution assessment
+ -> global/external evidence
+  + matching institution-scoped evidence
 ```
 
-Institution assessment, for example `qnl`:
+A local statement such as "QNL has no current migration tool" must not become a universal claim that no tool exists.
+
+## 15. Extension points
+
+The supported architecture has explicit extension points:
+
+1. **Source adapter** — add another preservation-data source.
+2. **Criterion/risk mapping configuration** — map a source-native vocabulary without changing the source record.
+3. **Synthesis policy** — change risk vocabulary/scope/aggregation rules through reviewed configuration.
+4. **Storage adapter** — persist the common model elsewhere.
+5. **AI provider** — call another model/provider without changing governance semantics.
+6. **Presentation layer** — CLI/API/dashboard/report consuming the same application core.
+
+## 16. What must not be hard-coded by a source
+
+Avoid source-specific application logic such as:
 
 ```text
-uses global/external evidence
-+ matching QNL-scoped evidence
-+ local readiness/exposure context where requested
+if source == NARA then headline wins
+if label contains "bad" then High
+if source missing then Low
+average NARA score with DPC classification
 ```
 
-Institutional observations therefore enrich QNL decisions without rewriting universal statements about a format.
-
-## Update ownership
-
-The current normal update path is:
+Instead:
 
 ```text
-source changes / new institutional evidence
-        |
-        v
-registry builder / source or evidence adapter
-        |
-        v
-RegistryStore.upsert(...)
-        |
-        v
-new/current source records + claims + canonical view
-        |
-        v
-risk manager reads refreshed evidence on next query
+source preserves native evidence
+ -> configured source terminology mapping
+ -> configured scope/aggregation synthesis policy
 ```
 
-A future API may expose controlled write/update operations, but it should call the registry/service abstraction rather than write directly to MongoDB collections. The backend must remain replaceable and validation/provenance rules must remain in the application layer.
+Provider/API code may be provider-specific, but risk semantics should remain governed configuration.
 
-## Extension points
+## 17. Where to go next
 
-The architecture is designed for extension in three places:
-
-1. **Source adapters** — add a new preservation registry or institutional source.
-2. **Storage adapters** — persist the common document model somewhere other than memory/file/MongoDB.
-3. **AI providers** — use Azure OpenAI, an OpenAI-compatible server, or future local/hosted inference without changing deterministic analysis.
-
-Future API/web UI/scheduler layers should sit above the canonical request API and `RegistryReader`, not duplicate assessment logic.
-
-## Related documentation
-
-- Shared data/storage contract: [`DATA_MODEL_AND_STORAGE_INTERFACE.md`](DATA_MODEL_AND_STORAGE_INTERFACE.md)
-- Registry-builder architecture: [`../qnl_format_registry_builder/docs/ARCHITECTURE.md`](../qnl_format_registry_builder/docs/ARCHITECTURE.md)
-- Registry-builder adapter implementation: [`../qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](../qnl_format_registry_builder/docs/ADAPTER_IMPLEMENTATION_GUIDE.md)
-- Risk-manager architecture: [`../preservation_risk_manager/docs/ARCHITECTURE.md`](../preservation_risk_manager/docs/ARCHITECTURE.md)
-- Human/system queries: [`../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md`](../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md)
+- Data objects/collections: [`DATA_MODEL.md`](DATA_MODEL.md)
+- Install: [`INSTALLATION.md`](INSTALLATION.md)
+- Operate/update: [`OPERATIONS.md`](OPERATIONS.md)
+- Add a source: [`HOW_TO_ADD_A_SOURCE.md`](HOW_TO_ADD_A_SOURCE.md)
+- Source catalogue: [`sources/README.md`](sources/README.md)
+- Curator examples: [`USE_CASES.md`](USE_CASES.md)
+- AI providers: [`AI_PROVIDERS.md`](AI_PROVIDERS.md)
+- API/Swagger: [`API_AND_SWAGGER.md`](API_AND_SWAGGER.md)
