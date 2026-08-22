@@ -146,12 +146,32 @@ def _prompt(
         "Produce a preservation-risk synthesis using only this bounded context. For source_interpretations, "
         "include only S-prefixed evidence whose kind is source_native_risk_assessment and only when its risk "
         "meaning is explicit enough to map to the configured semantic scale. Do not reinterpret R-prefixed "
-        "governed assessments; their configured mapping is binding. The application will re-run the configured "
-        "scope/aggregation policy after your source interpretations, so your proposed_overall_level is advisory "
-        "when mapped source-level assessments exist. When there is no mapped source-level assessment, you may "
-        "propose an overall level from cited supporting evidence only if the policy permits. Otherwise return "
-        "unassessed.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
+        "governed assessments; their configured mapping is binding. Do not reinterpret S-prefixed source-native "
+        "risk evidence when the supplied policy already maps that source/value. The application will re-run the "
+        "configured scope/aggregation policy after your source interpretations, so your proposed_overall_level is "
+        "advisory when mapped source-level assessments exist. When there is no mapped source-level assessment, "
+        "you may propose an overall level from cited supporting evidence only if the policy permits. Otherwise "
+        "return unassessed.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
+
+
+def _source_evidence_as_assessment(evidence_item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "source_id": evidence_item.get("source_id"),
+            "source_type": evidence_item.get("source_type"),
+            "source_record_id": evidence_item.get("source_record_id"),
+            "source_label": evidence_item.get("source_name"),
+            "native_label": evidence_item.get("native_label"),
+            "native_score": evidence_item.get("native_score"),
+            "native_scale": evidence_item.get("native_scale"),
+            "semantic_level": evidence_item.get("semantic_level"),
+            "scope_type": evidence_item.get("scope_type"),
+            "scope_name": evidence_item.get("scope_name"),
+        }.items()
+        if value is not None
+    }
 
 
 def _validate_response(
@@ -196,6 +216,15 @@ def _validate_response(
         if referenced.get("kind") != "source_native_risk_assessment":
             raise AIProviderError(
                 f"AI source interpretation ref '{ref}' is not a source_native_risk_assessment."
+            )
+        source_evidence = referenced.get("evidence")
+        if not isinstance(source_evidence, dict):
+            raise AIProviderError(f"AI source interpretation ref '{ref}' has invalid evidence payload.")
+        configured = normalize_assessment(_source_evidence_as_assessment(source_evidence), policy)
+        if configured.get("policy_status") == "mapped":
+            raise AIProviderError(
+                f"AI source interpretation ref '{ref}' is already normalized by configured rule "
+                f"'{configured.get('policy_rule_id')}'. Configured mappings are binding."
             )
         level = str(item.get("semantic_level") or "")
         if level not in allowed_levels:
