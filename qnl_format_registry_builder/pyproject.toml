@@ -5,6 +5,9 @@ description = "Repeatable pipeline for building and updating a local file-format
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6.0"]
 
+[project.scripts]
+qnl-registry-refresh = "registry_builder.refresh:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 mongo = ["pymongo>=4.8"]
