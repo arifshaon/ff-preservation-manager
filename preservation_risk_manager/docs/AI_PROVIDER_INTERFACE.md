@@ -1,124 +1,67 @@
 # AI provider interface
 
-The preservation risk manager uses a provider-neutral AI interface so natural-language routing and bounded evidence interpretation are not coupled to one vendor/model.
+This is the **developer reference** for the provider-neutral AI layer in `preservation_risk_manager`.
 
-The application—not the model—owns:
+For operator configuration, vendor examples, and the current Azure/OpenAI/Gemini/Claude compatibility matrix, use the canonical repository guide:
 
-- registry evidence and provenance;
-- format resolution;
-- supported request actions;
-- risk-framework questions/answers;
-- deterministic answer derivation;
-- scoring/banding;
-- evidence-gap/remediation rules;
-- institutional scope/posture;
-- canonical JSON results;
-- policy approval.
+**[`../../docs/AI_PROVIDERS.md`](../../docs/AI_PROVIDERS.md)**
 
-AI supplies language-model inference only within explicitly bounded workflows.
+## Current implementation boundary
 
-For the user-facing AI modes (`ask`, `fill-gaps`, `review-all`) see **[`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)**. This document focuses on the provider/configuration contract.
+The application owns and preserves:
 
-## Current providers
+- resolved registry identity;
+- source-native evidence and provenance;
+- governed source-risk synthesis;
+- criterion claims and framework configuration;
+- deterministic question/gap/remediation results;
+- registry writes and policy approval boundaries.
 
-### Azure OpenAI
+AI may be used for:
 
-Use:
+- natural-language request routing;
+- bounded format-identification fallback;
+- overall AI-assisted preservation-risk synthesis;
+- `fill-gaps` question interpretation;
+- `review-all` calibration/QA.
 
-```json
-"provider": "azure_openai"
-```
+AI output does not silently rewrite MongoDB evidence, source-native assessments, reviewed mappings, or the governed/config baseline.
 
-Committed example:
+## Supported provider classes
 
-```text
-examples/ai.azure.example.json
-```
+### `azure_openai`
 
-Copy it to a local ignored config before inserting real credentials:
-
-```powershell
-New-Item -ItemType Directory -Force config | Out-Null
-Copy-Item examples\ai.azure.example.json config\ai.local.json
-```
-
-Example shape:
-
-```json
-{
-  "ai": {
-    "provider": "azure_openai",
-    "endpoint": "https://example-resource.openai.azure.com/",
-    "api_key_env": "QNL_AZURE_OPENAI_API_KEY",
-    "api_version": "2024-10-21",
-    "deployment": "<AZURE_OPENAI_DEPLOYMENT_NAME>",
-    "temperature": 0.0,
-    "max_output_tokens": 1200,
-    "timeout_seconds": 60
-  }
-}
-```
-
-A direct local `api_key` is supported, but environment-variable/secret-store handling is preferred. Never commit real keys.
-
-### OpenAI-compatible hosted/local endpoint
-
-Use:
-
-```json
-"provider": "openai_compatible"
-```
-
-Aliases include `openai` and `local`.
-
-A committed local template now ships at:
+Implemented by:
 
 ```text
-examples/ai.local.example.json
+ai/providers/azure_openai.py
 ```
 
-Copy it:
+Azure supports the normal chat/structured-output path and, for eligible global overall synthesis, the Responses API with hosted `web_search` exposed using automatic tool choice.
 
-```powershell
-New-Item -ItemType Directory -Force config | Out-Null
-Copy-Item examples\ai.local.example.json config\ai.local.json
+### `openai_compatible`
+
+Implemented by:
+
+```text
+ai/providers/openai_compatible.py
 ```
 
-Template shape:
+Aliases include:
 
-```json
-{
-  "ai": {
-    "provider": "openai_compatible",
-    "endpoint": "http://127.0.0.1:8000/v1",
-    "model": "<LOCAL_MODEL_NAME>",
-    "temperature": 0.0,
-    "max_output_tokens": 1200,
-    "timeout_seconds": 60
-  }
-}
+```text
+openai
+local
+openai-compatible
 ```
 
-Edit `endpoint` and `model` to match the local inference server. A key is optional for a compatible local endpoint that does not require authentication; the adapter supplies an internal non-secret placeholder to the SDK in that case.
+This path targets OpenAI-compatible hosted or local Chat Completions endpoints. It intentionally does **not** inherit Azure's hosted web-search behavior.
 
-This provider can be used with compatible vLLM, llama.cpp, Ollama gateways, or other OpenAI-compatible HTTP servers. Strict structured-output/tool support depends on the actual server and model, so validate capabilities before relying on human routing or AI-assisted analysis.
+Compatibility depends on the endpoint/model actually implementing the OpenAI features required by the workflow, especially structured output and tool calling.
 
-## Installation
+## Provider-neutral abstractions
 
-AI SDK support is optional:
-
-```powershell
-cd preservation_risk_manager
-python -m pip install -e ".[dev,ai]"
-```
-
-The `ai` extra installs the OpenAI Python SDK used by the Azure and OpenAI-compatible adapters.
-
-Deterministic `query-json` and `analyze-format` do not require AI.
-
-## Provider-neutral core abstractions
-
-The `ai` package defines normalized application types including:
+Defined in `ai/base.py`:
 
 ```text
 AIProvider
@@ -129,200 +72,126 @@ AIUsage
 AIMessage
 AIToolDefinition
 AIToolCall
-AIError / provider/configuration error types
+AIError / AIConfigurationError / AIProviderError
 ```
 
-Provider implementations translate these types to/from their SDK/protocol. Preservation logic must not depend on an Azure-specific response object.
+Preservation logic should depend on these normalized types rather than vendor SDK response objects.
 
-## Configuration and secret handling
+## Configuration
 
-The loader can use a direct key:
+Loaded through `AIProviderConfig` in `ai/config.py`.
+
+Important fields include:
+
+```text
+provider
+endpoint
+api_key / api_key_env
+api_version
+deployment / model
+temperature
+max_output_tokens
+tokens_per_minute
+response_verbosity
+timeout_seconds
+max_retries
+human_format_assessment_limit
+external_research.allowed_domains
+external_research.blocked_domains
+```
+
+`web_research.enabled` may still be accepted from older local configuration for compatibility, but it is not the active capability switch. Capability availability is provider-driven.
+
+## Secret handling
+
+Prefer environment variables:
 
 ```json
-"api_key": "..."
+{
+  "ai": {
+    "api_key_env": "QNL_AZURE_OPENAI_API_KEY"
+  }
+}
 ```
 
-or environment variable:
+Do not commit real keys. Redacted configuration output must never reveal them.
 
-```json
-"api_key_env": "QNL_AZURE_OPENAI_API_KEY"
-```
+## Diagnostic commands
 
-Placeholder-looking configuration is rejected where required. Configuration description/redaction must never echo the secret.
-
-## Validate configuration without a network call
+Show redacted configuration:
 
 ```powershell
 python -m preservation_risk_manager.ai info `
   --config config\ai.local.json
 ```
 
-This prints redacted provider configuration.
-
-## Provider smoke test
+Smoke test:
 
 ```powershell
 python -m preservation_risk_manager.ai query `
   --config config\ai.local.json `
-  --prompt "Reply with a short confirmation that the provider is available."
+  --prompt "Reply with a short confirmation."
 ```
 
-This checks inference/connectivity only.
-
-## Validate structured output
+Validate structured output:
 
 ```powershell
 python -m preservation_risk_manager.ai validate-structured `
   --config config\ai.local.json
 ```
 
-Structured output is important because routing/evidence interpretation must return controlled application fields rather than free-form scores.
-
-## Validate tool calling
+Validate tool calling:
 
 ```powershell
 python -m preservation_risk_manager.ai validate-tools `
   --config config\ai.local.json
 ```
 
-Capability support should be verified independently for each local server/model combination.
+## Overall synthesis path
 
-## Current AI roles
-
-### 1. Natural-language request routing
-
-`ask` uses `ai/request_router.py`.
-
-Example:
+The active overall AI path is implemented primarily by:
 
 ```text
-Human:
-"What are the software dependency risks of PDF?"
-
-AI-routed request:
-{
-  "action": "assess_format_questions",
-  "format": "PDF",
-  "filters": {
-    "domains": ["software_dependencies_environment"]
-  }
-}
+ai/capability_synthesis.py
+ai/capability_result.py
 ```
 
-The router does not answer whether PDF is risky. It selects a supported action/parameters. `request_api.execute_request(...)` then queries the registry and runs deterministic assessment.
+The AI receives a compact, auditable context containing the resolved format, governed source assessments, source-native/criterion evidence, framework context, synthesis policy, and governed baseline.
 
-Machine integrations should bypass this AI step and send the structured request directly through `query-json` or a future wrapper around the same canonical request layer.
+For Azure global/public synthesis, a single Responses request may expose hosted web search. For OpenAI-compatible providers, the same high-level synthesis uses the provider's normal structured Chat Completions contract without Azure-specific web search.
 
-### 2. `fill-gaps` evidence interpretation
+Institution-scoped/private evidence suppresses public web-search capability while still allowing the configured model to analyse the supplied context.
 
-`analyze-format-ai --ai-mode fill-gaps` starts with deterministic answer derivation.
+The result records AI risk level, confidence, rationale, uncertainty, evidence references, capability use, and external URLs when returned. `capability_result.py` independently normalizes the reported relationship to the governed baseline from the returned semantic levels.
 
-Only unresolved/ambiguous framework questions are eligible for AI interpretation. The model receives bounded evidence and must choose a framework-declared answer ID.
+## Token budgeting
 
-Safety properties:
+When `tokens_per_minute` is configured, structured synthesis reserves enough output room to finish valid JSON and compacts prompt evidence to remain inside the configured TPM allowance.
 
-- resolved deterministic answers are not replaced;
-- fabricated evidence identifiers are rejected;
-- model output cannot introduce arbitrary answer IDs;
-- no usable evidence should result in abstention/no provider call rather than guessing;
-- scoring remains deterministic after the controlled answer document is assembled.
+This budgeting is synthesis-specific; `max_output_tokens` remains the normal output setting for smaller routing/helper calls.
 
-### 3. `review-all` independent calibration
+## Adding a provider
 
-`analyze-format-ai --ai-mode review-all` independently evaluates eligible questions for calibration/evaluation.
+A new native provider should:
 
-The review prompt uses **raw-source-only evidence** and excludes deterministic answer/status, normalized mapped values used as answer shortcuts, score/band/posture, and mapping fields that would leak the reference answer.
+1. implement `AIProvider`;
+2. accurately declare `AIProviderCapabilities`;
+3. translate `AIRequest` to the provider API without changing preservation semantics;
+4. normalize responses into `AIResponse`;
+5. support structured output required by workflows that depend on it;
+6. expose external/search capabilities only when genuinely supported;
+7. preserve provider/model/usage/audit metadata;
+8. add provider-contract tests;
+9. register the provider in `ai/factory.py`.
 
-After the model responds, its controlled answer is compared with the deterministic answer. A divergence is a review signal; it does not automatically change deterministic scoring or mappings.
-
-## Example commands
-
-### Human routing
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What are the software dependency and environment risks of PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
-```
-
-### Fill unresolved questions
-
-```powershell
-python -m preservation_risk_manager analyze-format-ai `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
-  --ai-config config\ai.local.json `
-  --ai-mode fill-gaps
-```
-
-### Independent review
-
-```powershell
-python -m preservation_risk_manager analyze-format-ai `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
-  --ai-config config\ai.local.json `
-  --ai-mode review-all
-```
-
-## Structured output contract
-
-`AIRequest` can carry a JSON Schema. Provider adapters normalize parsed output into `AIResponse.structured`.
-
-Application code validates the result against its allowed action/answer schema before deterministic execution. A model's structured output remains untrusted input until validated.
-
-## Tool calling contract
-
-`AIRequest` can carry `AIToolDefinition` objects and providers can return normalized `AIToolCall` objects.
-
-Future tool-oriented assistants should expose controlled application functions above `RegistryReader`/`request_api`, not arbitrary MongoDB access or scoring-rule mutation.
-
-Appropriate boundaries include:
-
-```text
-resolve/search formats
-execute canonical assessment request
-get evidence/provenance
-compare assessments/history
-```
-
-## Provider switching and deterministic equivalence
-
-Switching providers/models must not change:
-
-- stored evidence;
-- identifier reconciliation;
-- framework definitions;
-- deterministic mapped answers;
-- scoring code;
-- band thresholds;
-- evidence-gap/remediation rules.
-
-Provider changes can affect routing quality or AI interpretation/review behavior, so those need evaluation, but the deterministic reference result remains application-owned.
-
-## Evaluation areas
-
-Useful AI evaluation dimensions include:
-
-- format/request resolution;
-- correct action selection;
-- structured-output validity;
-- appropriate abstention;
-- evidence-reference validity;
-- hallucination rate;
-- agreement/divergence against reviewed deterministic examples;
-- recommendation boundedness;
-- latency/token usage.
+Do not make source-risk logic, registry writes, or QNL policy provider-specific.
 
 ## Related documentation
 
-- [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md)
-- [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
-- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
-- [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- Operator/provider setup: [`../../docs/AI_PROVIDERS.md`](../../docs/AI_PROVIDERS.md)
+- Installation: [`../../docs/INSTALLATION.md`](../../docs/INSTALLATION.md)
+- Repository architecture: [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- AI analysis behavior: [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
+- CLI reference: [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
+- Human/system interface: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- Module reference: [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md)
