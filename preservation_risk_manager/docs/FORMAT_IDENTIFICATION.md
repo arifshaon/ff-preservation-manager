@@ -1,6 +1,6 @@
 # Format identification and resolution
 
-The preservation-risk workflow begins with a **format observation** that must resolve to one canonical format before risk analysis continues.
+The preservation-risk workflow begins with a **format observation** that must resolve to one current canonical format before format-specific evidence can be assessed.
 
 Typical inputs include:
 
@@ -13,52 +13,44 @@ PDF 1.4
 Adobe Flash SWF
 ```
 
-The input may come from a human, an AIP metadata record, DROID, Siegfried, another characterization service, or an external integration.
+The observation may come from a person, repository metadata, DROID, Siegfried, another characterization service, or an external integration.
 
-## Core rule
+## Resolution principle
 
 ```text
 format observation
       ↓
-programmatic resolution
-      ↓ if unresolved/ambiguous and AI identification enabled
+programmatic normalization/resolution
+      ↓ if unresolved or ambiguous and AI identification is enabled
 bounded AI candidate selection
       ↓
 verified local CanonicalFormat
       ↓
-deterministic evidence / risk assessment
-      ↓ if --ai-mode is enabled
-bounded AI-assisted risk interpretation/review
+governed evidence/risk workflow
+      ↓ optional
+AI-assisted synthesis / question review
 ```
 
-Risk analysis does **not** begin until a canonical registry format has been resolved.
+Risk analysis does not invent a new format identity. It operates on an existing local canonical registry record.
 
-AI identification and AI risk assessment are separate permissions:
-
-- `--enable-ai-identification` allows AI to help resolve an otherwise unresolved/ambiguous format observation against local registry candidates.
-- `--ai-mode fill-gaps|review-all` enables AI-assisted risk analysis only after a canonical format has been resolved.
-
-They may use the same configured provider, but enabling identification alone does not silently alter risk analysis.
-
-## Default mode: programmatic only
+## Programmatic resolution
 
 AI identification is disabled by default.
 
-The resolver first uses the existing deterministic `FormatResolver` precedence:
+The resolver uses conservative precedence such as:
 
 ```text
-canonical ID                         highest
+canonical ID
 verified authority identifier
 other authority identifier
-exact name
+exact name/alias
 MIME type
 extension
-alias                               lowest
 ```
 
-Ambiguity is returned instead of guessed.
+Strong identifiers and exact identity signals outrank weak/generic matches. Ambiguity is returned rather than guessed.
 
-The identification layer then applies conservative syntax normalization before giving up. Current examples include:
+Safe syntax normalization includes forms such as:
 
 ```text
 PRONOM fmt 18  -> fmt/18
@@ -67,303 +59,138 @@ fmt-18         -> fmt/18
 x-fmt 123      -> x-fmt/123
 ```
 
-This normalization changes syntax only. It does not use general format knowledge to infer a version or identifier.
+Syntax normalization does not infer an unknown version or identifier from general knowledge.
 
-Candidate generation for optional AI review is broader than deterministic identity resolution. Descriptive input is tokenized so exact observations such as `SWF`, `JPEG`, or `TIFF` remain strong shortlist signals even when embedded in longer prose.
+## Optional AI identification
 
-## Optional AI fallback plugin
-
-The AI plugin is implemented by:
-
-```text
-preservation_risk_manager.format_identification.AIFormatIdentificationPlugin
-```
-
-The orchestration layer is:
+Implemented through:
 
 ```text
 IdentificationResolver
+AIFormatIdentificationPlugin
 ```
 
-When enabled, AI is called only after exact/programmatic resolution remains unresolved or ambiguous.
+When enabled, the model receives a bounded shortlist of **existing local canonical candidates** after normal programmatic resolution is unresolved or ambiguous.
 
-### Safety boundary
-
-The model receives a bounded shortlist of **existing local canonical registry candidates**.
-
-It may:
+The model may:
 
 - select one supplied candidate;
-- provide a confidence value and rationale;
+- return confidence/rationale;
 - abstain.
 
 It may not:
 
 - invent a PUID;
-- invent a new canonical format;
-- select a canonical ID that was not supplied;
+- invent a canonical format;
+- select an ID outside the supplied candidate set;
 - bypass the local registry;
-- change preservation-risk evidence or scoring.
+- modify preservation evidence or risk results.
 
-Even a high-confidence AI answer is accepted only if its selected `canonical_id` exists in the supplied local candidate set.
-
-Default minimum accepted confidence is:
-
-```text
-0.80
-```
+The default minimum accepted confidence is `0.80` unless overridden.
 
 ## Failure behavior
 
-AI is an optional enhancement, not a dependency of deterministic assessment.
+AI identification is optional. If the provider fails, times out, returns malformed data, selects an unknown candidate, falls below threshold, or abstains, the programmatic resolution state is retained.
 
-If the identification provider:
+This keeps format identification failure separate from preservation-risk evidence.
 
-- times out;
-- is unavailable;
-- returns malformed output;
-- returns a candidate outside the supplied set;
-- falls below the configured confidence threshold;
-- abstains;
+## Human use
 
-then the programmatic identification result is retained.
+Normal human query:
 
-If AI risk assessment fails after canonical resolution, the deterministic risk assessment is retained and the response reports:
-
-```text
-error_deterministic_retained
+```powershell
+python -m preservation_risk_manager ask `
+  "What is the preservation risk of fmt/276?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --ai-config config\ai.local.json `
+  --ai-mode synthesize
 ```
 
-The response metadata reports whether AI was attempted and why it was accepted/rejected.
-
-## AI-assisted risk assessment after identification
-
-Once identification succeeds, `--ai-mode` can continue the same request into the existing bounded AI risk engine.
-
-### `fill-gaps`
-
-```text
-canonical format
-   ↓
-deterministic evidence pack
-   ↓
-deterministic answer derivation
-   ↓
-AI receives only unresolved/ambiguous questions + supplied evidence
-   ↓
-AI may interpret supplied evidence or abstain
-   ↓
-AI-assisted analysis + deterministic baseline retained
-```
-
-Deterministically resolved answers are not silently replaced in this mode.
-
-### `review-all`
-
-```text
-canonical format
-   ↓
-deterministic baseline
-   +
-independent raw-source-only AI review
-   ↓
-agreement/divergence audit
-```
-
-This mode is for calibration and review. AI review does not replace deterministic scoring inputs.
-
-## Human mode
-
-Human question routing already requires an AI provider. Format-identification and risk-analysis AI remain separately controlled.
-
-Identification only:
+Enable bounded AI identification only when useful:
 
 ```powershell
 python -m preservation_risk_manager ask `
   "What is the preservation risk of old adobe flash movie?" `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --enable-ai-identification
-```
-
-Identification plus AI-assisted risk analysis:
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What is the preservation risk of Adobe Shockwave Flash SWF?" `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
   --ai-config config\ai.local.json `
   --enable-ai-identification `
-  --ai-mode fill-gaps
+  --identification-ai-min-confidence 0.85 `
+  --ai-mode synthesize
 ```
 
-The same provider is reused for request routing, optional identification, and optional AI risk analysis.
+AI identification and AI risk synthesis are separate stages. A specific PUID such as `fmt/276` normally does not need AI identification.
 
-Optional threshold:
+## Machine use
 
-```powershell
---identification-ai-min-confidence 0.90
-```
+Prefer a request file in PowerShell:
 
-## Machine mode
-
-For Windows PowerShell, prefer a request file instead of inline JSON because native-command quote handling can alter embedded JSON quotes.
-
-Create a request:
-
-```powershell
-$json = @'
+```json
 {
   "action": "assess_format",
-  "format": "Adobe Shockwave Flash SWF file",
+  "format": "fmt/276",
   "scope": "global"
 }
-'@
-
-[System.IO.File]::WriteAllText(
-  "$PWD\request-flash.json",
-  $json,
-  (New-Object System.Text.UTF8Encoding($false))
-)
 ```
-
-Programmatic identification + deterministic risk assessment only:
 
 ```powershell
 python -m preservation_risk_manager query-json `
-  --request request-flash.json `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+  --request request.json `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json
 ```
 
-AI identification fallback, but deterministic risk assessment:
+Optional AI identification flags:
 
-```powershell
-python -m preservation_risk_manager query-json `
-  --request request-flash.json `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --enable-ai-identification `
-  --ai-config config\ai.local.json
+```text
+--enable-ai-identification
+--identification-ai-config <path>
+--identification-ai-min-confidence <0..1>
 ```
 
-AI identification fallback **and** AI-assisted risk assessment:
+## Response audit metadata
 
-```powershell
-python -m preservation_risk_manager query-json `
-  --request request-flash.json `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --enable-ai-identification `
-  --ai-config config\ai.local.json `
-  --ai-mode fill-gaps
+Integration responses may include an `identification` object containing fields such as:
+
+```text
+input
+normalized
+method
+status
+match_type
+resolved_canonical_id
+resolved_label
+ai_attempted
+ai.accepted
+ai.confidence
+candidate_count
+candidates
 ```
 
-For an already specific identifier such as `fmt/18`, AI identification is normally unnecessary; `--ai-mode fill-gaps` can still be used for the downstream risk stage.
-
-`--identification-ai-config` remains accepted for backward compatibility and can supply the same provider when `--ai-config` is omitted in machine mode.
-
-Optional controls:
-
-```powershell
---identification-ai-min-confidence 0.90
---max-ai-evidence-items 20
---ai-mode review-all
-```
-
-## Response metadata
-
-Integration responses may include:
-
-```json
-{
-  "identification": {
-    "input": "PRONOM fmt 18",
-    "normalized": "fmt/18",
-    "method": "deterministic_normalization",
-    "status": "resolved",
-    "match_type": "verified_authority_identifier",
-    "ai_attempted": false,
-    "ai": {},
-    "resolved_canonical_id": "...",
-    "resolved_label": "PDF 1.4"
-  }
-}
-```
-
-AI identification output also includes the local shortlist audit (`candidate_count` and `candidates`) when AI is attempted, so an abstention can be distinguished from a genuinely empty local registry match.
-
-When `--ai-mode` is enabled after successful identification, the response adds:
-
-```json
-{
-  "ai_risk_assessment": {
-    "status": "ok",
-    "ai_mode": "fill-gaps",
-    "provider": {},
-    "criterion_claims_used": 0,
-    "evidence_hash": "...",
-    "deterministic_analysis": {},
-    "analysis": {},
-    "derived_answers": {}
-  }
-}
-```
-
-The normal deterministic request result remains present. This makes the AI layer additive and auditable rather than replacing the canonical deterministic response.
+This lets consumers distinguish exact authority resolution, normalization, ambiguity, AI abstention, and accepted AI candidate selection.
 
 ## Plugin contract
 
-Additional identification mechanisms can implement the `FormatIdentificationPlugin` protocol:
+Additional identification mechanisms can implement `FormatIdentificationPlugin` and return either a local canonical candidate plus audit metadata or `None` to abstain.
 
-```python
-def resolve(
-    query: str,
-    *,
-    candidates: list[dict],
-    base_resolution: FormatResolution,
-) -> tuple[dict | None, dict]:
-    ...
-```
-
-This allows future plugins such as:
+Potential future plugins include:
 
 ```text
 DROID result parser
 Siegfried result parser
-PRONOM authority lookup
 repository-specific identifier service
-another AI provider/agent
+authority lookup service
+another bounded AI provider/agent
 ```
 
-The plugin returns a local candidate record plus audit metadata, or `None` to abstain.
-
-## Future identification adapters
-
-DROID/Siegfried ingestion is not yet implemented by this module. The intended boundary is:
-
-```text
-DROID / Siegfried / AIP metadata
-        ↓
-format observation / identifier
-        ↓
-IdentificationResolver
-        ↓
-CanonicalFormat
-        ↓
-deterministic risk workflow
-        ↓ optional
-AI-assisted risk interpretation/review
-```
-
-Those future adapters should preserve identification provenance such as tool, tool version, method, and source/AIP record while keeping the downstream risk engine independent of the identification tool.
+Identification provenance should be retained independently from the downstream risk result.
 
 ## Related documentation
 
-- [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
-- [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
-- [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
-- [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md)
+- Repository architecture: [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- Operator use cases: [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md)
+- Human/system requests: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- CLI reference: [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
+- AI provider implementation: [`AI_PROVIDER_INTERFACE.md`](AI_PROVIDER_INTERFACE.md)
+- Module reference: [`MODULE_REFERENCE.md`](MODULE_REFERENCE.md)
