@@ -33,6 +33,103 @@ def _safe(value: Any, *, max_string: int = 3500) -> Any:
     return _safe(str(value), max_string=max_string)
 
 
+def _source_evidence_as_assessment(evidence_item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in {
+            "source_id": evidence_item.get("source_id"),
+            "source_type": evidence_item.get("source_type"),
+            "source_record_id": evidence_item.get("source_record_id"),
+            "source_label": evidence_item.get("source_name"),
+            "native_label": evidence_item.get("native_label"),
+            "native_score": evidence_item.get("native_score"),
+            "native_scale": evidence_item.get("native_scale"),
+            "semantic_level": evidence_item.get("semantic_level"),
+            "scope_type": evidence_item.get("scope_type"),
+            "scope_name": evidence_item.get("scope_name"),
+        }.items()
+        if value is not None
+    }
+
+
+def _source_tokens(assessment: dict[str, Any]) -> set[str]:
+    return {
+        str(value).strip().lower()
+        for value in (assessment.get("source_id"), assessment.get("source_type"))
+        if value is not None and str(value).strip()
+    }
+
+
+def _same_source_record(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_record = str(left.get("source_record_id") or "").strip().lower()
+    right_record = str(right.get("source_record_id") or "").strip().lower()
+    if not left_record or left_record != right_record:
+        return False
+    return bool(_source_tokens(left).intersection(_source_tokens(right)))
+
+
+def _prepare_source_risk_inputs(
+    risk_assessments: list[dict[str, Any]],
+    source_evidence: list[dict[str, Any]],
+    policy: SynthesisPolicy,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], int]:
+    """Route source-native risk through config before exposing anything to AI.
+
+    Governed ``risk_assessment_claims`` remain the primary deterministic input.
+    Source-record risk evidence is inspected only to support newly added sources:
+
+    * if the synthesis config can map the source/value, it is deterministic input;
+    * if the same source record is already represented by a governed mapped claim,
+      the raw duplicate is suppressed;
+    * only a genuinely unmapped source/value remains an AI interpretation candidate.
+
+    This lets a reviewed config rule activate a new source without requiring a
+    second manual interpretation step, while preventing AI from reinterpreting a
+    value that policy already governs.
+    """
+    effective = [dict(item) for item in risk_assessments if isinstance(item, dict)]
+    governed_normalized = [normalize_assessment(item, policy) for item in effective]
+    ai_evidence: list[dict[str, Any]] = []
+    config_normalized: list[dict[str, Any]] = []
+    suppressed_duplicates = 0
+
+    for item in source_evidence:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("evidence_kind") or "") != "source_native_risk_assessment":
+            ai_evidence.append(dict(item))
+            continue
+
+        assessment = _source_evidence_as_assessment(item)
+        normalized = normalize_assessment(assessment, policy)
+        if normalized.get("policy_status") != "mapped":
+            ai_evidence.append(dict(item))
+            continue
+
+        duplicate = any(
+            existing.get("policy_status") == "mapped"
+            and existing.get("semantic_level") == normalized.get("semantic_level")
+            and _same_source_record(existing, normalized)
+            for existing in governed_normalized
+        )
+        if duplicate:
+            suppressed_duplicates += 1
+            continue
+
+        deterministic_row = dict(assessment)
+        deterministic_row["evidence_origin"] = "config_normalized_source_record"
+        deterministic_row.setdefault("scope_basis", "config_rule_from_source_native_evidence")
+        effective.append(deterministic_row)
+        governed_normalized.append(normalize_assessment(deterministic_row, policy))
+
+        audited = dict(normalized)
+        audited["evidence_origin"] = "config_normalized_source_record"
+        audited["source_evidence"] = _safe(item)
+        config_normalized.append(audited)
+
+    return effective, ai_evidence, config_normalized, suppressed_duplicates
+
+
 def build_synthesis_evidence(
     *,
     risk_assessments: list[dict[str, Any]],
@@ -47,9 +144,14 @@ def build_synthesis_evidence(
 
     for index, assessment in enumerate(risk_assessments, start=1):
         normalized = normalize_assessment(assessment, policy)
+        kind = (
+            "config_normalized_source_risk_assessment"
+            if assessment.get("evidence_origin") == "config_normalized_source_record"
+            else "governed_source_risk_assessment"
+        )
         refs.append({
             "ref": f"R{index:03d}",
-            "kind": "governed_source_risk_assessment",
+            "kind": kind,
             "evidence": _safe(normalized),
         })
         if len(refs) >= max_items:
@@ -145,33 +247,13 @@ def _prompt(
     return (
         "Produce a preservation-risk synthesis using only this bounded context. For source_interpretations, "
         "include only S-prefixed evidence whose kind is source_native_risk_assessment and only when its risk "
-        "meaning is explicit enough to map to the configured semantic scale. Do not reinterpret R-prefixed "
-        "governed assessments; their configured mapping is binding. Do not reinterpret S-prefixed source-native "
-        "risk evidence when the supplied policy already maps that source/value. The application will re-run the "
-        "configured scope/aggregation policy after your source interpretations, so your proposed_overall_level is "
-        "advisory when mapped source-level assessments exist. When there is no mapped source-level assessment, "
-        "you may propose an overall level from cited supporting evidence only if the policy permits. Otherwise "
-        "return unassessed.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
+        "meaning is explicit enough to map to the configured semantic scale. Every R-prefixed assessment has "
+        "already been normalized or accepted by the configured policy and must not be reinterpreted. The "
+        "application will re-run the configured scope/aggregation policy after your source interpretations, so "
+        "your proposed_overall_level is advisory when mapped source-level assessments exist. When there is no "
+        "mapped source-level assessment, you may propose an overall level from cited supporting evidence only if "
+        "the policy permits. Otherwise return unassessed.\n\n" + json.dumps(context, indent=2, sort_keys=True, default=str)
     )
-
-
-def _source_evidence_as_assessment(evidence_item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in {
-            "source_id": evidence_item.get("source_id"),
-            "source_type": evidence_item.get("source_type"),
-            "source_record_id": evidence_item.get("source_record_id"),
-            "source_label": evidence_item.get("source_name"),
-            "native_label": evidence_item.get("native_label"),
-            "native_score": evidence_item.get("native_score"),
-            "native_scale": evidence_item.get("native_scale"),
-            "semantic_level": evidence_item.get("semantic_level"),
-            "scope_type": evidence_item.get("scope_type"),
-            "scope_name": evidence_item.get("scope_name"),
-        }.items()
-        if value is not None
-    }
 
 
 def _validate_response(
@@ -215,7 +297,7 @@ def _validate_response(
         referenced = evidence_by_ref[ref]
         if referenced.get("kind") != "source_native_risk_assessment":
             raise AIProviderError(
-                f"AI source interpretation ref '{ref}' is not a source_native_risk_assessment."
+                f"AI source interpretation ref '{ref}' is not an unmapped source_native_risk_assessment."
             )
         source_evidence = referenced.get("evidence")
         if not isinstance(source_evidence, dict):
@@ -260,11 +342,16 @@ def synthesize_with_ai(
     max_evidence_items: int = 80,
 ) -> dict[str, Any]:
     """Return an AI-assisted but policy-governed overall preservation risk."""
-    deterministic = synthesize_assessments(risk_assessments, policy)
+    effective_assessments, ai_source_evidence, config_normalized, suppressed_duplicates = _prepare_source_risk_inputs(
+        risk_assessments,
+        source_evidence,
+        policy,
+    )
+    deterministic = synthesize_assessments(effective_assessments, policy)
     evidence = build_synthesis_evidence(
-        risk_assessments=risk_assessments,
+        risk_assessments=effective_assessments,
         criterion_claims=criterion_claims,
-        source_evidence=source_evidence,
+        source_evidence=ai_source_evidence,
         policy=policy,
         max_items=max_evidence_items,
     )
@@ -272,6 +359,8 @@ def synthesize_with_ai(
         return {
             "status": "skipped_no_evidence",
             "deterministic_synthesis": deterministic,
+            "config_normalized_source_assessments": config_normalized,
+            "suppressed_configured_source_risk_duplicates": suppressed_duplicates,
             "overall_synthesized_risk": deterministic,
         }
 
@@ -318,7 +407,7 @@ def synthesize_with_ai(
         extra.append({key: value for key, value in row.items() if value is not None})
 
     policy_result = synthesize_assessments(
-        risk_assessments,
+        effective_assessments,
         policy,
         extra_normalized_assessments=extra,
     )
@@ -327,6 +416,7 @@ def synthesize_with_ai(
         overall = deepcopy(policy_result)
         overall["method"] = "ai_assisted_config_driven_synthesis" if extra else "config_driven_scope_aware_synthesis"
         overall["ai_assisted"] = bool(extra)
+        overall["ai_consulted"] = True
         overall["ai_confidence"] = ai["confidence"]
         overall["ai_rationale"] = ai["rationale"]
         overall["ai_uncertainty"] = ai["uncertainty"]
@@ -346,6 +436,7 @@ def synthesize_with_ai(
             "method": "ai_policy_guided_supporting_evidence_synthesis",
             "basis": "no_mapped_source_level_assessment_ai_supporting_evidence",
             "ai_assisted": True,
+            "ai_consulted": True,
             "confidence": ai["confidence"],
             "rationale": ai["rationale"],
             "uncertainty": ai["uncertainty"],
@@ -358,6 +449,7 @@ def synthesize_with_ai(
     else:
         overall = deepcopy(policy_result)
         overall["ai_assisted"] = True
+        overall["ai_consulted"] = True
         overall["ai_confidence"] = ai["confidence"]
         overall["ai_rationale"] = ai["rationale"]
         overall["ai_uncertainty"] = ai["uncertainty"]
@@ -366,13 +458,17 @@ def synthesize_with_ai(
         "status": "ok",
         "policy": policy.summary(),
         "deterministic_synthesis": deterministic,
+        "config_normalized_source_assessments": config_normalized,
+        "suppressed_configured_source_risk_duplicates": suppressed_duplicates,
         "ai": ai,
         "ai_interpreted_assessments": extra,
         "overall_synthesized_risk": overall,
         "evidence_refs": evidence,
         "authority_boundary": (
-            "Configured mappings and synthesis rules are binding. AI may normalize explicit unmapped source-native "
-            "risk findings and, only when no mapped source-level assessment exists, synthesize from cited supporting "
-            "evidence. Missing evidence contributes nothing and heterogeneous numeric source scales are never averaged."
+            "Configured mappings and synthesis rules are binding. Source-native risk already covered by config is "
+            "handled deterministically and is not exposed as an AI interpretation candidate. AI may normalize only "
+            "explicit unmapped source-native risk findings and, only when no mapped source-level assessment exists, "
+            "synthesize from cited supporting evidence. Missing evidence contributes nothing and heterogeneous "
+            "numeric source scales are never averaged."
         ),
     }
