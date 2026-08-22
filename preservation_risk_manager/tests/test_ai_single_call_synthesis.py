@@ -132,6 +132,7 @@ def test_azure_capability_synthesis_uses_one_responses_call_with_optional_web_se
     assert payload["tool_choice"] == "auto"
     assert payload["tools"][0]["type"] == "web_search"
     assert payload["tools"][0]["filters"]["allowed_domains"] == ["example.org"]
+    assert payload["text"]["verbosity"] == "low"
     assert payload["text"]["format"]["type"] == "json_schema"
     assert payload["text"]["format"]["strict"] is True
 
