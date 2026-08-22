@@ -36,15 +36,25 @@ python -m registry_builder.refresh `
   --report monitoring\nara-refresh.json
 ```
 
-Repeat `--source` to refresh multiple sources:
+Repeat `--source` to refresh multiple sources. The values are the source **IDs** from `sources.qnl.json`, not adapter type names:
 
 ```powershell
 python -m registry_builder.refresh `
   --config config\sources.qnl.json `
-  --source pronom `
-  --source loc_fdd_xml_reviewed `
+  --source pronom_registry `
+  --source loc_fdd_xml `
   --workdir work `
   --out output
+```
+
+Current production source IDs are:
+
+```text
+qnl_policy_current
+nara_digital_preservation_framework
+pronom_registry
+loc_fdd_xml
+dpc_bit_list_2025
 ```
 
 The command does not rewrite the reviewed configuration. It creates a temporary selection beside that configuration so existing relative paths continue to resolve exactly as before, sets `incremental_source_updates=true`, enables only requested sources for that run, invokes the normal pipeline, then deletes the temporary file.
@@ -65,7 +75,7 @@ Other sources remain active from their latest successful runs.
 
 A failed optional source is not considered refreshed.
 
-If NARA is `required:false` and acquisition fails, the incremental pipeline keeps its previous successful evidence active while processing other completed sources. The failure is reported separately; it is not treated as "no change".
+If an optional source fails, the incremental pipeline keeps its previous successful evidence active while processing other completed sources. The failure is reported separately; it is not treated as "no change".
 
 Required-source failures abort the run.
 
@@ -130,6 +140,8 @@ Important fields include:
 
 ```text
 run_id
+base_config_path
+base_config_sha256
 requested_source_ids
 refreshed_source_ids
 source_results
@@ -142,6 +154,8 @@ risk_claim_materialization
 criterion_mapping
 outputs
 ```
+
+`base_config_sha256` proves which reviewed configuration the temporary selected-source run was derived from. The temporary selection file itself is deleted after the run.
 
 The full normal builder `run_report.json` remains available in the output directory when exports are enabled.
 
@@ -173,7 +187,7 @@ For normal local MongoDB operation:
 Example sequence:
 
 ```text
-registry_builder.refresh --source nara...
+registry_builder.refresh --source nara_digital_preservation_framework
         ↓
 review refresh/change report
         ↓
