@@ -25,6 +25,62 @@ def _value(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _usage_from_responses(response: Any) -> AIUsage:
+    usage_obj = _value(response, "usage", None)
+    return AIUsage(
+        input_tokens=_value(usage_obj, "input_tokens", None),
+        output_tokens=_value(usage_obj, "output_tokens", None),
+        total_tokens=_value(usage_obj, "total_tokens", None),
+    )
+
+
+def _responses_web_audit(response: Any) -> dict[str, Any]:
+    outputs = _value(response, "output", ()) or ()
+    citations: list[dict[str, str | None]] = []
+    citation_seen: set[tuple[str, str | None]] = set()
+    queries: list[str] = []
+    consulted_urls: list[str] = []
+    web_search_used = False
+
+    for output in outputs:
+        output_type = str(_value(output, "type", "") or "")
+        if output_type == "web_search_call":
+            web_search_used = True
+            action = _value(output, "action", None)
+            query = str(_value(action, "query", "") or "").strip()
+            if query and query not in queries:
+                queries.append(query)
+            for source in _value(action, "sources", ()) or ():
+                url = str(_value(source, "url", "") or "").strip()
+                if url and url not in consulted_urls:
+                    consulted_urls.append(url)
+        if output_type != "message":
+            continue
+        for content in _value(output, "content", ()) or ():
+            for annotation in _value(content, "annotations", ()) or ():
+                if str(_value(annotation, "type", "") or "") != "url_citation":
+                    continue
+                url = str(_value(annotation, "url", "") or "").strip()
+                title_raw = _value(annotation, "title", None)
+                title = str(title_raw).strip() if title_raw is not None else None
+                if not url:
+                    continue
+                key = (url, title)
+                if key in citation_seen:
+                    continue
+                citation_seen.add(key)
+                citations.append({"url": url, "title": title})
+                if url not in consulted_urls:
+                    consulted_urls.append(url)
+
+    return {
+        "web_search_used": web_search_used,
+        "search_queries": queries,
+        "consulted_urls": consulted_urls,
+        "external_sources": citations,
+    }
+
+
 class AzureOpenAIProvider(AIProvider):
     """Azure OpenAI implementation of the provider-neutral AI interface."""
 
@@ -85,7 +141,7 @@ class AzureOpenAIProvider(AIProvider):
             from openai import OpenAI
         except ImportError as exc:
             raise AIConfigurationError(
-                "Azure external research requires a Responses-capable OpenAI Python SDK. "
+                "Azure capability-driven synthesis requires a Responses-capable OpenAI Python SDK. "
                 "Install or upgrade with: python -m pip install -U openai"
             ) from exc
         self._responses_client = OpenAI(
@@ -96,21 +152,35 @@ class AzureOpenAIProvider(AIProvider):
         )
         if not hasattr(self._responses_client, "responses"):
             raise AIConfigurationError(
-                "The installed OpenAI Python SDK does not expose the Responses API required for external research. "
+                "The installed OpenAI Python SDK does not expose the Responses API required for capability-driven synthesis. "
                 "Upgrade it with: python -m pip install -U openai"
             )
         return self._responses_client
+
+    def _web_tool(
+        self,
+        *,
+        allowed_domains: tuple[str, ...] = (),
+        blocked_domains: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        tool: dict[str, Any] = {"type": "web_search"}
+        effective_allowed = tuple(allowed_domains) or self.config.external_research_allowed_domains
+        effective_blocked = tuple(blocked_domains) or self.config.external_research_blocked_domains
+        filters: dict[str, Any] = {}
+        if effective_allowed:
+            filters["allowed_domains"] = list(effective_allowed)
+        if effective_blocked:
+            filters["blocked_domains"] = list(effective_blocked)
+        if filters:
+            tool["filters"] = filters
+        return tool
 
     def generate(self, request: AIRequest) -> AIResponse:
         payload: dict[str, Any] = {
             "model": self.model_name,
             "messages": [message.to_dict() for message in request.messages],
         }
-        temperature = (
-            request.temperature
-            if request.temperature is not None
-            else self.config.temperature
-        )
+        temperature = request.temperature if request.temperature is not None else self.config.temperature
         payload["temperature"] = temperature
 
         max_output_tokens = request.max_output_tokens or self.config.max_output_tokens
@@ -192,6 +262,80 @@ class AzureOpenAIProvider(AIProvider):
             metadata={"deployment": self.model_name},
         )
 
+    def generate_with_capabilities(
+        self,
+        request: AIRequest,
+        *,
+        allowed_domains: tuple[str, ...] = (),
+        blocked_domains: tuple[str, ...] = (),
+    ) -> AIResponse:
+        """Run one Responses request with optional web search and structured output.
+
+        The model receives the complete assessment prompt, web search is exposed with
+        ``tool_choice='auto'``, and the same response returns the final structured
+        synthesis. This avoids a separate research call followed by a second model call.
+        """
+        if request.tools:
+            raise AIProviderError(
+                "Azure capability-driven synthesis does not currently combine application-defined function tools."
+            )
+
+        payload: dict[str, Any] = {
+            "model": self.model_name,
+            "input": [
+                {"role": message.role, "content": message.content or ""}
+                for message in request.messages
+                if message.role in {"system", "user", "assistant"}
+            ],
+            "tools": [self._web_tool(allowed_domains=allowed_domains, blocked_domains=blocked_domains)],
+            "tool_choice": "auto",
+            "include": ["web_search_call.action.sources"],
+        }
+        if request.response_schema is not None:
+            payload["text"] = {
+                "format": {
+                    "type": "json_schema",
+                    "name": request.response_schema_name,
+                    "strict": True,
+                    "schema": request.response_schema,
+                }
+            }
+        temperature = request.temperature if request.temperature is not None else self.config.temperature
+        payload["temperature"] = temperature
+        max_output_tokens = request.max_output_tokens or self.config.max_output_tokens
+        if max_output_tokens is not None:
+            payload["max_output_tokens"] = max_output_tokens
+
+        client = self._get_responses_client()
+        try:
+            response = client.responses.create(**payload)
+        except Exception as exc:
+            raise AIProviderError(f"Azure OpenAI capability-driven request failed: {exc}") from exc
+
+        text = str(_value(response, "output_text", "") or "").strip()
+        if not text:
+            raise AIProviderError("Azure OpenAI capability-driven response returned no output text.")
+        structured = None
+        if request.response_schema is not None:
+            structured = parse_json_object(text, label="Azure OpenAI Responses structured output")
+
+        audit = _responses_web_audit(response)
+        response_model = str(_value(response, "model", None) or self.model_name)
+        return AIResponse(
+            provider=self.provider_name,
+            model=response_model,
+            text=text,
+            structured=structured,
+            finish_reason=str(_value(response, "status", "") or "") or None,
+            usage=_usage_from_responses(response),
+            metadata={
+                "deployment": self.model_name,
+                "responses_api": True,
+                "web_search_available": True,
+                **audit,
+            },
+        )
+
     def research_web(
         self,
         prompt: str,
@@ -199,26 +343,11 @@ class AzureOpenAIProvider(AIProvider):
         allowed_domains: tuple[str, ...] = (),
         blocked_domains: tuple[str, ...] = (),
     ) -> AIWebResearchResponse:
-        """Expose Azure Responses web_search with tool_choice=auto.
-
-        The application makes the capability available; the model decides whether
-        to call it. A valid ungrounded response is therefore not an error.
-        """
+        """Compatibility helper exposing Azure Responses web_search with tool_choice=auto."""
         client = self._get_responses_client()
-        tool: dict[str, Any] = {"type": "web_search"}
-        effective_allowed = tuple(allowed_domains) or self.config.external_research_allowed_domains
-        effective_blocked = tuple(blocked_domains) or self.config.external_research_blocked_domains
-        filters: dict[str, Any] = {}
-        if effective_allowed:
-            filters["allowed_domains"] = list(effective_allowed)
-        if effective_blocked:
-            filters["blocked_domains"] = list(effective_blocked)
-        if filters:
-            tool["filters"] = filters
-
         payload: dict[str, Any] = {
             "model": self.model_name,
-            "tools": [tool],
+            "tools": [self._web_tool(allowed_domains=allowed_domains, blocked_domains=blocked_domains)],
             "tool_choice": "auto",
             "include": ["web_search_call.action.sources"],
             "input": prompt,
@@ -229,66 +358,26 @@ class AzureOpenAIProvider(AIProvider):
             raise AIProviderError(f"Azure OpenAI external-research request failed: {exc}") from exc
 
         text = str(_value(response, "output_text", "") or "").strip()
-        outputs = _value(response, "output", ()) or ()
-        citations: list[AIWebCitation] = []
-        citation_seen: set[tuple[str, str | None]] = set()
-        queries: list[str] = []
-        consulted_urls: list[str] = []
-        web_search_used = False
-
-        for output in outputs:
-            output_type = str(_value(output, "type", "") or "")
-            if output_type == "web_search_call":
-                web_search_used = True
-                action = _value(output, "action", None)
-                query = str(_value(action, "query", "") or "").strip()
-                if query and query not in queries:
-                    queries.append(query)
-                for source in _value(action, "sources", ()) or ():
-                    url = str(_value(source, "url", "") or "").strip()
-                    if url and url not in consulted_urls:
-                        consulted_urls.append(url)
-            if output_type != "message":
-                continue
-            for content in _value(output, "content", ()) or ():
-                for annotation in _value(content, "annotations", ()) or ():
-                    if str(_value(annotation, "type", "") or "") != "url_citation":
-                        continue
-                    url = str(_value(annotation, "url", "") or "").strip()
-                    title_raw = _value(annotation, "title", None)
-                    title = str(title_raw).strip() if title_raw is not None else None
-                    if not url:
-                        continue
-                    key = (url, title)
-                    if key in citation_seen:
-                        continue
-                    citation_seen.add(key)
-                    citations.append(AIWebCitation(url=url, title=title))
-                    if url not in consulted_urls:
-                        consulted_urls.append(url)
-
         if not text:
             raise AIProviderError("Azure OpenAI capability-assisted analysis returned no text.")
-
-        usage_obj = _value(response, "usage", None)
-        usage = AIUsage(
-            input_tokens=_value(usage_obj, "input_tokens", None),
-            output_tokens=_value(usage_obj, "output_tokens", None),
-            total_tokens=_value(usage_obj, "total_tokens", None),
+        audit = _responses_web_audit(response)
+        citations = tuple(
+            AIWebCitation(url=str(item["url"]), title=item.get("title"))
+            for item in audit["external_sources"]
         )
         response_model = str(_value(response, "model", None) or self.model_name)
         return AIWebResearchResponse(
             provider=self.provider_name,
             model=response_model,
             text=text,
-            citations=tuple(citations),
-            search_queries=tuple(queries),
-            consulted_urls=tuple(consulted_urls),
-            usage=usage,
+            citations=citations,
+            search_queries=tuple(audit["search_queries"]),
+            consulted_urls=tuple(audit["consulted_urls"]),
+            usage=_usage_from_responses(response),
             metadata={
                 "deployment": self.model_name,
                 "web_search_available": True,
-                "web_search_used": web_search_used,
+                "web_search_used": bool(audit["web_search_used"]),
                 "external_capability": "azure_openai_responses_web_search",
             },
         )
