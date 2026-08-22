@@ -156,10 +156,48 @@ class AIResponse:
 
 
 @dataclass(frozen=True)
+class AIWebCitation:
+    url: str
+    title: str | None = None
+
+
+@dataclass(frozen=True)
+class AIWebResearchResponse:
+    provider: str
+    model: str
+    text: str
+    citations: tuple[AIWebCitation, ...] = ()
+    search_queries: tuple[str, ...] = ()
+    consulted_urls: tuple[str, ...] = ()
+    usage: AIUsage = field(default_factory=AIUsage)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "text": self.text,
+            "citations": [
+                {"url": citation.url, "title": citation.title}
+                for citation in self.citations
+            ],
+            "search_queries": list(self.search_queries),
+            "consulted_urls": list(self.consulted_urls),
+            "usage": {
+                "input_tokens": self.usage.input_tokens,
+                "output_tokens": self.usage.output_tokens,
+                "total_tokens": self.usage.total_tokens,
+            },
+            "metadata": self.metadata,
+        }
+
+
+@dataclass(frozen=True)
 class AIProviderCapabilities:
     structured_output: bool = False
     tool_calling: bool = False
     streaming: bool = False
+    web_search: bool = False
 
 
 class AIProvider(ABC):
@@ -175,6 +213,16 @@ class AIProvider(ABC):
     def generate(self, request: AIRequest) -> AIResponse:
         """Generate one response from the configured provider."""
 
+    def research_web(
+        self,
+        prompt: str,
+        *,
+        allowed_domains: tuple[str, ...] = (),
+        blocked_domains: tuple[str, ...] = (),
+    ) -> AIWebResearchResponse:
+        """Perform provider-grounded public-web research when supported."""
+        raise AIProviderError(f"AI provider '{self.provider_name}' does not support web research.")
+
     def describe(self) -> dict[str, Any]:
         return {
             "provider": self.provider_name,
@@ -183,6 +231,7 @@ class AIProvider(ABC):
                 "structured_output": self.capabilities.structured_output,
                 "tool_calling": self.capabilities.tool_calling,
                 "streaming": self.capabilities.streaming,
+                "web_search": self.capabilities.web_search,
             },
         }
 
