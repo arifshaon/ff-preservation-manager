@@ -1,23 +1,23 @@
 # Preservation Risk Manager CLI reference
 
-This document is the command-oriented reference for the current CLI surface.
+This is the command-oriented reference for `preservation_risk_manager`.
 
-For a first run across both packages, use [`../../docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md) instead.
+For installation, start with [`../../docs/INSTALLATION.md`](../../docs/INSTALLATION.md). For copy/paste one-format and batch examples, use [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md).
 
-## Command routing
+## Entry point
 
-`python -m preservation_risk_manager` dispatches two integration commands specially:
+```powershell
+python -m preservation_risk_manager <command> ...
+```
+
+The two main integration commands are:
 
 ```text
 ask
 query-json
 ```
 
-All other commands use the deterministic/AI analysis CLI.
-
-The integration commands now pass format observations through `IdentificationResolver` before the canonical request executor. Programmatic identification is always available; bounded AI identification is opt-in.
-
-See [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md).
+Other commands expose lower-level deterministic/AI analysis and utilities.
 
 ## `ask`
 
@@ -25,13 +25,14 @@ Human natural-language interface.
 
 ```powershell
 python -m preservation_risk_manager ask `
-  "What is the obsolescence risk of PDF?" `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
+  "What is the preservation risk of fmt/276?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --ai-config config\ai.local.json `
+  --ai-mode synthesize
 ```
 
-Required:
+Required for normal human use:
 
 ```text
 question
@@ -40,54 +41,42 @@ one of: --registry-json | --storage-config
 --ai-config
 ```
 
-Optional:
+Common optional flags:
 
 ```text
+--ai-mode synthesize|fill-gaps|review-all
 --institution <id>
---limit <1..5000>
+--limit <n>
 --json
 --enable-ai-identification
 --identification-ai-min-confidence <0..1>
+--max-ai-evidence-items <n>
 ```
 
-Without `--enable-ai-identification`, format resolution remains deterministic/programmatic.
+`ask` uses AI to interpret the human request. The application then resolves the format and executes the controlled registry/risk workflow. With `--ai-mode synthesize`, the final output also includes AI-assisted overall synthesis beside the governed/config baseline.
 
-With it enabled, the same provider configured by `--ai-config` is reused as a bounded format-identification fallback after deterministic resolution/normalization fails or remains ambiguous.
-
-Example:
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What is the preservation risk of old adobe flash movie?" `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --enable-ai-identification `
-  --identification-ai-min-confidence 0.85
-```
-
-Normal output is detailed human-readable text. `--json` returns canonical JSON plus router and identification audit metadata.
+Use `--json` when you need the canonical machine payload and routing/AI audit metadata.
 
 ## `query-json`
 
-Machine/system interface. No AI routing.
+Machine/system interface. The caller supplies the controlled action directly rather than asking AI to infer intent.
 
 Request file:
 
 ```powershell
 python -m preservation_risk_manager query-json `
   --request request.json `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json
 ```
 
 Literal request:
 
 ```powershell
 python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"PDF","scope":"global"}' `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+  --request-json '{"action":"assess_format","format":"fmt/276","scope":"global"}' `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json
 ```
 
 Required:
@@ -98,39 +87,20 @@ one of: --registry-json | --storage-config
 one of: --request | --request-json
 ```
 
-Optional identification flags:
+Optional AI/identification flags include:
 
 ```text
+--ai-config <path>
+--ai-mode synthesize|fill-gaps|review-all
 --enable-ai-identification
 --identification-ai-config <path>
 --identification-ai-min-confidence <0..1>
+--max-ai-evidence-items <n>
 ```
 
-`--identification-ai-config` is required only when `--enable-ai-identification` is used in `query-json` mode.
+When no AI mode is supplied, `query-json` executes the controlled application request without overall AI synthesis.
 
-Programmatic normalization example without AI:
-
-```powershell
-python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"PRONOM fmt 18","scope":"global"}' `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
-```
-
-AI fallback example:
-
-```powershell
-python -m preservation_risk_manager query-json `
-  --request-json '{"action":"assess_format","format":"old adobe flash movie","scope":"global"}' `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --enable-ai-identification `
-  --identification-ai-config config\ai.local.json
-```
-
-Output is always canonical JSON. When a request contains `format`, the response may include an `identification` section showing input, normalization method, whether AI was attempted, selected candidate, confidence, and acceptance/rejection metadata.
-
-Current request actions:
+Current actions:
 
 ```text
 assess_format
@@ -143,17 +113,17 @@ list_evidence_gaps
 plan_evidence_remediation
 ```
 
-Full request schema/examples: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
+Request examples and response behavior: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md).
 
 ## `analyze-format`
 
-Deterministic single-format analysis.
+Lower-level deterministic single-format framework analysis.
 
 ```powershell
 python -m preservation_risk_manager analyze-format `
   --framework examples\qnl_sustainability.framework.example.json `
-  --registry-json ..\qnl_format_registry_builder\output\registry.json `
-  --format PDF `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --format fmt/276 `
   --evidence-summary
 ```
 
@@ -165,7 +135,7 @@ one of: --registry-json | --storage-config
 --format
 ```
 
-Optional:
+Common optional flags:
 
 ```text
 --institution <id>
@@ -176,56 +146,35 @@ Optional:
 --compact-evidence
 ```
 
-This lower-level command currently uses the deterministic `FormatResolver` directly. The optional identification plugin is exposed through the common human/system integration commands (`ask` and `query-json`).
-
-### Export mode handoff
-
-When `--registry-json` points to `registry.json`, the file reader automatically loads a sibling:
-
-```text
-criterion_claims.jsonl
-criterion_claims.json
-```
-
-if present. This is the normal handoff from registry-builder exports.
-
-If neither exists and criterion claims are not embedded in `registry.json`, the analysis may correctly return `Not Assessed` because the framework has no normalized claims to consume.
+This command is primarily for deterministic/framework diagnostics. The normal human overall-risk route is `ask`.
 
 ## `analyze-format-ai`
 
-Deterministic analysis plus bounded AI assistance/review.
+Question-level deterministic analysis plus bounded AI assistance/review.
 
 ```powershell
 python -m preservation_risk_manager analyze-format-ai `
   --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --format fmt/276 `
   --ai-config config\ai.local.json `
   --ai-mode fill-gaps
 ```
 
-Additional required:
+Supported modes:
 
 ```text
---ai-config
+fill-gaps
+review-all
 ```
 
-Optional:
-
-```text
---ai-mode fill-gaps|review-all
---max-ai-evidence-items <n>
-```
-
-Default AI mode is `fill-gaps`.
-
-This AI mode concerns **risk evidence interpretation/review**, not format identification. For AI-assisted format identification, use the integration commands and [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md).
+Overall capability-driven synthesis is normally accessed through the integration commands with `--ai-mode synthesize`.
 
 See [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md).
 
 ## `analyze-fixture`
 
-Score explicit fixture evidence/answers without live registry access.
+Run framework/scoring tests from fixture files without live registry access.
 
 ```powershell
 python -m preservation_risk_manager analyze-fixture `
@@ -234,51 +183,46 @@ python -m preservation_risk_manager analyze-fixture `
   --answers examples\pdf.answers.example.json
 ```
 
-Required:
-
-```text
---framework
---evidence-pack
---answers
-```
-
-Useful for framework/scoring regression tests.
-
 ## `propose-policy-change`
 
-Create an evidence-grounded draft proposal package for human review.
+Build an evidence-grounded proposal package for human review. It does not write policy automatically.
 
 ```powershell
 python -m preservation_risk_manager propose-policy-change `
   --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --format fmt/276 `
   --institution qnl `
   --goal "Review whether the preservation action should change"
 ```
 
-Required:
+## Web/API
 
-```text
---framework
-one of: --registry-json | --storage-config
---format
---goal
+Run the local UI/API:
+
+```powershell
+python -m preservation_risk_manager web `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --ai-config config\ai.local.json `
+  --port 8080
 ```
 
-Optional:
+Open:
 
 ```text
---institution
---readiness-status
---exposure-level
---include-unapproved
---compact-evidence
+UI      http://127.0.0.1:8080/
+Swagger http://127.0.0.1:8080/api/docs
+OpenAPI http://127.0.0.1:8080/api/openapi.json
 ```
 
-This command does not automatically update policy.
+See [`../../docs/API_AND_SWAGGER.md`](../../docs/API_AND_SWAGGER.md).
 
-## AI provider utility commands
+## Batch/report command
+
+The package exposes the `preservation-risk-batch` script for batch/report workflows. The preferred operator examples use the committed watchlist files and are documented in [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md).
+
+## AI provider utilities
 
 Run through:
 
@@ -286,16 +230,14 @@ Run through:
 python -m preservation_risk_manager.ai ...
 ```
 
-Common commands:
-
-### Show redacted config
+Show redacted config:
 
 ```powershell
 python -m preservation_risk_manager.ai info `
   --config config\ai.local.json
 ```
 
-### Provider smoke test
+Smoke test:
 
 ```powershell
 python -m preservation_risk_manager.ai query `
@@ -303,49 +245,47 @@ python -m preservation_risk_manager.ai query `
   --prompt "Reply with a short confirmation."
 ```
 
-### Validate structured output
+Validate structured output:
 
 ```powershell
 python -m preservation_risk_manager.ai validate-structured `
   --config config\ai.local.json
 ```
 
-### Validate tool calling
+Validate tool calling:
 
 ```powershell
 python -m preservation_risk_manager.ai validate-tools `
   --config config\ai.local.json
 ```
 
+Provider setup: [`../../docs/AI_PROVIDERS.md`](../../docs/AI_PROVIDERS.md).
+
 ## Registry input modes
 
 ### `--storage-config`
 
-Preferred for persistent integrations.
-
-The risk manager reuses the registry-builder backend through `RegistryReader`.
+Preferred for persistent operation. The Risk Manager reads the Registry Builder backend through `RegistryReader`.
 
 ### `--registry-json`
 
-Preferred for export-only/offline interchange.
+Portable/export mode. When the path is a Registry Builder `registry.json`, the reader also discovers sibling `criterion_claims.jsonl` or `criterion_claims.json` when present.
 
-The file reader loads canonical formats from `registry.json` plus sibling criterion claims when available.
+## Scope
 
-## Global and institution scope
+Global:
 
-### Global
+```text
+scope = global
+```
 
-No institution ID. Institution-scoped claims are excluded.
-
-### Institution
-
-For analysis commands:
+Institution:
 
 ```text
 --institution qnl
 ```
 
-For structured requests:
+or in a structured request:
 
 ```json
 {
@@ -354,11 +294,11 @@ For structured requests:
 }
 ```
 
-Institution scope includes global evidence plus claims belonging to that institution.
+Institution scope adds matching institution-scoped evidence; it does not turn local observations into universal format facts.
 
-## Common result diagnostics
+## Common diagnostics
 
-If a command succeeds but no band is returned, inspect:
+If framework/question analysis has no band, inspect:
 
 ```text
 analysis_status
@@ -369,7 +309,7 @@ missing_count
 abstention_count
 ```
 
-For identification problems, inspect:
+For identification issues inspect:
 
 ```text
 identification.status
@@ -380,12 +320,25 @@ identification.ai.accepted
 identification.ai.confidence
 ```
 
-Suppression reasons are documented in [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md).
+For overall synthesis inspect:
 
-## Related docs
+```text
+governed_synthesis
+overall_synthesized_risk
+source assessments
+capabilities_available
+capabilities_used
+external_sources
+quality_warnings
+uncertainty
+```
 
-- [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md)
-- [`RISK_ANALYSIS_WORKFLOW.md`](RISK_ANALYSIS_WORKFLOW.md)
-- [`FRAMEWORKS.md`](FRAMEWORKS.md)
-- [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
-- [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+## Related documentation
+
+- Installation: [`../../docs/INSTALLATION.md`](../../docs/INSTALLATION.md)
+- Operator use cases: [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md)
+- Repository architecture: [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- Format identification: [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md)
+- Human/system requests: [`HUMAN_AND_SYSTEM_QUERIES.md`](HUMAN_AND_SYSTEM_QUERIES.md)
+- AI analysis: [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
+- Frameworks: [`FRAMEWORKS.md`](FRAMEWORKS.md)
