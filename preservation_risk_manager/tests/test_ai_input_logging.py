@@ -10,6 +10,7 @@ from preservation_risk_manager.ai.base import (
     AIResponse,
 )
 from preservation_risk_manager.ai.config import AIProviderConfig
+from preservation_risk_manager.ai.factory import build_ai_provider
 from preservation_risk_manager.ai.request_logging import AIRequestLoggingProvider, with_ai_request_logging
 
 
@@ -92,3 +93,20 @@ def test_logging_is_not_enabled_without_path():
     provider = _FakeProvider()
     assert with_ai_request_logging(provider, None) is provider
     assert with_ai_request_logging(provider, "") is provider
+
+
+def test_factory_wraps_provider_when_input_log_file_is_configured(tmp_path):
+    log_path = tmp_path / "factory-ai-inputs.jsonl"
+    config = AIProviderConfig.from_dict({
+        "provider": "azure_openai",
+        "endpoint": "https://example-resource.openai.azure.com/",
+        "deployment": "test-deployment",
+        "input_log_file": str(log_path),
+    })
+
+    provider = build_ai_provider(config, client=object())
+
+    assert isinstance(provider, AIRequestLoggingProvider)
+    assert provider.delegate.provider_name == "azure_openai"
+    assert provider.log_path == log_path
+    assert log_path.exists()
