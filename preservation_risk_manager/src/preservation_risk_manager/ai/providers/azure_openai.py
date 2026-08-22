@@ -85,7 +85,7 @@ class AzureOpenAIProvider(AIProvider):
             from openai import OpenAI
         except ImportError as exc:
             raise AIConfigurationError(
-                "Azure web research requires a Responses-capable OpenAI Python SDK. "
+                "Azure external research requires a Responses-capable OpenAI Python SDK. "
                 "Install or upgrade with: python -m pip install -U openai"
             ) from exc
         self._responses_client = OpenAI(
@@ -96,7 +96,7 @@ class AzureOpenAIProvider(AIProvider):
         )
         if not hasattr(self._responses_client, "responses"):
             raise AIConfigurationError(
-                "The installed OpenAI Python SDK does not expose the Responses API required for web research. "
+                "The installed OpenAI Python SDK does not expose the Responses API required for external research. "
                 "Upgrade it with: python -m pip install -U openai"
             )
         return self._responses_client
@@ -199,15 +199,15 @@ class AzureOpenAIProvider(AIProvider):
         allowed_domains: tuple[str, ...] = (),
         blocked_domains: tuple[str, ...] = (),
     ) -> AIWebResearchResponse:
-        """Run Azure OpenAI Responses web_search and preserve citations/query audit."""
-        if not self.config.web_research_enabled:
-            raise AIConfigurationError(
-                "AI web research is disabled. Set ai.web_research.enabled=true in the AI provider config."
-            )
+        """Expose Azure Responses web_search with tool_choice=auto.
+
+        The application makes the capability available; the model decides whether
+        to call it. A valid ungrounded response is therefore not an error.
+        """
         client = self._get_responses_client()
         tool: dict[str, Any] = {"type": "web_search"}
-        effective_allowed = tuple(allowed_domains) or self.config.web_research_allowed_domains
-        effective_blocked = tuple(blocked_domains) or self.config.web_research_blocked_domains
+        effective_allowed = tuple(allowed_domains) or self.config.external_research_allowed_domains
+        effective_blocked = tuple(blocked_domains) or self.config.external_research_blocked_domains
         filters: dict[str, Any] = {}
         if effective_allowed:
             filters["allowed_domains"] = list(effective_allowed)
@@ -226,7 +226,7 @@ class AzureOpenAIProvider(AIProvider):
         try:
             response = client.responses.create(**payload)
         except Exception as exc:
-            raise AIProviderError(f"Azure OpenAI web research failed: {exc}") from exc
+            raise AIProviderError(f"Azure OpenAI external-research request failed: {exc}") from exc
 
         text = str(_value(response, "output_text", "") or "").strip()
         outputs = _value(response, "output", ()) or ()
@@ -267,12 +267,8 @@ class AzureOpenAIProvider(AIProvider):
                     if url not in consulted_urls:
                         consulted_urls.append(url)
 
-        if not web_search_used:
-            raise AIProviderError(
-                "Azure OpenAI returned a response without a web_search_call; research synthesis requires web grounding."
-            )
         if not text:
-            raise AIProviderError("Azure OpenAI web research returned no grounded text.")
+            raise AIProviderError("Azure OpenAI capability-assisted analysis returned no text.")
 
         usage_obj = _value(response, "usage", None)
         usage = AIUsage(
@@ -291,7 +287,8 @@ class AzureOpenAIProvider(AIProvider):
             usage=usage,
             metadata={
                 "deployment": self.model_name,
-                "web_search_used": True,
-                "web_grounding": "azure_openai_responses_web_search",
+                "web_search_available": True,
+                "web_search_used": web_search_used,
+                "external_capability": "azure_openai_responses_web_search",
             },
         )
