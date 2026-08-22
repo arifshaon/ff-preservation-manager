@@ -71,6 +71,11 @@ def build_external_risk_context(
     never converted into framework-question answers or numerically averaged. The
     versioned synthesis policy controls normalization, scope precedence, missing
     evidence handling, same-scope aggregation and broader-scope context behavior.
+
+    ``scoring_effect`` and ``aggregation_policy`` retain their original values for
+    API compatibility: these assessments remain context-only relative to the
+    separate 22-question framework score. ``policy_synthesized_risk`` is the
+    independent overall source-risk synthesis.
     """
 
     policy = synthesis_policy or load_synthesis_policy()
@@ -130,8 +135,9 @@ def build_external_risk_context(
             "policy_level": policy_level,
             "semantic_level_match": registry_level == policy_level,
         },
-        "scoring_effect": "separate_overall_source_risk",
-        "aggregation_policy": {
+        "scoring_effect": "context_only",
+        "aggregation_policy": "do_not_average_external_assessments",
+        "synthesis_rules": {
             "missing_assessment_policy": policy.synthesis["missing_assessment_policy"],
             "scope_selection": policy.synthesis["scope_selection"],
             "same_scope_aggregation": policy.synthesis["same_scope_aggregation"],
