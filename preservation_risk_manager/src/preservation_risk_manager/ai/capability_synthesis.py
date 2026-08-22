@@ -157,6 +157,22 @@ def _validate_with_warnings(
     }
 
 
+def _generate_capability_response(provider: AIProvider, request: AIRequest) -> AIResponse:
+    """Use the provider's single-call capability path without bypassing wrappers."""
+    direct = getattr(provider, "generate_with_capabilities", None)
+    if callable(direct):
+        return direct(request)
+
+    delegate = getattr(provider, "delegate", None)
+    delegated = getattr(delegate, "generate_with_capabilities", None)
+    guard = getattr(provider, "_call_with_rate_limit_guard", None)
+    if callable(delegated) and callable(guard):
+        return guard(delegated, request)
+    if callable(delegated):
+        return delegated(request)
+    return provider.generate(request)
+
+
 def synthesize_with_capabilities(
     provider: AIProvider,
     *,
@@ -169,14 +185,7 @@ def synthesize_with_capabilities(
     framework: Any | None = None,
     max_evidence_items: int = 100,
 ) -> dict[str, Any]:
-    """Ask the AI client once, exposing provider capabilities when supported.
-
-    The complete registry evidence, governed baseline, synthesis policy, and
-    framework are supplied in one request. Azure/OpenAI providers that implement
-    ``generate_with_capabilities`` may expose web search with automatic tool choice
-    inside that same request; other providers fall back to their normal generation
-    method. The AI output remains advisory and is never written to MongoDB here.
-    """
+    """Ask the AI client once, exposing provider capabilities when supported."""
     database_evidence = build_synthesis_evidence(
         risk_assessments=[dict(item) for item in risk_assessments if isinstance(item, dict)],
         criterion_claims=[dict(item) for item in criterion_claims if isinstance(item, dict)],
@@ -210,12 +219,7 @@ def synthesize_with_capabilities(
         temperature=0.0,
     )
 
-    capability_generate = getattr(provider, "generate_with_capabilities", None)
-    if callable(capability_generate):
-        response = capability_generate(request)
-    else:
-        response = provider.generate(request)
-
+    response = _generate_capability_response(provider, request)
     overall = _validate_with_warnings(response, database_evidence=database_evidence, policy=policy)
     response_meta = response.metadata if isinstance(response.metadata, dict) else {}
     external_sources = [
