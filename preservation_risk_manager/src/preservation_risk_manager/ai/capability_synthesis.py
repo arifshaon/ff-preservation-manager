@@ -127,6 +127,30 @@ def _evidence_priority(item: dict[str, Any]) -> int:
     return 4
 
 
+def _contains_institution_scoped(value: Any, *, depth: int = 0) -> bool:
+    """Detect assessment context that must not be exposed to public web tooling."""
+    if depth > 8:
+        return False
+    if isinstance(value, dict):
+        institution_id = value.get("institution_id")
+        if institution_id not in (None, ""):
+            return True
+        if str(value.get("source_independence") or "").strip().lower() == "institution_scoped":
+            return True
+        if str(value.get("scope_type") or "").strip().lower() == "institutional_format":
+            return True
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower()
+            if normalized_key in {"institution_evidence", "internal_note", "private_note"} and item not in (None, "", [], {}):
+                return True
+            if _contains_institution_scoped(item, depth=depth + 1):
+                return True
+        return False
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_institution_scoped(item, depth=depth + 1) for item in value)
+    return False
+
+
 def _framework_summary(framework: Any | None, *, minimal: bool = False) -> dict[str, Any] | None:
     if framework is None:
         return None
@@ -422,8 +446,16 @@ def _validate_with_warnings(
     }
 
 
-def _generate_capability_response(provider: AIProvider, request: AIRequest) -> AIResponse:
-    """Use the provider's single-call capability path without bypassing wrappers."""
+def _generate_capability_response(
+    provider: AIProvider,
+    request: AIRequest,
+    *,
+    allow_external_capabilities: bool,
+) -> AIResponse:
+    """Use one model call while respecting the institution-data web boundary."""
+    if not allow_external_capabilities:
+        return provider.generate(request)
+
     direct = getattr(provider, "generate_with_capabilities", None)
     if callable(direct):
         return direct(request)
@@ -464,6 +496,20 @@ def synthesize_with_capabilities(
     candidate_evidence = [item for _, item in ranked[:max(1, int(max_evidence_items))]]
 
     capabilities_available = provider.describe().get("capabilities") or {}
+    institution_scoped = any(
+        _contains_institution_scoped(value)
+        for value in (
+            format_context,
+            governed_synthesis,
+            risk_assessments,
+            criterion_claims,
+            source_evidence,
+        )
+    )
+    capabilities_for_call = dict(capabilities_available)
+    if institution_scoped and capabilities_for_call.get("web_search"):
+        capabilities_for_call["web_search"] = False
+
     budget = _token_budget(provider)
     schema = _response_schema(policy)
     database_evidence, user_text, estimated_prompt_tokens, minimal_framework, omitted_for_budget = _fit_context_to_budget(
@@ -472,7 +518,7 @@ def synthesize_with_capabilities(
         governed_synthesis=governed_synthesis,
         policy=policy,
         framework=framework,
-        capabilities_available=capabilities_available,
+        capabilities_available=capabilities_for_call,
         schema=schema,
         prompt_budget_tokens=budget.get("prompt_budget_tokens"),
     )
@@ -503,7 +549,12 @@ def synthesize_with_capabilities(
         max_output_tokens=budget.get("effective_max_output_tokens"),
     )
 
-    response = _generate_capability_response(provider, request)
+    allow_external = not institution_scoped
+    response = _generate_capability_response(
+        provider,
+        request,
+        allow_external_capabilities=allow_external,
+    )
     overall = _validate_with_warnings(response, database_evidence=database_evidence, policy=policy)
     response_meta = response.metadata if isinstance(response.metadata, dict) else {}
     external_sources = [
@@ -515,7 +566,7 @@ def synthesize_with_capabilities(
         for index, item in enumerate(response_meta.get("external_sources") or [], start=1)
         if isinstance(item, dict) and str(item.get("url") or "").strip()
     ]
-    web_search_used = bool(response_meta.get("web_search_used"))
+    web_search_used = bool(response_meta.get("web_search_used")) and allow_external
     overall["governed_baseline"] = _safe(governed_synthesis)
     overall["capabilities_available"] = _safe(capabilities_available)
     overall["capabilities_used"] = {"web_search": web_search_used}
@@ -531,11 +582,14 @@ def synthesize_with_capabilities(
         "token_budget": budget,
         "external_capability": {
             "capability_available": bool(capabilities_available.get("web_search")),
-            "capability_invoked": bool(response_meta.get("responses_api")),
+            "capability_invoked": bool(response_meta.get("responses_api")) and allow_external,
             "web_search_used": web_search_used,
-            "search_queries": list(response_meta.get("search_queries") or []),
-            "consulted_urls": list(response_meta.get("consulted_urls") or []),
-            "sources": external_sources,
+            "suppressed_for_institution_evidence": bool(
+                institution_scoped and capabilities_available.get("web_search")
+            ),
+            "search_queries": list(response_meta.get("search_queries") or []) if allow_external else [],
+            "consulted_urls": list(response_meta.get("consulted_urls") or []) if allow_external else [],
+            "sources": external_sources if allow_external else [],
             "error": None,
         },
         "provider": provider.describe(),
@@ -543,7 +597,8 @@ def synthesize_with_capabilities(
         "authority_boundary": (
             "The AI-assisted result is returned for the consumer to evaluate. Source-native registry evidence and "
             "the deterministic/config synthesis remain unchanged and separately auditable; AI output is not written "
-            "to MongoDB automatically."
+            "to MongoDB automatically. Public web-search capability is suppressed when institution-scoped/private "
+            "assessment evidence is present."
         ),
     }
 
