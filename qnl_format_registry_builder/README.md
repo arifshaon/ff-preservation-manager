@@ -1,158 +1,34 @@
 # QNL File Format Registry Builder
 
-`qnl_format_registry_builder` is the **evidence-ingestion and registry-construction module** in the File Format Preservation Manager repository.
+`qnl_format_registry_builder` is the evidence-ingestion and registry-maintenance module of File Format Preservation Manager.
 
-It is not a manually maintained static registry. Its deliverable is a repeatable process that can be rerun when NARA, PRONOM, LOC, QNL, DPC, Wikidata, or other configured/governed sources change.
+It acquires preservation-data sources, retains source snapshots/provenance, extracts source-native records, reconciles file-format identities conservatively, maps reviewed evidence, and persists the current registry while retaining history.
 
-For the first cross-package run from source acquisition to risk assessment, use:
+For repository-wide documentation, start at **[`../docs/README.md`](../docs/README.md)**.
 
-**[`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md)**
-
-For adding any new evidence source, use the single onboarding route:
-
-**[`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md)**
-
-## Repository role
+## What this module owns
 
 ```text
-structured sources -----------------------------+
-                                                |
-narrative/PDF/HTML source                       |
-  -> manual/AI transcription                    |
-  -> human-reviewed structured artifact --------+
-                                                |
-                                                v
-qnl_format_registry_builder
-  -> canonical formats + criterion claims
-  -> RegistryStore / exports
-  -> preservation_risk_manager
+source acquisition
+ -> SourceSnapshot
+ -> RawFormatRecord
+ -> authority-aware identifier reconciliation
+ -> CanonicalFormat
+ -> criterion / risk / relationship evidence
+ -> RegistryStore
+ -> change detection + provenance
 ```
 
-Repository-wide references:
+Normal registry writes and source updates belong here. The sibling Risk Manager normally reads the resulting registry and does not rewrite source evidence.
 
-- canonical backend-neutral data model: [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md)
-- architecture: [`../docs/REPOSITORY_ARCHITECTURE.md`](../docs/REPOSITORY_ARCHITECTURE.md)
-- storage/query/update interface: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+## Install
 
-## What this module does
+Python 3.10+.
 
-For structured sources:
-
-```text
-Source acquisition
-  -> content-addressed snapshots
-  -> adapter extraction
-  -> RawFormatRecord
-  -> normalization
-  -> verified identifier reconciliation
-  -> CanonicalFormat
-  -> source-native evidence retention
-  -> declarative criterion mapping
-  -> criterion_claims
-  -> RegistryStore persistence / exports
-  -> change detection
-```
-
-For narrative/unstructured sources, add one controlled stage before normal ingestion:
-
-```text
-PDF / HTML / narrative publication
-  -> manual or AI-assisted transcription draft
-  -> human-reviewed versioned JSON
-  -> standard_json or thin source-specific adapter
-  -> normal pipeline
-```
-
-The builder owns normal registry **writes and updates**. The risk manager reads the resulting registry through the same storage abstraction or paired export files.
-
-## Main capabilities
-
-- NARA Digital Preservation Framework acquisition/parsing.
-- PRONOM registry and DROID/signature evidence.
-- Library of Congress FDD XML evidence.
-- **Wikidata policy-v3 acquisition plus controlled evidence-only/cross-registry relationship refresh with drift gates and independent verification.**
-- Structured JSON source packages.
-- **Reviewed transcription packages for narrative/PDF/HTML preservation sources.**
-- **AI-assisted transcription prompts and schemas for unstructured sources, including DPC Bit List.**
-- Institutional policy workbook ingestion.
-- QNL institutional format evidence.
-- Content-addressed source snapshot cache and offline replay.
-- Conservative reconciliation using configured identifier authority rules.
-- Source-by-source incremental augmentation against persistent storage.
-- Governed persistent source-relationship and risk-claim replay across canonical rebuilds.
-- Declarative source-to-criterion mappings with review status/versioning.
-- **AI-assisted criterion-mapping drafts with mandatory human approval.**
-- Criterion-claim audit and backfill workflows.
-- Institution-scoped evidence separated from global facts.
-- Preservation method/readiness/trend evidence support.
-- Change detection between registry states.
-- Pluggable source adapters, storage backends, and exporters.
-- Storage backends: memory, file/JSON, MongoDB, and trusted external plugins.
-- Optional JSON, JSONL, CSV, SQLite, and Markdown outputs.
-
-## Start here
-
-| Need | Document |
-| --- | --- |
-| First build + risk assessment across both packages | [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md) |
-| Canonical data model | [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md) |
-| Add any new source end-to-end | [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md) |
-| Wikidata acquisition and population policy | [`docs/WIKIDATA_SOURCE.md`](docs/WIKIDATA_SOURCE.md) |
-| Wikidata production evidence/relationship refresh | [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md) |
-| Add a narrative/PDF/unstructured source | [`../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md) |
-| Installation/setup/all builder modes | [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md) |
-| Full builder documentation map | [`docs/DOCUMENTATION_MAP.md`](docs/DOCUMENTATION_MAP.md) |
-| Add/map a new source or institution evidence | [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md) |
-| Detailed criterion mapping workflow | [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md) |
-| DPC AI transcription prompt | [`config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md`](config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md) |
-| DPC AI criterion-mapping prompt | [`config/prompts/propose_mapping/dpc_bit_list.v1.md`](config/prompts/propose_mapping/dpc_bit_list.v1.md) |
-| Periodic source refresh + risk-report orchestration | [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md) |
-
-## AI-assisted source onboarding
-
-AI is useful in two separate source-onboarding stages.
-
-### 1. Transcription
-
-```text
-unstructured source -> source-native JSON draft
-```
-
-The repository provides:
-
-```text
-config/schemas/unstructured_source_transcription.v1.schema.json
-config/prompts/transcribe_unstructured_source/v1.0.md
-config/prompts/transcribe_unstructured_source/dpc_bit_list.v1.md
-```
-
-The model must preserve source locators and source-native terminology. It must not invent identifiers or calculate QNL risk. A named human/team reviews the artifact before production use.
-
-### 2. Criterion mapping
-
-```text
-reviewed source-native fields -> proposed neutral criterion mapping
-```
-
-Prompts:
-
-```text
-config/prompts/propose_mapping/v1.0.md
-config/prompts/propose_mapping/dpc_bit_list.v1.md
-```
-
-The mapping remains unapproved until human review. AI must not invent criterion IDs/values or approve its own mapping.
-
-Keep these two AI stages separate and auditable.
-
-## Installation
-
-Python 3.10 or later is required.
+With MongoDB support:
 
 ```powershell
 cd qnl_format_registry_builder
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev,mongo]"
 pytest -q
 ```
@@ -163,264 +39,88 @@ Without MongoDB:
 python -m pip install -e ".[dev]"
 ```
 
-## Two different quickstart configurations
+Unified installation guide: [`../docs/INSTALLATION.md`](../docs/INSTALLATION.md).
 
-### Registry-construction example
+## Current integrated sources
 
-```powershell
-python -m registry_builder run `
-  --config config\sources.example.json `
-  --workdir work `
-  --out output
-```
+| Source | Source ID | Primary role |
+| --- | --- | --- |
+| PRONOM | `pronom_registry` | PUID identity / technical format data |
+| LOC FDD | `loc_fdd_xml` | FDD identity + reviewed sustainability evidence |
+| NARA | `nara_digital_preservation_framework` | NARA identity + native preservation risk/action evidence |
+| DPC Global Bit List | `dpc_bit_list_2025` | Risk/context evidence only |
+| Wikidata | controlled `wikidata_file_formats` workflow | Contextual cross-registry relationships only |
+| QNL/local | institution-specific workflows | Local policy/readiness/evidence |
 
-This demonstrates multi-source registry construction. **Criterion mapping is not enabled in this config.** It is valid for learning/building the registry, but its outputs are not sufficient by themselves to demonstrate framework-driven risk assessment.
+Exact upstream URLs, release policies and refresh procedures: [`../docs/sources/README.md`](../docs/sources/README.md).
 
-### Cross-package risk-assessment quickstart
-
-```powershell
-python -m registry_builder run `
-  --config config\sources.criterion-mapping.quickstart.json `
-  --workdir work `
-  --out output
-```
-
-This no-database config enables approved criterion mappings and exports:
-
-```text
-output\registry.json
-output\criterion_claims.jsonl
-```
-
-The risk manager uses these together. When given `output\registry.json`, it automatically discovers the sibling criterion-claim export.
-
-Verify:
-
-```powershell
-Test-Path output\registry.json
-Test-Path output\criterion_claims.jsonl
-(Get-Content output\criterion_claims.jsonl | Measure-Object -Line).Lines
-```
-
-Full path: [`../docs/GETTING_STARTED.md`](../docs/GETTING_STARTED.md).
-
-## Adding a narrative source such as DPC Bit List
-
-The recommended path is:
-
-```text
-DPC Bit List PDF/HTML
- -> AI/manual transcription draft
- -> human-reviewed JSON artifact
- -> standard_json or DpcBitListAdapter
- -> source field audit
- -> AI/manual criterion mapping draft
- -> human-approved mapping
- -> criterion_claims
- -> preservation_risk_manager verification
-```
-
-The transcription itself is a first-class artifact: versioned, diffable, reviewable, and traceable back to page/section/URL passages.
-
-Do not make production risk assessment depend directly on a transient LLM answer.
-
-See:
-
-- [`../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](../docs/TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
-- [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md)
-
-## Offline replay
-
-After snapshots have been cached:
-
-```powershell
-python -m registry_builder run `
-  --config config\sources.example.json `
-  --workdir work `
-  --out output `
-  --offline
-```
-
-Offline mode replays previously acquired evidence; it cannot discover a new upstream release that has never been fetched.
-
-## Periodic source updates
-
-For operational monitoring, an external scheduler/service can rerun an integrated source configuration periodically.
+## Refresh a selected source
 
 Example:
 
 ```powershell
-python -m registry_builder run `
-  --config config\sources.criterion-mapping.mongodb.example.json `
+python -m registry_builder.refresh `
+  --config config\sources.qnl.json `
+  --source pronom_registry `
   --workdir work `
-  --out output
+  --out output `
+  --report monitoring\pronom-refresh.json
 ```
 
-Release behavior is source/configuration-specific. The committed integrated example intentionally pins NARA for reproducibility. For NARA follow-latest monitoring, use:
+The refresh is incremental: it replaces the refreshed source's active contribution and reuses the latest successful evidence from sources not refreshed in the run.
 
-```json
-"release_mode": "latest"
-```
+Wikidata uses a separate guarded preflight/apply refresh. See [`../docs/sources/WIKIDATA.md`](../docs/sources/WIKIDATA.md).
 
-A deployment may keep separate pinned baseline and follow-latest monitoring configurations.
+Full operator workflow: [`../docs/OPERATIONS.md`](../docs/OPERATIONS.md).
 
-Wikidata is a deliberate exception to the ordinary source loop. Do not add `wikidata_sparql_evidence` to `sources.qnl.json`; use the governed `wikidata_refresh` preflight/apply transaction documented in [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md). This keeps source acquisition, relationship supersession, rematerialization, drift review and post-write verification in one controlled operation.
+## Add a source
 
-For a manually transcribed narrative source, source refresh means reviewing the new publication edition, producing/reviewing a new transcription artifact, then rerunning the source. A future DPC-specific adapter may automate edition acquisition while retaining the same reviewed-transcription gate.
+Use the A-to-Z onboarding guide:
 
-See:
+**[`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md)**
 
-- [`docs/NARA_ADAPTER_REQUIREMENTS.md`](docs/NARA_ADAPTER_REQUIREMENTS.md)
-- [`docs/WIKIDATA_SOURCE.md`](docs/WIKIDATA_SOURCE.md)
-- [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md)
-- [`../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md`](../preservation_risk_manager/docs/RISK_MONITORING_AND_REPORTING.md)
+A complete source integration must document authority/scope, exact upstream location, update semantics, native fields, identifier rules, mappings, tests and Risk Manager consumer behavior.
 
-## Common CLI modes
-
-| Command | Purpose |
-| --- | --- |
-| `registry_builder run` | Source acquisition, reconciliation, mapping, persistence, change detection, exports. |
-| `registry_builder validate` | Validate exported `registry.json`. |
-| `registry_builder collision-report` | Inspect identifier collisions/heuristic bridges. |
-| `registry_builder criterion-evidence-audit` | Read-only audit of source fields/projected criterion coverage. |
-| `registry_builder mapping validate` | Validate criterion-mapping configuration. |
-| `registry_builder criterion-claims backfill` | Rebuild criterion claims from stored evidence without reacquiring sources. |
-| `python -m registry_builder.wikidata_refresh` | Drift-gated Wikidata preflight; add `--apply` only after reviewing a ready preflight. |
-| `python -m registry_builder.wikidata_relationship_verify` | Independently verify the persisted Wikidata evidence/relationship layer. |
-| `python -m registry_builder.wikidata_refresh_simulation` | Read-only deterministic changed-source test; no apply/write mode. |
-
-Full command guide: [`docs/INSTALLATION_SETUP_AND_RUN.md`](docs/INSTALLATION_SETUP_AND_RUN.md).
-
-## Storage and common interface
-
-All persistence is behind `RegistryStore`:
-
-```python
-upsert(collection, key, document)
-query(collection, filter)
-```
-
-Built-in backends:
+## Core configuration
 
 ```text
-memory
-file / json_file
-mongodb
+config/sources.qnl.json
+config/criteria/v1.json
+config/criterion_mappings/
 ```
 
-The sibling risk manager reuses the same store through `RegistryReader`; it does not duplicate MongoDB access logic.
+The source configuration controls acquisition and storage. Criteria/mapping configuration controls reviewed normalization of preservation observations. Overall Risk Manager synthesis policy lives in the Risk Manager module and does not belong in source adapter code.
 
-Read:
+## Storage
 
-- canonical model: [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md)
-- common storage/query/update contract: [`../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
-- builder storage config: [`docs/STORAGE_AND_EXPORT_CONFIG.md`](docs/STORAGE_AND_EXPORT_CONFIG.md)
+Normal persistent database:
+
+```text
+MongoDB database: qnl_format_registry
+```
+
+The logical persistence boundary is `RegistryStore`; file/memory/plugin backends are also supported.
+
+- Data model: [`../docs/DATA_MODEL.md`](../docs/DATA_MODEL.md)
 - MongoDB physical schema: [`docs/MONGODB_STORAGE_SCHEMA.md`](docs/MONGODB_STORAGE_SCHEMA.md)
 
-## Source-by-source augmentation
+## Advanced reference
 
-A persistent registry can be updated one source at a time:
+The module `docs/` directory contains deep implementation references rather than a second documentation starting point.
 
-```text
-NARA run -> refresh NARA contribution
-PRONOM run -> refresh verified PUID/identity contribution
-LOC run -> refresh FDD sustainability evidence
-DPC run -> refresh reviewed DPC transcription contribution
-Wikidata controlled refresh -> refresh evidence-only QIDs + governed source_relationship_claims
-```
+Useful documents include:
 
-Wikidata uses its dedicated controlled refresh command rather than the ordinary source loop because its evidence snapshot and relationship replacement are one governed operation.
-
-The current canonical view is recomputed from active source contributions; source history/provenance is retained. Current governed risk and source-relationship claims are replayed after reconciliation so unrelated canonical rebuilds do not strip those layers.
-
-Read [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md).
-
-## Criterion claims
-
-Source adapters retain source-native vocabulary. Declarative mapping files convert only preservation-relevant source fields into neutral `criterion_claims` with provenance.
-
-```text
-source-native field/value
- -> approved mapping rule
- -> criterion_claim
- -> risk framework question
- -> deterministic answer/risk analysis
-```
-
-For a new source, use the complete route:
-
-```text
-decide boundary
- -> transcribe if unstructured
- -> adapter/register identifiers
- -> audit actual fields
- -> draft mapping
- -> validate/human approve
- -> generate criterion claims
- -> verify in risk manager
-```
-
-Use [`../docs/HOW_TO_ADD_A_SOURCE.md`](../docs/HOW_TO_ADD_A_SOURCE.md).
-
-Detailed mapping guide: [`docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md).
-
-## Adding sources/backends
-
-External trusted source adapter:
-
-```json
-{
-  "id": "future_source",
-  "type": "mypkg.adapters.future:FutureAdapter",
-  "enabled": true
-}
-```
-
-Storage plugin:
-
-```json
-{
-  "storage": {
-    "type": "mypkg.storage.sql:SqlRegistryStore"
-  }
-}
-```
-
-Plugin imports execute trusted code. Use only reviewed packages/configuration.
-
-Read:
-
-- [`docs/ADDING_AND_RUNNING_DATA_SOURCES.md`](docs/ADDING_AND_RUNNING_DATA_SOURCES.md)
-- [`docs/ADAPTER_REFERENCE.md`](docs/ADAPTER_REFERENCE.md)
 - [`docs/ADAPTER_IMPLEMENTATION_GUIDE.md`](docs/ADAPTER_IMPLEMENTATION_GUIDE.md)
-
-## Generated data
-
-Runtime/export directories are generated output and should not normally be committed.
-
-Common paths:
-
-```text
-work/snapshots/<source_id>/
-output/
-```
-
-Reviewed transcription source artifacts are different from generated output. Store/version them in a controlled source-data location appropriate to the deployment so that they can be reviewed and diffed between editions.
+- [`docs/IDENTIFIER_RECONCILIATION.md`](docs/IDENTIFIER_RECONCILIATION.md)
+- [`docs/criterion_mapping_workflow.md`](docs/criterion_mapping_workflow.md)
+- [`docs/INCREMENTAL_SOURCE_UPDATES.md`](docs/INCREMENTAL_SOURCE_UPDATES.md)
+- [`docs/PERSISTENT_INTEGRATION.md`](docs/PERSISTENT_INTEGRATION.md) — clean-room/current production integration detail
+- [`docs/WIKIDATA_PRODUCTION_INTEGRATION.md`](docs/WIKIDATA_PRODUCTION_INTEGRATION.md)
 
 ## Tests
 
 ```powershell
-cd qnl_format_registry_builder
-python -m pip install -e ".[dev,mongo]"
 pytest -q
 ```
 
-For source/mapping changes, also run the smallest relevant real/configured pipeline and inspect the run/coverage report. For narrative sources, validate/review the transcription and prove the final criterion claim is visible to the risk manager.
-
-For Wikidata changes, use the focused preflight/verification/simulation suites and the controlled refresh workflow; do not bypass its drift and identity-safety gates.
-
-## Related module
-
-Once criterion evidence is available, `preservation_risk_manager` can perform deterministic or AI-assisted assessment without duplicating ingestion/storage logic.
-
-Start at [`../preservation_risk_manager/README.md`](../preservation_risk_manager/README.md).
+After a source/config change, also run the smallest relevant real/configured acquisition and review its source/run/change report before touching the maintained production registry.
