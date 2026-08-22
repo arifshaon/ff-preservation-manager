@@ -9,7 +9,7 @@ from preservation_risk_manager.ai.base import (
     AIWebCitation,
     AIWebResearchResponse,
 )
-from preservation_risk_manager.ai.research_synthesis import synthesize_with_web_research
+from preservation_risk_manager.ai.research_synthesis import synthesize_with_capabilities
 from preservation_risk_manager.synthesis_policy import load_synthesis_policy
 
 
@@ -33,6 +33,7 @@ class _PrivacyResearchProvider(AIProvider):
             citations=(AIWebCitation("https://example.org/spec", "Public specification"),),
             search_queries=("verify public format specification",),
             consulted_urls=("https://example.org/spec",),
+            metadata={"web_search_used": True},
         )
 
     def generate(self, request: AIRequest) -> AIResponse:
@@ -42,20 +43,19 @@ class _PrivacyResearchProvider(AIProvider):
             structured={
                 "semantic_level": "low",
                 "confidence": 0.8,
-                "rationale": "The public evidence confirms the governed baseline.",
+                "rationale": "The supplied evidence and public information support Low concern.",
                 "database_evidence_refs": ["R001", "C001"],
-                "web_source_refs": ["W001"],
-                "verification_findings": [
+                "external_source_refs": ["W001"],
+                "considerations": [
                     {
                         "finding": "The public specification remains available.",
-                        "relationship_to_database": "confirms",
+                        "basis": "mixed",
                         "risk_effect": "reduces_concern",
                         "database_evidence_refs": ["C001"],
-                        "web_source_refs": ["W001"],
-                        "rationale": "The official specification is publicly accessible.",
+                        "external_source_refs": ["W001"],
                     }
                 ],
-                "policy_rules_applied": ["missing_assessment_policy=exclude"],
+                "config_rules_considered": ["missing_assessment_policy=exclude"],
                 "governed_baseline_relation": "same",
                 "uncertainty": "None material for this test.",
             },
@@ -63,11 +63,11 @@ class _PrivacyResearchProvider(AIProvider):
         )
 
 
-def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web_grounding():
+def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web_capability():
     provider = _PrivacyResearchProvider()
     policy = load_synthesis_policy()
 
-    result = synthesize_with_web_research(
+    result = synthesize_with_capabilities(
         provider,
         format_context={
             "canonical_id": "puid-fmt-276",
@@ -141,4 +141,4 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
     assert "DO-NOT-SEND" not in provider.research_prompt
     assert "PRIVATE-BASELINE-DETAIL" not in provider.research_prompt
     assert "LOCAL-RISK-1" not in provider.research_prompt
-    assert result["web_research"]["institution_scoped_evidence_excluded"] == 2
+    assert result["external_capability"]["institution_scoped_evidence_excluded"] == 2
