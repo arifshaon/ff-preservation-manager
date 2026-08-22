@@ -18,5 +18,8 @@ web = ["fastapi>=0.115", "uvicorn>=0.30"]
 where = ["src"]
 include = ["preservation_risk_manager*"]
 
+[tool.setuptools.package-data]
+preservation_risk_manager = ["config/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
