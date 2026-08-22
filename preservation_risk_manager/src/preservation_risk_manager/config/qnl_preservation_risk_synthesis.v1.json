@@ -86,6 +86,23 @@
     "supporting_evidence_policy": "may_synthesize_only_when_no_mapped_source_level_assessment_exists",
     "missing_evidence_policy": "exclude",
     "scope_policy": "obey_configured_scope_precedence",
-    "numeric_aggregation": "forbidden_across_source_scales"
+    "numeric_aggregation": "forbidden_across_source_scales",
+    "expert_synthesis": {
+      "version": "1.0",
+      "enabled": true,
+      "output_role": "parallel_advisory",
+      "governed_result_remains_authoritative": true,
+      "allow_model_training_knowledge": true,
+      "allow_live_web_knowledge": false,
+      "must_consider_configured_rules": true,
+      "must_preserve_source_native_assessments": true,
+      "must_preserve_configured_source_mappings": true,
+      "must_distinguish_registry_evidence_from_model_knowledge": true,
+      "may_disagree_with_governed_result": true,
+      "must_explain_divergence": true,
+      "must_report_confidence": true,
+      "must_report_currentness_caveat": true,
+      "missing_database_evidence_policy": "not_a_risk_signal"
+    }
   }
 }
