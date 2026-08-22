@@ -35,7 +35,7 @@ class WebRuntimeConfig:
     batch_max_formats: int = 5000
     max_ai_evidence_items: int = 20
     identification_ai_min_confidence: float = 0.80
-    human_match_limit: int = 100
+    human_match_limit: int = 10
 
     def validate(self) -> None:
         if bool(self.storage_config) == bool(self.registry_json):
@@ -51,6 +51,8 @@ class WebRuntimeConfig:
             raise ValueError("batch_max_formats must be greater than zero.")
         if int(self.max_workers) <= 0:
             raise ValueError("max_workers must be greater than zero.")
+        if int(self.human_match_limit) <= 0:
+            raise ValueError("human_match_limit must be greater than zero.")
 
 
 def _reader_args(config: WebRuntimeConfig) -> Namespace:
