@@ -8,6 +8,7 @@ dependencies = []
 [project.scripts]
 preservation-risk-manager = "preservation_risk_manager.cli:main"
 preservation-risk-web = "preservation_risk_manager.web_cli:main"
+preservation-risk-batch = "preservation_risk_manager.batch_cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "fastapi>=0.115", "httpx>=0.27"]
