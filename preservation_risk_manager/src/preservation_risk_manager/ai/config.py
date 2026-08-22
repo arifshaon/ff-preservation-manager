@@ -32,7 +32,7 @@ def _string_tuple(value: Any) -> tuple[str, ...]:
     elif isinstance(value, (list, tuple, set)):
         values = list(value)
     else:
-        raise AIConfigurationError("AI web-search domain filters must be strings or arrays of strings.")
+        raise AIConfigurationError("AI external-research domain filters must be strings or arrays of strings.")
     result: list[str] = []
     for item in values:
         text = str(item or "").strip()
@@ -85,13 +85,19 @@ class AIProviderConfig:
                 "AI configuration 'human_format_assessment_limit' must be greater than zero."
             )
 
-        web_research = data.get("web_research") or {}
-        if not isinstance(web_research, dict):
-            raise AIConfigurationError("AI configuration 'web_research' must be an object.")
-        allowed_domains = _string_tuple(web_research.get("allowed_domains"))
-        blocked_domains = _string_tuple(web_research.get("blocked_domains"))
+        # ``external_research`` is the current administrative configuration.
+        # ``web_research`` remains a compatibility alias for existing local
+        # configs. Any historical ``enabled`` field is ignored: provider/model
+        # capabilities are made available automatically when AI mode is on.
+        external_research = data.get("external_research")
+        if external_research is None:
+            external_research = data.get("web_research") or {}
+        if not isinstance(external_research, dict):
+            raise AIConfigurationError("AI configuration 'external_research' must be an object.")
+        allowed_domains = _string_tuple(external_research.get("allowed_domains"))
+        blocked_domains = _string_tuple(external_research.get("blocked_domains"))
         if len(allowed_domains) > 100:
-            raise AIConfigurationError("AI web research supports at most 100 allowed domains.")
+            raise AIConfigurationError("AI external research supports at most 100 allowed domains.")
 
         return cls(
             provider=provider,
