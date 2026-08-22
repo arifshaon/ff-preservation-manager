@@ -24,6 +24,23 @@ def _looks_like_placeholder(value: str) -> bool:
     return not normalized or any(marker in normalized for marker in _PLACEHOLDER_MARKERS)
 
 
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        raise AIConfigurationError("AI web-search domain filters must be strings or arrays of strings.")
+    result: list[str] = []
+    for item in values:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class AIProviderConfig:
     provider: str
@@ -38,6 +55,9 @@ class AIProviderConfig:
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
+    web_research_enabled: bool = False
+    web_research_allowed_domains: tuple[str, ...] = ()
+    web_research_blocked_domains: tuple[str, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AIProviderConfig":
@@ -62,6 +82,14 @@ class AIProviderConfig:
                 "AI configuration 'human_format_assessment_limit' must be greater than zero."
             )
 
+        web_research = data.get("web_research") or {}
+        if not isinstance(web_research, dict):
+            raise AIConfigurationError("AI configuration 'web_research' must be an object.")
+        allowed_domains = _string_tuple(web_research.get("allowed_domains"))
+        blocked_domains = _string_tuple(web_research.get("blocked_domains"))
+        if len(allowed_domains) > 100:
+            raise AIConfigurationError("AI web research supports at most 100 allowed domains.")
+
         return cls(
             provider=provider,
             endpoint=_optional_string(data.get("endpoint")),
@@ -79,6 +107,9 @@ class AIProviderConfig:
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
             human_format_assessment_limit=human_format_assessment_limit,
+            web_research_enabled=bool(web_research.get("enabled", False)),
+            web_research_allowed_domains=allowed_domains,
+            web_research_blocked_domains=blocked_domains,
         )
 
     @property
@@ -122,6 +153,11 @@ class AIProviderConfig:
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "human_format_assessment_limit": self.human_format_assessment_limit,
+            "web_research": {
+                "enabled": self.web_research_enabled,
+                "allowed_domains": list(self.web_research_allowed_domains),
+                "blocked_domains": list(self.web_research_blocked_domains),
+            },
         }
 
 
