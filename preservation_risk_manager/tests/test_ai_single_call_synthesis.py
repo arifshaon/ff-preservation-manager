@@ -132,7 +132,7 @@ def test_azure_capability_synthesis_uses_one_responses_call_with_optional_web_se
     assert payload["tool_choice"] == "auto"
     assert payload["tools"][0]["type"] == "web_search"
     assert payload["tools"][0]["filters"]["allowed_domains"] == ["example.org"]
-    assert payload["text"]["verbosity"] == "low"
+    assert payload["text"]["verbosity"] == "medium"
     assert payload["text"]["format"]["type"] == "json_schema"
     assert payload["text"]["format"]["strict"] is True
 
@@ -143,3 +143,33 @@ def test_azure_capability_synthesis_uses_one_responses_call_with_optional_web_se
     assert result["external_capability"]["web_search_used"] is True
     assert result["external_capability"]["sources"][0]["url"] == "https://example.org/pdf17"
     assert result["usage"]["total_tokens"] == 280
+
+
+def test_azure_response_verbosity_can_be_configured():
+    config = AIProviderConfig.from_dict({
+        "provider": "azure_openai",
+        "endpoint": "https://example-resource.openai.azure.com/",
+        "api_key": "test-key",
+        "deployment": "test-deployment",
+        "response_verbosity": "high",
+    })
+    responses_client = _ResponsesClient()
+    provider = AzureOpenAIProvider(config, client=_FailChatClient(), responses_client=responses_client)
+    policy = load_synthesis_policy()
+
+    synthesize_with_capabilities(
+        provider,
+        format_context={"canonical_id": "puid-fmt-276", "label": "PDF 1.7"},
+        policy=policy,
+        governed_synthesis={"assessed": True, "semantic_level": "low", "semantic_label": "Low concern"},
+        risk_assessments=[{
+            "source_id": "nara_digital_preservation_framework",
+            "source_record_id": "NF00369",
+            "native_label": "Low Risk",
+            "scope_type": "exact_format",
+        }],
+        criterion_claims=[],
+        source_evidence=[],
+    )
+
+    assert responses_client.responses.calls[0]["text"]["verbosity"] == "high"
