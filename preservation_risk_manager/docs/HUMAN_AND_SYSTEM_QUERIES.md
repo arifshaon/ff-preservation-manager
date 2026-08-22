@@ -1,102 +1,89 @@
 # Human and system preservation-risk queries
 
-The preservation risk manager exposes **one canonical request/execution layer with two presentation modes**:
+The Risk Manager exposes one controlled request/execution layer through two main interfaces:
 
 ```text
-Human user
+Human
   natural-language question
-      -> AI routes intent/parameters only
-      -> canonical request
-      -> deterministic registry/framework execution
-      -> human-readable detailed answer
+       ↓
+  AI request routing
+       ↓
+  controlled request
+       ↓
+  registry + governed synthesis + framework evidence
+       ↓
+  optional AI-assisted synthesis
+       ↓
+  human-readable answer
 
 System/API
-  canonical structured request
-      -> deterministic registry/framework execution
-      -> canonical JSON
+  structured request
+       ↓
+  same controlled execution layer
+       ↓
+  canonical JSON
+       ↓ optional
+  AI-assisted synthesis when explicitly enabled
 ```
 
-The human and machine paths therefore do not have separate preservation logic.
+The human and machine paths therefore share the same format resolution, registry evidence, synthesis policy, question framework, and audit boundaries.
 
-## Human mode is for questions, not JSON
+For simple copy/paste examples, start with [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md).
 
-A person should ask a normal preservation question:
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What are the software dependency and environment risks of PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
-```
-
-Normal `ask` output is detailed prose for a preservation professional. Depending on the requested action it can include:
-
-- resolved format;
-- assessment conclusion/status;
-- evidence coverage;
-- relevant domain/question headings;
-- question-by-question controlled assessments;
-- derivation status;
-- supporting evidence provenance;
-- evidence gaps;
-- coverage warnings;
-- draft/calibration warnings;
-- at-risk format lists;
-- evidence-remediation priorities.
-
-The renderer is deterministic over the canonical result; it does not ask the AI model to invent a narrative answer.
-
-## Human debugging/audit mode
-
-Add `--json` when you want to inspect the canonical payload and router metadata behind a human question:
-
-```powershell
-python -m preservation_risk_manager ask `
-  "What are the software dependency and environment risks of PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --json
-```
-
-This is useful for routing tests and audits, not the normal human presentation.
-
-The JSON includes `router` metadata such as provider/model, token usage, the raw structured route, and any deterministic mechanical repairs.
-
-## Machine/system mode
-
-A system that already knows what operation it needs should bypass the natural-language router.
+## Human mode: `ask`
 
 Example:
 
+```powershell
+python -m preservation_risk_manager ask `
+  "What is the preservation risk of fmt/276?" `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
+  --ai-config config\ai.local.json `
+  --ai-mode synthesize
+```
+
+A normal human answer can include:
+
+- resolved format identity;
+- governed/config synthesized risk;
+- source-native risk assessments such as NARA or DPC where available;
+- supporting criterion/source evidence;
+- AI-assisted synthesized risk when requested;
+- rationale, confidence and uncertainty;
+- capability/web-search audit information;
+- question-level evidence/gaps when the request asks for them.
+
+Use `--json` when you need the canonical payload and routing/AI audit data instead of prose.
+
+## Machine mode: `query-json`
+
+A system that already knows its operation should send a structured request directly.
+
+Example request:
+
 ```json
 {
-  "action": "assess_format_questions",
-  "format": "PDF",
-  "filters": {
-    "domains": ["software_dependencies_environment"]
-  },
+  "action": "assess_format",
+  "format": "fmt/276",
   "scope": "global"
 }
 ```
 
-Execute a request file:
+Run it:
 
 ```powershell
 python -m preservation_risk_manager query-json `
   --request request.json `
   --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json
 ```
 
-No AI provider is called.
-
-A future HTTP API/dashboard/scheduler should wrap this canonical request/result layer rather than reproduce the CLI or natural-language router.
+This avoids using an AI model merely to reinterpret a stable machine instruction.
 
 ## Common request shape
 
-The normalized request can contain:
+Requests normalize to fields such as:
 
 ```json
 {
@@ -116,48 +103,30 @@ The normalized request can contain:
 }
 ```
 
-Not every field is required for every action. `normalize_request` fills omitted optional filter arrays with safe defaults.
+Not every field applies to every action.
 
 ## Supported actions
 
 ### `assess_format`
 
-Assess one resolved format against the full active framework.
-
-Human:
-
-```text
-What is the obsolescence risk of PDF?
-```
-
-Machine:
+Assess one format and return the available overall source-risk context plus framework analysis.
 
 ```json
 {
   "action": "assess_format",
-  "format": "PDF",
+  "format": "fmt/276",
   "scope": "global"
 }
 ```
 
-Use a calibrated/banding-enabled framework when the requirement is an overall Low/Moderate/High result. With the broad draft framework, question-level analysis is available but overall banding is intentionally disabled.
-
 ### `assess_format_questions`
 
-Assess one format against selected domains/questions/content type.
-
-Human:
-
-```text
-What are the software dependency and environment risks of PDF?
-```
-
-Machine:
+Assess selected framework domains/questions for one format.
 
 ```json
 {
   "action": "assess_format_questions",
-  "format": "PDF",
+  "format": "fmt/276",
   "filters": {
     "domains": ["software_dependencies_environment"]
   },
@@ -170,7 +139,7 @@ Specific questions:
 ```json
 {
   "action": "assess_format_questions",
-  "format": "PDF",
+  "format": "fmt/276",
   "filters": {
     "question_ids": [
       "q_platform_dependency",
@@ -182,35 +151,9 @@ Specific questions:
 }
 ```
 
-Content-type selection:
-
-```json
-{
-  "action": "assess_format_questions",
-  "format": "TIFF",
-  "filters": {
-    "domains": ["essential_characteristics"],
-    "content_type": "image"
-  },
-  "scope": "global"
-}
-```
-
 ### `list_assessment_questions`
 
-List/filter the framework's question catalog.
-
-Human:
-
-```text
-What preservation-risk questions do you assess?
-```
-
-```text
-What questions do you use for software dependency risk?
-```
-
-Machine:
+Return the framework question catalogue.
 
 ```json
 {
@@ -222,19 +165,9 @@ Machine:
 }
 ```
 
-The output includes stable question IDs, labels, domains, definitions, guidance, applicability, evidence fields, and controlled answer options.
-
 ### `search_formats`
 
-Discover matching current canonical formats without running assessment.
-
-Human:
-
-```text
-Find formats matching JPEG 2000.
-```
-
-Machine:
+Search current canonical formats without running risk analysis.
 
 ```json
 {
@@ -245,19 +178,9 @@ Machine:
 }
 ```
 
-General search can consider names, identifiers, MIME types, extensions, and related searchable fields. It is intentionally broader than family membership.
-
 ### `assess_format_family`
 
-Assess/rank all plausible members of a named family.
-
-Human:
-
-```text
-Assess the PDF family.
-```
-
-Machine:
+Assess plausible members of a named family.
 
 ```json
 {
@@ -270,19 +193,11 @@ Machine:
 }
 ```
 
-Family discovery uses explicit family metadata when present; otherwise it uses names/aliases. Extensions/MIME/authority identifiers alone do not establish family membership.
+Family membership is deliberately conservative; a shared extension or MIME type alone is not sufficient proof of family membership.
 
 ### `list_at_risk_formats`
 
-Assess a set and return formats in requested risk bands. If bands are omitted, the controlled default is `Moderate` + `High`.
-
-Human:
-
-```text
-Give me the PDF formats that are at risk.
-```
-
-Machine:
+Return formats matching requested risk bands where the selected framework/policy supports banded results.
 
 ```json
 {
@@ -296,69 +211,23 @@ Machine:
 }
 ```
 
-Batch output also reports how many candidates are High, Moderate, Low, and **Unbanded**.
-
-An empty `results` list means no **banded** candidate met the requested bands. It does not mean all candidates are safe. Always inspect `unbanded_count`, `unbanded_results`, and `coverage_warning`.
-
-Use this action with a framework whose overall banding has been validated/enabled.
+Always inspect unbanded/unknown counts. An empty banded result does not mean every candidate is safe.
 
 ### `list_evidence_gaps`
 
-Explain why one format or a family cannot be fully assessed.
-
-Human:
-
-```text
-Why can't PDF 1.7 be assessed?
-```
-
-```text
-Which PDF formats need more evidence and what is missing?
-```
-
-Single format machine request:
+Explain why one format or a family lacks enough evidence for selected framework questions.
 
 ```json
 {
   "action": "list_evidence_gaps",
-  "format": "PDF 1.7",
+  "format": "fmt/276",
   "scope": "global"
 }
 ```
 
-Family machine request:
-
-```json
-{
-  "action": "list_evidence_gaps",
-  "filters": {
-    "family": "PDF"
-  },
-  "scope": "global",
-  "limit": 500
-}
-```
-
-Gap diagnoses distinguish cases such as:
-
-```text
-no_matching_evidence
-claims_exist_but_do_not_map
-claims_exist_but_not_for_framework
-mixed mapping/evidence gaps
-```
-
 ### `plan_evidence_remediation`
 
-Convert diagnosed gaps into a deterministic work queue.
-
-Human:
-
-```text
-What should we fix first so the PDF family can be assessed?
-```
-
-Machine:
+Convert evidence gaps into a controlled remediation queue.
 
 ```json
 {
@@ -371,121 +240,28 @@ Machine:
 }
 ```
 
-Current remediation types include:
+Current work types include mapping review, source-evidence acquisition, and framework-alignment work. Missing evidence is never silently converted to Low risk.
 
-```text
-mapping_rule_needed
-source_evidence_needed
-framework_alignment_review
-```
-
-Priorities use controlled P1/P2/P3 rules. Critical blocked questions are prioritized before non-critical enrichment work.
-
-## Human prompt examples by preservation domain
-
-The natural-language router is intended to understand ordinary preservation questions such as:
-
-### Specification / governance
-
-```text
-How well documented is PDF?
-Can an independent developer implement this format from a public specification?
-Who governs this format?
-Is this format stable across versions?
-```
-
-### Software/environment
-
-```text
-Does this format depend on proprietary software or legacy hardware?
-Does PDF require external assets to render correctly?
-Are open-source viewers or validators available?
-```
-
-### Adoption/community
-
-```text
-Is this format still widely adopted?
-Is third-party read/write support still actively maintained?
-Can the format be reliably identified through PRONOM or MIME identifiers?
-```
-
-### Technical structure
-
-```text
-Is the format transparent or an opaque binary format?
-Does it use lossy compression?
-Would migration lose essential characteristics?
-```
-
-### Rights/TPM
-
-```text
-Are patents or licensing restrictions a preservation problem for this format?
-Can DRM or encryption prevent automated preservation actions?
-```
-
-### Metadata/accessibility
-
-```text
-Can the format preserve embedded metadata?
-Can it preserve accessibility features such as tags, alt text or captions?
-```
-
-### Essential characteristics
-
-```text
-Can TIFF preserve the image characteristics we need?
-Can this video format retain timecodes, multi-track audio and subtitles?
-Can this spreadsheet format preserve formulas and typed relationships?
-```
-
-### Local QNL feasibility
-
-```text
-Can QNL currently manage this format with our software and staff?
-Does QNL have a tested migration pathway for this format?
-Would this format create unsustainable storage/network overhead for QNL?
-```
-
-Stable domain/question IDs are documented in [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md).
-
-## Global vs institution-scoped queries
+## Global vs institution scope
 
 ### Global
 
 ```json
 {
   "action": "assess_format_questions",
-  "format": "PDF",
-  "filters": {
-    "domains": ["specification_governance"]
-  },
+  "format": "fmt/276",
   "scope": "global"
 }
 ```
 
-Global scope excludes institution-scoped claims.
+Global scope excludes institution-scoped evidence.
 
-### QNL
-
-Human:
-
-```powershell
-python -m preservation_risk_manager ask `
-  "Can QNL sustainably manage PDF?" `
-  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --institution qnl
-```
-
-Machine:
+### Institution
 
 ```json
 {
   "action": "assess_format_questions",
-  "format": "PDF",
+  "format": "fmt/276",
   "filters": {
     "domains": ["local_institutional_feasibility"]
   },
@@ -494,130 +270,93 @@ Machine:
 }
 ```
 
-Institution scope includes global claims plus claims for that institution.
+Institution scope adds evidence explicitly associated with that institution. Local capability statements must not become universal format facts.
 
-## Human output behavior
+## Human prompt examples
 
-For targeted question assessment the human renderer reports, for example:
+The router is intended to handle questions such as:
 
 ```text
-PDF preservation-risk assessment
-
-Evidence coverage: 2 of 3 selected questions answered (67%).
-Overall Low/Moderate/High banding is not reported because the framework
-is draft_unvalidated and banding is disabled.
-
-Software Dependencies & Environment
-- Is rendering dependent on specific operating systems ...?
-  Assessment: ...
-  Derivation: ...
-  Supporting evidence: ...
-
-- Does opening or rendering depend on external assets ...?
-  Assessment: Unknown / insufficient evidence.
-  Evidence gap: ...
-
-Interpretation
-This is a partial assessment. Unresolved questions must not be read as
-proof that no preservation risk exists.
+What is the preservation risk of fmt/276?
+What are the source assessments for PDF 1.7?
+What are the software dependency risks of PDF 1.7?
+How well documented is this format?
+Does it rely on proprietary software or external assets?
+Which PDF formats are at risk?
+Why can this format not be fully assessed?
+What evidence should we collect next?
+Can QNL currently manage this format?
 ```
 
-Human rendering is based on the canonical response and retains coverage/caveats.
+The 22 framework questions and stable IDs are summarized in [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md).
 
-## Canonical JSON response behavior
+## AI boundaries
 
-A successful response contains common fields such as:
+For human prompts, AI routing may determine request parameters such as:
+
+```text
+action
+format/query/family
+question domains / IDs
+risk bands
+content type
+scope / institution
+limit
+```
+
+The application still owns format resolution, registry evidence retrieval, governed synthesis, framework execution, and validation of the returned request.
+
+With `--ai-mode synthesize`, AI receives the assembled evidence/methodology and returns a separate AI-assisted overall result. That result may agree or disagree with the governed baseline, but it does not rewrite the source-native evidence or MongoDB.
+
+## Format ambiguity
+
+Format resolution may return:
+
+```text
+resolved
+ambiguous
+not_found
+```
+
+The application must not choose an arbitrary PDF/version merely because an extension such as `.pdf` matches many canonical records.
+
+Optional bounded AI identification can be enabled separately; see [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md).
+
+## Canonical JSON response
+
+Common response areas can include:
 
 ```text
 status
 request
 framework
 scope
-institution_id
-result/result_count or results/result_count
+resolved format
+source risk assessments
+governed_synthesis
+question/framework analysis
+evidence gaps/remediation
+ai_assisted_synthesis
+identification audit
+provider/capability audit
 ```
 
-Action-specific data can include:
+Exact fields are action-specific. Machine clients should use structured fields, not scrape human prose.
 
-- format identity;
-- score/risk band;
-- calibration/banding status;
-- evidence completeness;
-- question results;
-- evidence hashes;
-- family candidate counts;
-- unbanded candidates;
-- coverage warnings;
-- gap summaries;
-- remediation summaries.
+## Which interface should software use?
 
-Exact response shape is action-specific; clients should key behavior off `action`, `status`, and documented fields rather than scraping human output.
+Use `query-json` or the HTTP API when the caller already knows the requested action.
 
-## Error and resolution behavior
+Use `ask` when a person expresses preservation intent in ordinary language.
 
-The API intentionally returns structured ambiguity/not-found states rather than guessing.
-
-Examples:
-
-```text
-status = ambiguous
-status = not_found
-status = error
-```
-
-A machine client should handle these explicitly.
-
-A human `ask` command renders a concise readable failure unless `--json` was requested.
-
-## AI router boundaries
-
-For human prompts, the router may determine:
-
-```text
-action
-format/query/family
-risk bands
-question domains / IDs
-content type
-scope / institution
-limit
-```
-
-It may not determine:
-
-```text
-risk score
-risk band
-framework answer from general knowledge
-registry evidence
-QNL policy
-```
-
-Where a routed request is mechanically inconsistent, deterministic repair rules may normalize it before request validation. The repair is recorded in `ask --json` router metadata.
-
-## Which interface should an application use?
-
-Use:
-
-```text
-query-json / canonical request layer
-```
-
-when the caller is software and already knows the intended operation.
-
-Use:
-
-```text
-ask
-```
-
-when the caller is a person expressing preservation intent in ordinary language.
-
-Do not make an automated integration depend on a model reinterpreting a prompt on every run if the integration can send a stable action and IDs directly.
+For HTTP/Swagger integration see [`../../docs/API_AND_SWAGGER.md`](../../docs/API_AND_SWAGGER.md).
 
 ## Related documentation
 
-- All question/domain IDs: [`PRESERVATION_RISK_QUESTIONS.md`](PRESERVATION_RISK_QUESTIONS.md)
-- Installation and all modes: [`INSTALLATION_SETUP_AND_RUN.md`](INSTALLATION_SETUP_AND_RUN.md)
-- Architecture: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- Shared registry/data interface: [`../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md`](../../docs/DATA_MODEL_AND_STORAGE_INTERFACE.md)
+- Installation: [`../../docs/INSTALLATION.md`](../../docs/INSTALLATION.md)
+- Operator use cases: [`../../docs/USE_CASES.md`](../../docs/USE_CASES.md)
+- Repository architecture: [`../../docs/REPOSITORY_ARCHITECTURE.md`](../../docs/REPOSITORY_ARCHITECTURE.md)
+- API/Swagger: [`../../docs/API_AND_SWAGGER.md`](../../docs/API_AND_SWAGGER.md)
+- Format identification: [`FORMAT_IDENTIFICATION.md`](FORMAT_IDENTIFICATION.md)
+- AI analysis: [`AI_ASSISTED_ANALYSIS.md`](AI_ASSISTED_ANALYSIS.md)
+- CLI reference: [`CLI_REFERENCE.md`](CLI_REFERENCE.md)
