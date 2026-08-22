@@ -1,0 +1,17 @@
+{
+  "storage": {
+    "type": "mongodb",
+    "uri": "mongodb://localhost:27017",
+    "database": "qnl_format_registry",
+    "server_selection_timeout_ms": 5000,
+    "ping": true
+  },
+  "criteria": "criteria/v1.json",
+  "mappings": "criterion_mappings/nara_digital_preservation_framework.v1.approved.json",
+  "include_drafts": false,
+  "replace_source_claims": true,
+  "dry_run": false,
+  "out": "../out/nara-criterion-claims-backfill-report.json",
+  "progress_every": 500,
+  "notes": "Production application of the already-approved NARA rubric-to-criterion mappings. This is distinct from the NARA source-native risk_assessment_claims backfill: composite NARA risk levels remain external risk assessments, while only individually approved rubric observations become criterion_claims. Run with --dry-run first and review counts before applying. Source-level replacement is required so stale NARA criterion claims are superseded when approved mappings or NARA source rows change."
+}
