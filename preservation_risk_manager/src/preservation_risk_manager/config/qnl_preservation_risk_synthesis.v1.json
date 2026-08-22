@@ -9,6 +9,13 @@
     {"id": "high", "label": "High concern", "rank": 3},
     {"id": "critical", "label": "Critical concern", "rank": 4}
   ],
+  "terminology": {
+    "mapping_authority": "source_rules",
+    "unknown_term_policy": "unmapped",
+    "normalization": "trim_casefold_underscore_as_space",
+    "ai_output_vocabulary": "semantic_levels",
+    "notes": "Source-native terminology is preserved. A term affects governed synthesis only when a matching source_rule maps it to one of semantic_levels or an already normalized semantic_level is explicitly accepted. AI-assisted synthesis returns semantic_levels directly and may discuss other terminology in rationale without changing source-native records."
+  },
   "source_rules": [
     {
       "rule_id": "nara-native-risk",
@@ -61,6 +68,7 @@
     {"source_match": {"source_id": "wikidata"}, "role": "context_only", "may_create_source_overall_rating": false}
   ],
   "synthesis": {
+    "headline_roles": ["risk_assessment"],
     "missing_assessment_policy": "exclude",
     "unmapped_assessment_policy": "retain_for_ai_or_review",
     "scope_precedence": [
