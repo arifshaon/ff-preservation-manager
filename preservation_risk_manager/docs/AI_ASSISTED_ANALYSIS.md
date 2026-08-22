@@ -1,23 +1,22 @@
 # AI-assisted preservation analysis
 
-AI support is optional and bounded by the preservation application.
+AI support is optional. When enabled, the Preservation Risk Manager supplies the model with controlled preservation context while keeping source records, deterministic calculations, and approved policy outside automatic AI write control.
 
 The application owns:
 
 ```text
-registry evidence
+registry evidence and provenance
 format resolution
-source-native assessments
-configured source mappings
-synthesis policy
 framework questions
-controlled answers
-scoring
+controlled deterministic answers
+configured synthesis rules
+deterministic/config baseline
 gap/remediation logic
 policy approval boundaries
+MongoDB writes
 ```
 
-AI has different permissions depending on the explicitly selected mode. The normal evidence source remains the QNL format registry.
+The AI provider supplies analysis using the capabilities it actually exposes.
 
 ## Supported provider styles
 
@@ -33,47 +32,29 @@ cd preservation_risk_manager
 python -m pip install -e ".[dev,ai]"
 ```
 
-## Azure example
+## Configure a provider
 
-Copy:
+Azure example:
 
 ```powershell
 New-Item -ItemType Directory -Force config | Out-Null
 Copy-Item examples\ai.azure.example.json config\ai.local.json
 ```
 
-Then replace deployment/API-key placeholders locally. Do not commit real secrets.
+Replace deployment/key placeholders locally. Do not commit real secrets.
 
-The Azure example contains an optional `web_research` block. It is disabled by default.
-
-## Local model example
-
-The repository ships:
-
-```text
-examples/ai.local.example.json
-```
-
-Example:
+Optional external-research domain controls are administrative only:
 
 ```json
-{
-  "ai": {
-    "provider": "openai_compatible",
-    "endpoint": "http://127.0.0.1:8000/v1",
-    "model": "<LOCAL_MODEL_NAME>",
-    "temperature": 0.0,
-    "max_output_tokens": 1200,
-    "timeout_seconds": 60
-  }
+"external_research": {
+  "allowed_domains": [],
+  "blocked_domains": []
 }
 ```
 
-Copy it to a local config and set `endpoint` and `model`. An API key is optional for compatible local servers that do not require one.
+There is no active `web_research.enabled` gate. If the configured provider exposes web/search capability, the application makes it available and the provider/model decides whether to use it.
 
 ## Validate configuration
-
-No network call:
 
 ```powershell
 python -m preservation_risk_manager.ai info `
@@ -88,21 +69,7 @@ python -m preservation_risk_manager.ai query `
   --prompt "Reply with a short confirmation."
 ```
 
-Structured-output capability:
-
-```powershell
-python -m preservation_risk_manager.ai validate-structured `
-  --config config\ai.local.json
-```
-
-Tool-calling capability:
-
-```powershell
-python -m preservation_risk_manager.ai validate-tools `
-  --config config\ai.local.json
-```
-
-## Mode 1: human-question routing
+## Human-question routing
 
 ```powershell
 python -m preservation_risk_manager ask `
@@ -112,161 +79,127 @@ python -m preservation_risk_manager ask `
   --ai-config config\ai.local.json
 ```
 
-AI responsibility:
+For natural-language routing, AI maps the request to a controlled application action. The canonical request is then executed by application code.
+
+## Overall synthesis: `--ai-mode synthesize`
+
+This is the main AI-assisted overall-risk path.
+
+The AI receives:
+
+- resolved format identity;
+- all relevant registry/source evidence;
+- source-native assessments;
+- criterion claims;
+- the deterministic/config synthesized risk;
+- the versioned synthesis configuration;
+- the QNL preservation-risk framework.
+
+The deterministic result is an auditable baseline, not a required AI answer.
+
+The AI may agree or disagree. If it differs, the structured output records the relationship to the governed baseline plus rationale, confidence and uncertainty.
+
+### Capability-driven behavior
+
+The application does not prescribe a mandatory research sequence.
 
 ```text
-natural language
- -> controlled request action/parameters
+AI provider available
+        |
+        +-- web/search supported -> capability made available automatically
+        |                         -> provider/model may use it or decline it
+        |
+        +-- web/search unsupported -> continue from supplied evidence
 ```
 
-The canonical request is executed by application code. Routing does not itself calculate preservation risk.
+A web capability failure does not automatically cancel the AI analysis. The model can still synthesize from the supplied context.
 
-## Mode 2: `synthesize`
+See [`AI_RESEARCH_ASSISTED_SYNTHESIS.md`](AI_RESEARCH_ASSISTED_SYNTHESIS.md).
+
+## Evidence and external-information separation
+
+Source-native records remain source-native records. AI must not silently turn external/model information into a NARA, DPC, LOC or PRONOM statement.
+
+The result can record:
+
+```text
+R... / C... / S...  supplied registry evidence refs
+W...                 external sources returned by provider capability
+```
+
+Evidence-reference use is preferred for audit but is not a hard acceptance gate. If the AI returns a useful assessment without explicitly referencing supplied registry refs, the result is returned with a quality warning so the consumer can decide whether it is sufficient.
+
+## Privacy boundary for public search
+
+Institution-scoped/private operational evidence is excluded from the public-search capability context.
+
+The final AI model call can still receive the full assessment context through the configured AI provider, but public web grounding receives only public/global format evidence and public format identity.
+
+## `fill-gaps`
+
+`fill-gaps` remains a narrower question-level workflow:
+
+- deterministic derivation runs first;
+- unresolved/ambiguous questions may be interpreted by AI;
+- framework-declared answer IDs are used;
+- fabricated evidence references are rejected;
+- deterministic resolved answers are not silently replaced.
+
+This workflow is distinct from capability-driven overall synthesis.
+
+## `review-all`
+
+`review-all` is for calibration and QA. It presents a raw-source-oriented review view and compares controlled AI answers with deterministic answers.
+
+A divergence is a review signal; it does not automatically change mappings, deterministic scoring or policy.
+
+## Data-integrity rules
+
+AI-assisted analysis does not automatically:
+
+1. rewrite canonical registry data;
+2. rewrite NARA/DPC/LOC/PRONOM source-native records;
+3. change reviewed source mappings;
+4. persist new external findings as approved evidence;
+5. overwrite the deterministic/config baseline;
+6. convert missing evidence into Low risk.
+
+The AI-assisted result is returned alongside the governed baseline for the consumer to evaluate.
+
+## Example overall-risk command
 
 ```powershell
 python -m preservation_risk_manager ask `
   "What is the preservation risk of fmt/276?" `
   --framework examples\qnl_preservation_risk_questions.framework.draft.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
   --ai-config config\ai.local.json `
   --ai-mode synthesize
 ```
 
-There are two controlled behaviors under the same mode.
-
-### Without web research
-
-The application starts with governed source assessments and the versioned synthesis policy. If all source-level risk is already understood by configuration, no AI call is needed. AI is used only when an explicit source-native risk value remains unmapped or when policy permits synthesis from supplied supporting evidence.
-
-### With web research explicitly enabled
-
-Azure provider config:
-
-```json
-{
-  "ai": {
-    "provider": "azure_openai",
-    "web_research": {
-      "enabled": true,
-      "allowed_domains": [],
-      "blocked_domains": []
-    }
-  }
-}
-```
-
-The workflow changes to:
+Expected output distinguishes:
 
 ```text
-registry evidence
- -> config-driven governed synthesis baseline
- -> cited public-web verification/supplementation
- -> policy-guided AI-assisted synthesis
+AI-assisted synthesized risk
+Governed/config baseline
+source assessments
+AI rationale
+capabilities available
+capabilities actually used
+external sources if returned
+quality warnings
+uncertainty
 ```
-
-This is **not** an independent AI opinion and is not a generic search for "the risk of PDF". Research begins with the actual NARA/DPC/LOC/PRONOM and other evidence available for the resolved canonical format.
-
-The web-grounded research may:
-
-- confirm existing evidence;
-- identify that a source statement has become stale or needs qualification;
-- contradict an existing preservation-relevant claim with newer authoritative evidence;
-- add current evidence about specification/governance, tooling, adoption, dependencies, migration, rights/DRM, or metadata characteristics.
-
-Source-native assessments and configured mappings remain immutable. Missing evidence still contributes nothing. Web findings are retained with URLs/citations and are not automatically persisted to MongoDB.
-
-Because public web grounding is an external service, institution-scoped evidence and private/local operational details are excluded from the web-search payload.
-
-Full design: [`AI_RESEARCH_ASSISTED_SYNTHESIS.md`](AI_RESEARCH_ASSISTED_SYNTHESIS.md).
-
-## Mode 3: `fill-gaps`
-
-```powershell
-python -m preservation_risk_manager analyze-format-ai `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
-  --ai-config config\ai.local.json `
-  --ai-mode fill-gaps
-```
-
-Purpose:
-
-- deterministic derivation runs first;
-- only unresolved/ambiguous questions are eligible;
-- AI receives bounded registry evidence;
-- returned answers must use framework-declared answer IDs;
-- fabricated evidence references are rejected;
-- deterministic evidence remains unchanged.
-
-Question-level `fill-gaps` is **not** permission to use outside general knowledge. The optional web research described above applies to the overall synthesis stage, not to silently fill individual framework answers from the internet.
-
-## Mode 4: `review-all`
-
-```powershell
-python -m preservation_risk_manager analyze-format-ai `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --format PDF `
-  --ai-config config\ai.local.json `
-  --ai-mode review-all
-```
-
-Purpose: calibration and quality assurance.
-
-The model is given a raw-source-only review view and independently answers eligible framework questions. It is not shown deterministic answers/scores as review evidence. Divergence is recorded but does not automatically change deterministic answers.
-
-## Raw-evidence review boundary
-
-`review-all` excludes normalized/scoring leakage such as:
-
-```text
-normalized mapped value
-answer_id
-mapping_rule_id
-score
-band
-posture
-deterministic derivation status
-```
-
-If usable raw payload is absent, the question may be skipped rather than letting AI infer from normalized conclusions.
-
-## AI and policy proposals
-
-`propose-policy-change` produces a bounded proposal package for human approval and does not automatically write institutional policy.
-
-## AI and source mapping
-
-The registry builder has a separate AI **mapping-draft** workflow. AI cannot approve its own mapping.
-
-See:
-
-[`../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md`](../../qnl_format_registry_builder/docs/ADDING_CRITERIA_AND_MAPPING_NEW_SOURCES.md)
-
-## Safety rules
-
-1. Missing evidence is never interpreted as Low risk.
-2. AI must not silently change canonical registry data.
-3. Source-native assessments and reviewed mappings remain visible and immutable.
-4. Bounded question-level AI must cite supplied evidence and use controlled answers.
-5. Web-researched synthesis must start from registry evidence, not replace it with an independent opinion.
-6. Web-research findings require citations and are not automatically persisted.
-7. Institution-scoped/private evidence is not sent to public web grounding.
-8. AI-generated mapping/policy changes remain drafts until human approval.
-9. Provider/model identity and usage metadata should be retained for audits.
 
 ## Choosing a mode
 
 | Need | Mode |
 | --- | --- |
-| Human asks natural-language question | `ask` routing |
-| Machine already knows action | `query-json` — no AI by default |
-| Overall source synthesis, optionally with cited current web verification | `--ai-mode synthesize` |
-| Interpret unresolved bounded framework evidence | `fill-gaps` |
-| Calibrate/check deterministic mappings | `review-all` |
-| Test deterministic engine only | `analyze-format` |
-| Draft policy/action proposal | `propose-policy-change` |
+| Natural-language routing only | `ask` with AI mode off |
+| AI-assisted overall synthesized risk | `--ai-mode synthesize` |
+| Interpret unresolved framework questions | `--ai-mode fill-gaps` |
+| Calibration/QA review | `--ai-mode review-all` |
+| Deterministic engine only | `query-json` / `analyze-format` without AI |
 
 ## Related docs
 
