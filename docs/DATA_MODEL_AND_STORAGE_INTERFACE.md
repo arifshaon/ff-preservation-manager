@@ -129,6 +129,8 @@ format_identifiers
 institution_policy_overlays
 format_evidence_claims
 criterion_claims
+risk_assessment_claims
+source_relationship_claims
 hazard_assessments
 readiness_assessments
 trend_observations
@@ -166,7 +168,7 @@ Normal creation and update operations are performed by `qnl_format_registry_buil
 - reconcile canonical formats;
 - generate criterion claims from reviewed mappings;
 - supersede old claims where configured;
-- save hazard/readiness/trend/change outputs.
+- save governed risk/source-relationship claims and hazard/readiness/trend/change outputs.
 
 For narrative sources, the reviewed transcription artifact enters the builder as source evidence; the storage layer does not perform LLM transcription.
 
@@ -184,6 +186,7 @@ It provides higher-level operations such as:
 - get a canonical format;
 - resolve strong identity aliases that can contribute criterion claims;
 - retrieve global/institution-scoped criterion claims;
+- retrieve governed source-risk and relationship context through the current read layer;
 - retrieve legacy evidence where needed.
 
 When given a storage configuration, it lazily uses `registry_builder.storage.create_store(...)`, keeping backend implementation centralized in the builder.
@@ -206,7 +209,7 @@ JsonRegistryStore
 RegistryReader / risk manager
 ```
 
-When `--registry-json` points to `registry.json`, the risk manager automatically looks for sibling criterion-claim exports. This keeps the portable export path functionally equivalent to the logical collections needed for assessment.
+When `--registry-json` points to `registry.json`, the risk manager automatically looks for sibling criterion-claim exports. This keeps the portable export path functionally equivalent to the logical collections needed for framework/question assessment.
 
 A canonical-format-only file can resolve formats, but without relevant criterion claims it may produce missing/unknown framework answers.
 
@@ -272,12 +275,10 @@ QNL evidence file
 ```
 
 ```text
-DPC PDF/HTML
- -> reviewed transcription JSON
- -> standard_json / DPC adapter
- -> RawFormatRecord
- -> criterion mapping
- -> criterion_claims
+DPC publication/repository
+ -> DPC adapter / reviewed source handling
+ -> evidence-only RawFormatRecord
+ -> governed risk projection
  -> RegistryStore
 ```
 
@@ -316,7 +317,7 @@ A new storage backend should:
 6. implement connection/transaction lifecycle hooks if needed;
 7. add backend-specific indexes for common query fields without changing logical semantics;
 8. add storage-contract tests;
-9. prove the risk manager can query canonical formats and `criterion_claims` through it.
+9. prove the risk manager can query canonical formats and evidence through it.
 
 See:
 
@@ -330,5 +331,5 @@ See:
 - Unstructured-source transcription: [`TRANSCRIBING_UNSTRUCTURED_SOURCES.md`](TRANSCRIBING_UNSTRUCTURED_SOURCES.md)
 - Builder storage/export configuration: [`../qnl_format_registry_builder/docs/STORAGE_AND_EXPORT_CONFIG.md`](../qnl_format_registry_builder/docs/STORAGE_AND_EXPORT_CONFIG.md)
 - MongoDB physical schema: [`../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md`](../qnl_format_registry_builder/docs/MONGODB_STORAGE_SCHEMA.md)
-- Risk-manager architecture: [`../preservation_risk_manager/docs/ARCHITECTURE.md`](../preservation_risk_manager/docs/ARCHITECTURE.md)
+- Risk-manager module reference: [`../preservation_risk_manager/docs/MODULE_REFERENCE.md`](../preservation_risk_manager/docs/MODULE_REFERENCE.md)
 - Human/system query API: [`../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md`](../preservation_risk_manager/docs/HUMAN_AND_SYSTEM_QUERIES.md)
