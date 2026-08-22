@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -15,6 +16,14 @@ def _load_config(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("Registry configuration must contain a JSON object.")
     return data
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _selected_config(config: dict[str, Any], source_ids: list[str]) -> tuple[dict[str, Any], list[str]]:
@@ -37,7 +46,13 @@ def _selected_config(config: dict[str, Any], source_ids: list[str]) -> tuple[dic
     return selected, available
 
 
-def _compact_report(report: dict[str, Any], requested: list[str]) -> dict[str, Any]:
+def _compact_report(
+    report: dict[str, Any],
+    requested: list[str],
+    *,
+    base_config_path: str | None = None,
+    base_config_sha256: str | None = None,
+) -> dict[str, Any]:
     source_rows = [
         row for row in report.get("sources") or []
         if isinstance(row, dict) and str(row.get("source_id") or "") in set(requested)
@@ -47,6 +62,8 @@ def _compact_report(report: dict[str, Any], requested: list[str]) -> dict[str, A
         "run_id": report.get("run_id"),
         "started_at": report.get("started_at"),
         "finished_at": report.get("finished_at"),
+        "base_config_path": base_config_path,
+        "base_config_sha256": base_config_sha256,
         "incremental_source_updates": report.get("incremental_source_updates"),
         "requested_source_ids": requested,
         "refreshed_source_ids": sorted(
@@ -93,6 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config_path = Path(args.config).expanduser().resolve()
     if not config_path.is_file():
         raise SystemExit(f"Config not found: {config_path}")
+    config_hash = _sha256_file(config_path)
     config = _load_config(config_path)
     requested: list[str] = []
     for value in args.source_ids:
@@ -150,7 +168,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             except OSError:
                 pass
 
-    compact = _compact_report(report, requested)
+    compact = _compact_report(
+        report,
+        requested,
+        base_config_path=str(config_path),
+        base_config_sha256=config_hash,
+    )
     text = json.dumps(compact, indent=2, ensure_ascii=False, sort_keys=True)
     if args.report:
         report_path = Path(args.report).expanduser()
