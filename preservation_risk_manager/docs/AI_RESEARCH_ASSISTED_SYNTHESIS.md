@@ -59,7 +59,7 @@ The web-researched result may be different from the governed baseline when curre
 
 ## What web research should investigate
 
-The research prompt begins with the actual evidence available for the resolved canonical format. It may investigate current authoritative evidence concerning:
+The research prompt begins with the actual public/global evidence available for the resolved canonical format. It may investigate current authoritative evidence concerning:
 
 - accuracy and currentness of existing source findings;
 - specification disclosure and governance;
@@ -120,6 +120,23 @@ Web research does not rewrite:
 
 A web finding can affect the AI-assisted synthesized result, but it is retained as separate researched evidence with citations. The current workflow does not persist these findings to MongoDB.
 
+## Privacy and institution-scoped evidence
+
+The public-web grounding step is intentionally limited to public/global format evidence.
+
+Before the web-search request is created, the application excludes:
+
+- claims carrying an `institution_id`;
+- evidence marked `source_independence=institution_scoped`;
+- institution-level risk assessments such as `scope_type=institutional_format`;
+- private/local evidence embedded in the format record outside the public identity fields.
+
+Only public format identity values such as canonical ID, PUID, LOC/NARA identifiers, version, extension and MIME type are passed as format context.
+
+The governed baseline supplied to the web-search prompt is also sanitized so institution-scoped contributors and local details are not included.
+
+Institution/local evidence can still participate in non-web institution-scoped application logic, but it is not sent to the public search grounding service.
+
 ## Explicit opt-in
 
 Web research is disabled by default and must be enabled in the AI provider configuration:
@@ -139,9 +156,9 @@ Web research is disabled by default and must be enabled in the AI provider confi
 }
 ```
 
-An empty `allowed_domains` list allows the provider's normal public-web search scope. Organizations can instead restrict research to approved domains.
+An empty `allowed_domains` list allows the provider's normal public-web search scope. Organizations can instead restrict research to approved domains and/or block selected domains.
 
-Web grounding is an external service with separate cost, data-processing, and availability considerations, so it must not be enabled implicitly.
+Web grounding is an external service with separate cost, data-processing, compliance-boundary, and availability considerations, so it must not be enabled implicitly.
 
 ## Azure OpenAI implementation
 
@@ -154,7 +171,7 @@ When web research is enabled, the Azure provider additionally uses the Azure Ope
 - a recent OpenAI Python SDK exposing `client.responses`;
 - outbound access required by the Azure service configuration.
 
-The application requires an actual `web_search_call`. If the provider returns an ungrounded response, the research step fails closed and the deterministic config-driven synthesis is retained.
+The application requests `web_search_call.action.sources` and extracts both the search actions and `url_citation` annotations. The application requires an actual `web_search_call`. If the provider returns an ungrounded response, the research step fails closed and the deterministic config-driven synthesis is retained.
 
 ## Failure behavior
 
@@ -177,7 +194,7 @@ DPC PDF group: Moderate concern (broader context)
 Governed baseline: Low concern
 ```
 
-With web research enabled, the AI receives those findings and related LOC/PRONOM evidence first. It then verifies or supplements material preservation facts using cited current sources.
+With web research enabled, AI receives those findings and related public LOC/PRONOM evidence first. It then verifies or supplements material preservation facts using cited current sources.
 
 A final output may therefore be:
 
@@ -188,9 +205,11 @@ Governed baseline: Low concern
 Web verification:
 - current specification/tooling evidence confirms the existing low-risk indicators
 - current migration support supplements the registry evidence
+```
 
-or, where justified by current evidence:
+or, where current cited evidence materially qualifies the baseline:
 
+```text
 Overall AI-assisted synthesized risk: Moderate concern
 Governed baseline: Low concern
 
