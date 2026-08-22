@@ -7,6 +7,11 @@
     "deployment": "<AZURE_OPENAI_DEPLOYMENT_NAME>",
     "temperature": 0.0,
     "max_output_tokens": 1200,
-    "timeout_seconds": 60
+    "timeout_seconds": 60,
+    "web_research": {
+      "enabled": false,
+      "allowed_domains": [],
+      "blocked_domains": []
+    }
   }
 }
