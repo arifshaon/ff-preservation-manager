@@ -7,7 +7,7 @@ from typing import Any, Iterable
 
 
 DEFAULT_SYNTHESIS_POLICY_PATH = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parent
     / "config"
     / "qnl_preservation_risk_synthesis.v1.json"
 )
@@ -218,6 +218,8 @@ def _compact_assessment(item: dict[str, Any]) -> dict[str, Any]:
         "projection_version",
         "policy_rule_id",
         "policy_mapping_basis",
+        "ai_evidence_ref",
+        "ai_rationale",
     )
     return {key: item.get(key) for key in keys if item.get(key) is not None}
 
