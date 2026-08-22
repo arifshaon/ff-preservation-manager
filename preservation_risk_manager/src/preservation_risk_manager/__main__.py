@@ -16,6 +16,10 @@ if __name__ == "__main__":
         from preservation_risk_manager.audit_cli import main as audit_main
 
         raise SystemExit(audit_main(argv[1:]))
+    if argv and argv[0] == "expert-synthesize":
+        from preservation_risk_manager.expert_cli import main as expert_main
+
+        raise SystemExit(expert_main(argv[1:]))
     if argv and argv[0] in {"ask", "query-json"}:
         raise SystemExit(integration_main(argv))
     raise SystemExit(legacy_main(argv))
