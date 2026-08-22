@@ -71,10 +71,6 @@ def plan_format_evidence_remediation(diagnostic: dict[str, Any]) -> dict[str, An
     content-specific assessment, or bounded mapping review. It never instructs a
     caller to rewrite registry source data merely because a framework answer is
     unknown.
-
-    Questions deferred until institution scope or content type is known are kept
-    visible in the result but are not turned into remediation actions for the
-    current request.
     """
     items = [
         _item_for_gap(gap)
@@ -125,17 +121,8 @@ def plan_format_evidence_remediation(diagnostic: dict[str, Any]) -> dict[str, An
         "risk_band": diagnostic.get("risk_band"),
         "band_suppressed_reason": diagnostic.get("band_suppressed_reason"),
         "evidence_completeness": diagnostic.get("evidence_completeness"),
-        "applicable_evidence_completeness": diagnostic.get("applicable_evidence_completeness"),
-        "applicable_question_count": diagnostic.get("applicable_question_count"),
-        "applicable_answered_question_count": diagnostic.get("applicable_answered_question_count"),
         "gap_classification": diagnostic.get("gap_classification"),
         "criterion_claims_available": diagnostic.get("criterion_claims_available"),
-        "deferred_question_count": diagnostic.get("deferred_question_count", 0),
-        "deferred_reason_counts": deepcopy(diagnostic.get("deferred_reason_counts") or {}),
-        "deferred_questions": deepcopy(diagnostic.get("deferred_questions") or []),
-        "excluded_question_count": diagnostic.get("excluded_question_count", 0),
-        "excluded_questions": deepcopy(diagnostic.get("excluded_questions") or []),
-        "request_context": deepcopy(diagnostic.get("request_context") or {}),
         "non_scoring_registry_context": deepcopy(diagnostic.get("non_scoring_registry_context") or {}),
         "remediation_item_count": len(items),
         "priority_counts": dict(sorted(priority_counts.items())),
@@ -151,7 +138,6 @@ def summarize_evidence_remediation(rows: list[dict[str, Any]], *, candidate_coun
     priority_counts: Counter[str] = Counter()
     work_type_counts: Counter[str] = Counter()
     question_action_counts: dict[str, Counter[str]] = {}
-    deferred_reason_counts: Counter[str] = Counter()
 
     for row in rows:
         for item in row.get("remediation_items") or []:
@@ -166,8 +152,6 @@ def summarize_evidence_remediation(rows: list[dict[str, Any]], *, candidate_coun
             question_id = item.get("question_id")
             if question_id:
                 question_action_counts.setdefault(str(question_id), Counter())[action_type] += 1
-        for reason, count in (row.get("deferred_reason_counts") or {}).items():
-            deferred_reason_counts[str(reason)] += int(count)
 
     return {
         "candidate_count": candidate_count,
@@ -177,7 +161,6 @@ def summarize_evidence_remediation(rows: list[dict[str, Any]], *, candidate_coun
         "action_type_counts": dict(sorted(action_counts.items())),
         "priority_counts": dict(sorted(priority_counts.items())),
         "work_type_counts": dict(sorted(work_type_counts.items())),
-        "deferred_question_reason_counts": dict(sorted(deferred_reason_counts.items())),
         "question_action_counts": {
             question_id: dict(sorted(counts.items()))
             for question_id, counts in sorted(question_action_counts.items())
