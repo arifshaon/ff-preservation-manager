@@ -45,12 +45,14 @@ def _band_suppressed_reason(
 def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str, Any]:
     """Score supplied answer IDs against a validated framework.
 
-    The scorer accepts only framework-declared answer IDs. Missing answers are
-    treated as abstentions when the question provides an unknown/abstention
-    option; otherwise they are recorded as missing with zero points. A framework
-    may explicitly disable overall banding while its question set is being
-    calibrated; question-level answers and completeness remain available, but no
-    authoritative Low/Moderate/High band is emitted.
+    The scorer accepts only framework-declared answer IDs. Missing or unknown
+    answers are abstentions: they remain visible in diagnostics and completeness,
+    but they contribute zero points to the risk score. Absence of evidence must
+    never be interpreted as Low, Moderate, High, or any synthetic risk value.
+
+    A framework may explicitly disable overall banding while its question set is
+    being calibrated; question-level answers and completeness remain available,
+    but no authoritative Low/Moderate/High band is emitted.
     """
     question_results: list[dict[str, Any]] = []
     total_score = 0.0
@@ -72,10 +74,17 @@ def score_answers(framework: RiskFramework, answers: dict[str, Any]) -> dict[str
             answer_id = None
             abstention = True
         else:
-            points = answer.points
-            weighted_points = answer.points * question.weight
             answer_id = answer.id
             abstention = answer.abstention
+            if abstention:
+                # Abstention/unknown is diagnostic state, not preservation-risk
+                # evidence. Keep the declared option points visible nowhere in
+                # scoring so missing information cannot bias the aggregate.
+                points = 0.0
+                weighted_points = 0.0
+            else:
+                points = answer.points
+                weighted_points = answer.points * question.weight
 
         if not abstention:
             answered_questions += 1
