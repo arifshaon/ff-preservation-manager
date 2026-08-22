@@ -14,6 +14,7 @@ from preservation_risk_manager.ai.base import (
     AIUsage,
 )
 from preservation_risk_manager.ai.config import AIProviderConfig, load_ai_config
+from preservation_risk_manager.ai.expert_synthesis import synthesize_expert_with_ai
 from preservation_risk_manager.ai.factory import build_ai_provider
 from preservation_risk_manager.ai.review import review_answers_with_ai
 from preservation_risk_manager.ai.risk_analysis import (
@@ -45,5 +46,6 @@ __all__ = [
     "load_ai_config",
     "question_evidence",
     "review_answers_with_ai",
+    "synthesize_expert_with_ai",
     "synthesize_with_ai",
 ]
