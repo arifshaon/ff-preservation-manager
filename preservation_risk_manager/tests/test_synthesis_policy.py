@@ -71,3 +71,15 @@ def test_absent_source_contributes_nothing():
     assert len(result["contributors"]) == 1
     assert result["contextual_contributors"] == []
     assert result["missing_evidence_policy"] == "exclude"
+
+
+def test_ai_policy_is_capability_driven_and_keeps_governed_result_as_baseline():
+    policy = load_synthesis_policy()
+    ai = policy.ai
+
+    assert ai["version"] == "2.0"
+    assert ai["strategy"] == "capability_driven_contextual_synthesis"
+    assert ai["external_capabilities_policy"] == "make_provider_capabilities_available_and_let_model_decide"
+    assert ai["configured_source_mappings"] == "supply_as_methodology_context_not_binding_on_ai_result"
+    assert ai["consumer_decision_policy"] == "return_ai_result_alongside_governed_baseline"
+    assert ai["automatic_persistence"] is False
