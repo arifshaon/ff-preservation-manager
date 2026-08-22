@@ -6,8 +6,6 @@ from preservation_risk_manager.ai.base import (
     AIRequest,
     AIResponse,
     AIUsage,
-    AIWebCitation,
-    AIWebResearchResponse,
 )
 from preservation_risk_manager.ai.research_synthesis import synthesize_with_capabilities
 from preservation_risk_manager.synthesis_policy import load_synthesis_policy
@@ -18,52 +16,44 @@ class _PrivacyResearchProvider(AIProvider):
     capabilities = AIProviderCapabilities(structured_output=True, web_search=True)
 
     def __init__(self):
-        self.research_prompt = ""
+        self.generate_requests: list[AIRequest] = []
+        self.capability_requests: list[AIRequest] = []
 
     @property
     def model_name(self) -> str:
         return "fake-privacy-model"
 
-    def research_web(self, prompt: str, *, allowed_domains=(), blocked_domains=()):
-        self.research_prompt = prompt
-        return AIWebResearchResponse(
-            provider=self.provider_name,
-            model=self.model_name,
-            text="Public documentation confirms the format specification remains available.",
-            citations=(AIWebCitation("https://example.org/spec", "Public specification"),),
-            search_queries=("verify public format specification",),
-            consulted_urls=("https://example.org/spec",),
-            metadata={"web_search_used": True},
-        )
+    def generate_with_capabilities(self, request: AIRequest) -> AIResponse:
+        self.capability_requests.append(request)
+        raise AssertionError("Public web capability must be suppressed for institution-scoped evidence")
 
     def generate(self, request: AIRequest) -> AIResponse:
+        self.generate_requests.append(request)
         return AIResponse(
             provider=self.provider_name,
             model=self.model_name,
             structured={
                 "semantic_level": "low",
                 "confidence": 0.8,
-                "rationale": "The supplied evidence and public information support Low concern.",
+                "rationale": "The supplied evidence supports Low concern without public web search.",
                 "database_evidence_refs": ["R001", "C001"],
-                "external_source_refs": ["W001"],
                 "considerations": [
                     {
-                        "finding": "The public specification remains available.",
-                        "basis": "mixed",
+                        "finding": "The public specification evidence remains available in the registry context.",
+                        "basis": "registry_evidence",
                         "risk_effect": "reduces_concern",
                         "database_evidence_refs": ["C001"],
-                        "external_source_refs": ["W001"],
                     }
                 ],
                 "config_rules_considered": ["missing_assessment_policy=exclude"],
                 "governed_baseline_relation": "same",
-                "uncertainty": "None material for this test.",
+                "uncertainty": "Public web search was suppressed because institution-scoped evidence was present.",
             },
             usage=AIUsage(input_tokens=20, output_tokens=20, total_tokens=40),
         )
 
 
-def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web_capability():
+def test_institution_scoped_evidence_suppresses_public_web_capability_but_still_allows_ai_analysis():
     provider = _PrivacyResearchProvider()
     policy = load_synthesis_policy()
 
@@ -73,8 +63,8 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
             "canonical_id": "puid-fmt-276",
             "label": "PDF 1.7",
             "puids": ["fmt/276"],
-            "institution_evidence": [{"secret": "DO-NOT-SEND"}],
-            "internal_note": "DO-NOT-SEND-EITHER",
+            "institution_evidence": [{"secret": "DO-NOT-SEND-TO-WEB"}],
+            "internal_note": "PRIVATE-LOCAL-CONTEXT",
         },
         policy=policy,
         governed_synthesis={
@@ -94,7 +84,6 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
                     "scope_type": "institutional_format",
                     "semantic_level": "moderate",
                     "institution_id": "qnl",
-                    "internal_note": "PRIVATE-BASELINE-DETAIL",
                 },
             ],
         },
@@ -133,12 +122,11 @@ def test_institution_scoped_claims_and_private_format_fields_are_not_sent_to_web
         ],
     )
 
-    assert "PDF 1.7" in provider.research_prompt
-    assert "NF00369" in provider.research_prompt
-    assert "fdd000277" in provider.research_prompt
-    assert "internal-sensitive-value" not in provider.research_prompt
-    assert "private-local-description" not in provider.research_prompt
-    assert "DO-NOT-SEND" not in provider.research_prompt
-    assert "PRIVATE-BASELINE-DETAIL" not in provider.research_prompt
-    assert "LOCAL-RISK-1" not in provider.research_prompt
-    assert result["external_capability"]["institution_scoped_evidence_excluded"] == 2
+    assert len(provider.generate_requests) == 1
+    assert provider.capability_requests == []
+    external = result["external_capability"]
+    assert external["capability_available"] is True
+    assert external["capability_invoked"] is False
+    assert external["web_search_used"] is False
+    assert external["suppressed_for_institution_evidence"] is True
+    assert result["overall_synthesized_risk"]["semantic_level"] == "low"
