@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import json
 from typing import Any
 
@@ -11,6 +12,8 @@ from preservation_risk_manager.scoring import score_answers
 
 
 _VALUE_KEYS = ("value", "status", "level", "assessment", "rating", "state")
+_LOCAL_DOMAIN = "local_institutional_feasibility"
+_CONTENT_SPECIFIC_DOMAIN = "essential_characteristics"
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -30,13 +33,36 @@ def _format_identity(format_doc: dict[str, Any]) -> dict[str, Any]:
         or format_doc.get("label")
         or format_doc.get("display_name")
     )
+    identifiers = format_doc.get("identifiers") or {}
+    if not isinstance(identifiers, dict):
+        identifiers = {}
     return {
         "format_id": str(format_id) if format_id is not None else None,
         "label": str(label) if label is not None else None,
-        "extensions": [str(value) for value in _as_list(format_doc.get("extensions") or format_doc.get("file_extensions"))],
-        "mime_types": [str(value) for value in _as_list(format_doc.get("mime_types") or format_doc.get("mime_type"))],
-        "puids": [str(value) for value in _as_list(format_doc.get("puids"))],
-        "loc_ids": [str(value) for value in _as_list(format_doc.get("loc_ids"))],
+        "extensions": [
+            str(value)
+            for value in _as_list(
+                format_doc.get("extensions")
+                or format_doc.get("file_extensions")
+                or identifiers.get("extension")
+            )
+        ],
+        "mime_types": [
+            str(value)
+            for value in _as_list(
+                format_doc.get("mime_types")
+                or format_doc.get("mime_type")
+                or identifiers.get("mime")
+            )
+        ],
+        "puids": [
+            str(value)
+            for value in _as_list(format_doc.get("puids") or identifiers.get("puid"))
+        ],
+        "loc_ids": [
+            str(value)
+            for value in _as_list(format_doc.get("loc_ids") or identifiers.get("loc"))
+        ],
     }
 
 
@@ -53,6 +79,26 @@ def _claim_value(claim: dict[str, Any]) -> Any:
         if key in claim and claim[key] is not None:
             return claim[key]
     return None
+
+
+def _work_type_for_gap(question: Any, gap_reason: str) -> str:
+    """Classify the kind of work needed without inferring any preservation fact.
+
+    The active MongoDB registry is treated as locked input. This classification
+    describes how an unresolved framework question should be investigated; it is
+    not permission to add, remap, or rewrite registry evidence.
+    """
+    if gap_reason == "claims_exist_but_do_not_map":
+        return "deterministic_mapping_review"
+
+    domain_id = str(getattr(question, "domain_id", None) or "")
+    if domain_id == _LOCAL_DOMAIN:
+        return "institution_evidence_required"
+    if domain_id == _CONTENT_SPECIFIC_DOMAIN or getattr(question, "applicability", ()):
+        return "content_specific_assessment_required"
+    if domain_id:
+        return "automated_evidence_research_required"
+    return "source_evidence_required"
 
 
 def _question_gap(question: Any, derivation: dict[str, Any]) -> dict[str, Any] | None:
@@ -78,13 +124,59 @@ def _question_gap(question: Any, derivation: dict[str, Any]) -> dict[str, Any] |
     return {
         "question_id": question.id,
         "label": question.label,
+        "domain_id": getattr(question, "domain_id", None),
+        "domain_label": getattr(question, "domain_label", None),
+        "applicability": list(getattr(question, "applicability", ()) or ()),
         "critical": question.critical,
         "derivation_status": status,
         "gap_reason": gap_reason,
+        "work_type": _work_type_for_gap(question, gap_reason),
         "expected_evidence_fields": list(question.evidence_fields),
         "matched_claim_count": len(matched_claims),
         "matched_criterion_ids": criterion_ids,
         "matched_values": values,
+    }
+
+
+def _current_context_rows(
+    reader: RegistryReader,
+    collection: str,
+    canonical_ids: list[str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for canonical_id in canonical_ids:
+        for row in reader.query(collection, {"canonical_id": canonical_id}):
+            if row.get("current") is False:
+                continue
+            key = _claim_key(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+    return rows
+
+
+def _non_scoring_context(reader: RegistryReader, format_doc: dict[str, Any]) -> dict[str, Any]:
+    """Summarize locked registry context that is intentionally not question evidence."""
+    canonical_ids = reader.criterion_claim_canonical_ids(format_doc)
+    risk_rows = _current_context_rows(reader, "risk_assessment_claims", canonical_ids)
+    relationship_rows = _current_context_rows(reader, "source_relationship_claims", canonical_ids)
+
+    risk_sources = Counter(str(row.get("source_id") or "unknown") for row in risk_rows)
+    risk_scopes = Counter(str(row.get("scope_type") or "unknown") for row in risk_rows)
+    relationship_sources = Counter(str(row.get("source_id") or "unknown") for row in relationship_rows)
+    relationship_types = Counter(str(row.get("relationship") or "unknown") for row in relationship_rows)
+
+    return {
+        "canonical_ids_checked": canonical_ids,
+        "external_risk_assessment_count": len(risk_rows),
+        "external_risk_sources": dict(sorted(risk_sources.items())),
+        "external_risk_scope_types": dict(sorted(risk_scopes.items())),
+        "relationship_claim_count": len(relationship_rows),
+        "relationship_sources": dict(sorted(relationship_sources.items())),
+        "relationship_types": dict(sorted(relationship_types.items())),
+        "scoring_effect": "context_only",
     }
 
 
@@ -97,9 +189,10 @@ def diagnose_format_evidence_gaps(
 ) -> dict[str, Any]:
     """Diagnose why framework questions cannot be deterministically answered.
 
-    The diagnosis is derived only from the same explicit criterion claims and
-    framework declarations used by deterministic scoring. It never uses AI or
-    general file-format knowledge.
+    The diagnosis uses the same governed criterion claims and framework
+    declarations as deterministic scoring. The registry is treated as locked
+    read-only input. NARA/DPC risk assessments and relationship claims are
+    summarized separately as non-scoring context and never promoted to answers.
     """
     claims = reader.get_criterion_claims_for_format(format_doc, institution_id=institution_id)
     pack = build_evidence_pack(
@@ -128,9 +221,12 @@ def diagnose_format_evidence_gaps(
                     unmapped_keys.add(_claim_key(claim))
 
     reason_counts: dict[str, int] = {}
+    work_type_counts: dict[str, int] = {}
     for gap in gaps:
         reason = str(gap["gap_reason"])
+        work_type = str(gap["work_type"])
         reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        work_type_counts[work_type] = work_type_counts.get(work_type, 0) + 1
 
     if not gaps:
         classification = "none"
@@ -158,23 +254,29 @@ def diagnose_format_evidence_gaps(
         "gap_classification": classification,
         "gap_count": len(gaps),
         "gap_reason_counts": reason_counts,
+        "work_type_counts": work_type_counts,
         "missing_questions": gaps,
+        "non_scoring_registry_context": _non_scoring_context(reader, format_doc),
         "evidence_hash": evidence_hash(pack),
     }
 
 
 def summarize_evidence_gaps(rows: list[dict[str, Any]], *, candidate_count: int) -> dict[str, Any]:
     question_reason_counts: dict[str, int] = {}
+    work_type_counts: dict[str, int] = {}
     classification_counts: dict[str, int] = {}
     for row in rows:
         classification = str(row.get("gap_classification") or "unknown")
         classification_counts[classification] = classification_counts.get(classification, 0) + 1
         for reason, count in (row.get("gap_reason_counts") or {}).items():
             question_reason_counts[str(reason)] = question_reason_counts.get(str(reason), 0) + int(count)
+        for work_type, count in (row.get("work_type_counts") or {}).items():
+            work_type_counts[str(work_type)] = work_type_counts.get(str(work_type), 0) + int(count)
     return {
         "candidate_count": candidate_count,
         "formats_with_gaps": len(rows),
         "fully_covered_formats": max(0, candidate_count - len(rows)),
         "format_gap_classification_counts": classification_counts,
         "question_gap_reason_counts": question_reason_counts,
+        "question_work_type_counts": work_type_counts,
     }
