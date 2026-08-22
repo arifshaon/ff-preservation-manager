@@ -65,7 +65,7 @@ def _surface_consulted_urls(result: dict[str, Any]) -> None:
         sources.append({
             "ref": f"W{len(sources) + 1:03d}",
             "url": text,
-            "title": None,
+            "title": "Consulted web source",
             "source_kind": "consulted_url",
         })
         known_urls.add(text)
