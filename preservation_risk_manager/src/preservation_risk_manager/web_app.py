@@ -9,9 +9,10 @@ from pydantic import BaseModel, Field
 
 from preservation_risk_manager import integration_cli as base
 from preservation_risk_manager.web_batch_service import run_batch_web_job
+from preservation_risk_manager.web_human_service import run_human_web_job
 from preservation_risk_manager.web_jobs import JobManager
 from preservation_risk_manager.web_reports import combine_format_id_inputs
-from preservation_risk_manager.web_service import WebRuntimeConfig, run_human_web_job
+from preservation_risk_manager.web_service import WebRuntimeConfig
 from preservation_risk_manager.web_ui_curator import INDEX_HTML
 
 
