@@ -12,6 +12,7 @@ from preservation_risk_manager.ai import (
     load_ai_config,
     review_answers_with_ai,
     synthesize_with_ai,
+    synthesize_with_web_research,
 )
 from preservation_risk_manager.ai.request_router import route_natural_language_request
 from preservation_risk_manager.answer_derivation import derive_answers
@@ -112,10 +113,10 @@ def _add_ai_risk_args(parser: argparse.ArgumentParser, *, machine_mode: bool) ->
         choices=("off", "synthesize", "fill-gaps", "review-all"),
         default="off",
         help=(
-            "Optional AI assistance after canonical format resolution. 'synthesize' performs only policy-guided "
-            "overall risk synthesis; 'fill-gaps' also interprets unresolved framework questions; 'review-all' "
-            "independently reviews framework evidence. All enabled modes use the versioned synthesis policy and "
-            "bounded registry evidence. Default: off."
+            "Optional AI assistance after canonical format resolution. 'synthesize' produces the overall AI-assisted "
+            "synthesis; when ai.web_research.enabled=true in the provider config it first verifies/supplements the "
+            "registry evidence using cited public-web research. 'fill-gaps' also interprets unresolved framework "
+            "questions; 'review-all' independently reviews framework evidence. Default: off."
         ),
     )
     parser.add_argument(
@@ -361,6 +362,11 @@ def _ai_format_context(reader: RegistryReader, format_doc: dict[str, Any]) -> di
         return format_doc
 
 
+def _web_research_enabled(provider: Any) -> bool:
+    config = getattr(provider, "config", None)
+    return bool(getattr(config, "web_research_enabled", False))
+
+
 def _apply_ai_risk_assessment(
     reader: RegistryReader,
     framework,
@@ -427,18 +433,32 @@ def _apply_ai_risk_assessment(
         external_context = {}
 
     policy = load_synthesis_policy()
+    governed_synthesis = (
+        external_context.get("policy_synthesized_risk")
+        or external_context.get("registry_synthesized_risk")
+        or {"assessed": False, "semantic_level": None, "semantic_label": None}
+    )
+    web_research = _web_research_enabled(provider)
     try:
-        ai_synthesis = synthesize_with_ai(
-            provider,
-            format_context=pack.get("format") or {},
-            policy=policy,
-            risk_assessments=[
+        synthesis_args = {
+            "provider": provider,
+            "format_context": pack.get("format") or {},
+            "policy": policy,
+            "risk_assessments": [
                 dict(item) for item in external_context.get("assessments") or [] if isinstance(item, dict)
             ],
-            criterion_claims=[dict(item) for item in claims if isinstance(item, dict)],
-            source_evidence=[dict(item) for item in source_evidence if isinstance(item, dict)],
-            max_evidence_items=max(40, max_items * 4),
-        )
+            "criterion_claims": [dict(item) for item in claims if isinstance(item, dict)],
+            "source_evidence": [dict(item) for item in source_evidence if isinstance(item, dict)],
+            "max_evidence_items": max(40, max_items * 4),
+        }
+        if web_research:
+            ai_synthesis = synthesize_with_web_research(
+                governed_synthesis=governed_synthesis,
+                framework=framework,
+                **synthesis_args,
+            )
+        else:
+            ai_synthesis = synthesize_with_ai(**synthesis_args)
         response["ai_synthesis"] = ai_synthesis
         if isinstance(result_payload, dict):
             result_payload["overall_synthesized_risk"] = ai_synthesis.get("overall_synthesized_risk")
@@ -446,20 +466,24 @@ def _apply_ai_risk_assessment(
         response["ai_synthesis"] = {
             "status": "error_config_synthesis_retained",
             "ai_mode": ai_mode,
+            "web_research_enabled": web_research,
             "provider": provider.describe(),
             "error_type": type(exc).__name__,
             "error": str(exc),
-            "overall_synthesized_risk": external_context.get("policy_synthesized_risk"),
-            "authority_boundary": "AI synthesis failed; the config-driven deterministic synthesis remains authoritative.",
+            "overall_synthesized_risk": governed_synthesis,
+            "authority_boundary": (
+                "AI research/synthesis failed; the config-driven deterministic synthesis was retained unchanged."
+            ),
         }
         if isinstance(result_payload, dict):
-            result_payload["overall_synthesized_risk"] = external_context.get("policy_synthesized_risk")
+            result_payload["overall_synthesized_risk"] = governed_synthesis
 
     if ai_mode == "synthesize":
         response["ai_risk_assessment"] = {
-            "status": "not_requested_synthesis_only",
+            "status": "synthesis_only",
             "ai_mode": ai_mode,
-            "deterministic_analysis": deterministic_analysis,
+            "web_research_enabled": web_research,
+            "question_level_ai_requested": False,
         }
         return response
 
@@ -490,6 +514,7 @@ def _apply_ai_risk_assessment(
             "status": "ok",
             "ai_mode": ai_mode,
             "provider": provider.describe(),
+            "web_research_enabled_for_overall_synthesis": web_research,
             "evidence_hash": evidence_hash(pack),
             "criterion_claims_used": len(claims),
             "ai_source_evidence_items": len(source_evidence),
@@ -502,7 +527,8 @@ def _apply_ai_risk_assessment(
                 "Question-level deterministic answers and scores use approved criterion evidence only. AI may "
                 "additionally interpret bounded source-native evidence for unresolved questions; it cannot replace "
                 "deterministically resolved answers, change framework governance, or create policy. Overall source "
-                "risk synthesis is handled separately through the versioned synthesis policy."
+                "risk synthesis is handled separately through the versioned synthesis policy and, when explicitly "
+                "enabled in provider config, registry-first cited web research."
             ),
         }
     except Exception as exc:
