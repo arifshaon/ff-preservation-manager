@@ -1,13 +1,14 @@
 # Web UI
 
-The Preservation Risk Manager includes a lightweight curator-facing web interface built on the same assessment code as the CLI.
+The Preservation Risk Manager includes a lightweight curator-facing FastAPI interface built on the same registry, governed synthesis, batch-report and AI code used by the CLI.
 
-It supports two workflows:
+The browser now presents three curator tasks:
 
-1. **Human risk questions** — natural-language query, normal format resolution, governed source-risk synthesis and optional AI assistance.
-2. **Batch risk reports** — paste/upload controlled format identifiers, run the assessment as a background job, preview governed/AI results and download HTML/CSV/JSON/ZIP artifacts.
+1. **Ask Risk** — ask a preservation-risk question in normal language.
+2. **PUID Lookup** — find the PRONOM PUID when the curator knows the format name but not the identifier.
+3. **Run Report** — assess a supplied list of PUIDs/format IDs in a background job and download HTML/CSV/JSON/ZIP reports.
 
-The web layer does **not** contain a second preservation-risk engine. It calls the same request executor, governed synthesis policy, evidence layer and AI synthesis used by command-line workflows.
+The web layer does not contain a second risk engine.
 
 ## Install
 
@@ -17,7 +18,7 @@ From `preservation_risk_manager`:
 python -m pip install -e ".[dev,ai,web]"
 ```
 
-For MongoDB-backed registry access, install the sibling builder's Mongo extra as well.
+For MongoDB-backed registry access, install the sibling Registry Builder Mongo extra as well.
 
 ## Run
 
@@ -30,30 +31,114 @@ python -m preservation_risk_manager web `
   --open-browser
 ```
 
-Default local URL:
+Default interfaces:
 
 ```text
-http://127.0.0.1:8080/
+Curator UI   http://127.0.0.1:8080/
+Swagger UI   http://127.0.0.1:8080/api/docs
 ```
 
-## Human question workflow
+## 1. Ask Risk
 
-The **Ask a risk question** tab uses the same human-query path as the CLI.
+Examples:
 
-AI modes exposed by the API/UI are:
+```text
+What is the preservation risk of fmt/276?
+What is the preservation risk of PDF?
+```
 
-- `synthesize` — AI-assisted overall synthesis alongside the governed baseline;
+### Exact PUID
+
+A complete PRONOM PUID such as:
+
+```text
+fmt/276
+```
+
+resolves to that exact canonical format before assessment.
+
+### Broad name
+
+A broad term such as:
+
+```text
+PDF
+```
+
+may match many PUID-backed formats. The existing `human_format_assessment_limit` is applied before risk work starts. Its default is `10` and it can be changed in the AI provider configuration:
+
+```json
+{
+  "ai": {
+    "human_format_assessment_limit": 10
+  }
+}
+```
+
+The web PUID Lookup uses the same configured limit so discovery and human fan-out behave consistently.
+
+### AI modes
+
+- `synthesize` — AI-assisted overall synthesis beside the governed baseline;
 - `off` — governed/database evidence only;
-- `fill-gaps` — additionally interpret unresolved framework questions;
-- `review-all` — question-evidence review mode.
+- `fill-gaps` — question-level unresolved evidence interpretation;
+- `review-all` — question-evidence review/calibration mode.
 
-The existing `human_format_assessment_limit` applies before broad human queries fan out into many PUID assessments.
+With no AI provider configured, a direct pattern such as:
 
-AI never changes the source-native records or the governed config baseline. Both remain visible/auditable.
+```text
+What is the preservation risk of fmt/276?
+```
 
-## Batch risk-report workflow
+can still run with AI mode off and AI identification disabled. More general natural-language routing requires an AI provider.
 
-The **Batch risk report** tab accepts pasted IDs or `.txt`/`.csv` uploads. CSV may use:
+The governed source-risk result remains the audit baseline. AI never rewrites source-native records or the governed result.
+
+## 2. PUID Lookup
+
+Use **PUID Lookup** when the format is known but its PRONOM identifier is not.
+
+Example searches:
+
+```text
+PDF
+TIFF
+application/pdf
+.docx
+fmt/276
+```
+
+The endpoint is:
+
+```http
+GET /api/formats/lookup?q=PDF
+```
+
+Lookup searches the current canonical registry by name, PUID, MIME type, extension and other searchable identifiers, then returns only PUID-backed formats.
+
+Each result includes where available:
+
+```text
+PUID
+label
+version
+canonical ID
+extensions
+MIME types
+LOC FDD IDs
+NARA IDs
+```
+
+In the browser each result has two actions:
+
+- **Assess** — fills the Ask Risk form with that exact PUID;
+- **Add to report** — adds the PUID to the Run Report list.
+
+This lookup is a read-only registry operation and does not require AI.
+
+## 3. Run Report
+
+The **Run Report** tab accepts pasted identifiers or `.txt`/`.csv` uploads. CSV may use:
 
 ```text
 puid
@@ -64,7 +149,7 @@ format
 id
 ```
 
-Batch input is intended to be a controlled watchlist of PUIDs/canonical identifiers, not ambiguous descriptive names. AI identification is not used for the uploaded list.
+Batch input is intentionally identifier-based. If the PUID is unknown, use **PUID Lookup** first rather than passing an ambiguous descriptive name to the report job.
 
 ### Batch AI modes
 
@@ -84,11 +169,9 @@ registry evidence + governed baseline + framework/methodology
    -> AI-assisted risk/confidence/rationale/uncertainty
 ```
 
-The governed result and AI result are reported separately. If AI fails, the governed result remains.
+The governed and AI results remain separate. If AI fails, governed results remain available.
 
-`fill-gaps` remains for the older question-level evidence-gap workflow and is not the default overall-risk AI mode.
-
-## Curator report
+## Report artifacts
 
 A completed batch produces:
 
@@ -99,59 +182,11 @@ risk-report.json
 risk-report.zip
 ```
 
-### HTML
-
-The HTML report is self-contained and intended for curator review. It includes:
-
-- search/filter by format, PUID, source or risk;
-- governed overall risk;
-- governed selected scope;
-- governed headline and broader-context sources;
-- AI-assisted overall risk and confidence;
-- relation of AI level to the governed baseline;
-- AI considerations and uncertainty;
-- external URLs returned/consulted by the AI provider;
-- expandable full machine record for audit.
-
-### CSV
-
-The CSV provides a compact management/analysis view. Key columns include:
-
-```text
-input_format_id
-puid
-label
-governed_risk_level
-governed_risk_label
-governed_selected_scope
-governed_headline_sources
-governed_context_sources
-ai_status
-ai_risk_level
-ai_risk_label
-ai_confidence
-ai_relation_to_governed
-ai_web_search_used
-ai_external_source_count
-ai_quality_warning_count
-framework_analysis_status
-framework_evidence_completeness_pct
-error
-```
-
-Framework score/completeness fields are supporting diagnostics. They do not replace the configured governed source-risk synthesis.
-
-### JSON
-
-`risk-report.json` preserves the full per-format source assessments, governed synthesis, AI audit information and framework diagnostics.
-
-### ZIP
-
-The ZIP contains HTML, CSV and JSON.
+The HTML report is the main curator view and supports filtering plus per-format evidence drill-down. CSV is the compact summary; JSON retains the full machine/audit record; ZIP contains all report files.
 
 ## Background execution
 
-The current local server uses the existing in-process `JobManager` thread pool. Jobs expose:
+Human assessments and report generation use the local `JobManager` background pool. Jobs expose:
 
 ```text
 queued
@@ -160,19 +195,20 @@ completed
 failed
 ```
 
-and progress from 0–100. Artifacts/status are stored under:
+Artifacts and job state are stored under:
 
 ```text
 web-jobs/<job-id>/
 ```
 
-This is appropriate for a single local/internal application instance. For a horizontally scaled deployment, move execution/state to a shared queue before adding multiple application servers.
+This is suitable for a single local/internal instance. A horizontally scaled deployment should use a shared queue/state service.
 
 ## API endpoints
 
 ```text
 GET  /api/health
 GET  /api/config
+GET  /api/formats/lookup?q=<term>
 GET  /api/jobs
 GET  /api/jobs/{job_id}
 POST /api/jobs/human
@@ -186,22 +222,22 @@ FastAPI documentation:
 /api/docs
 ```
 
-`GET /api/config` also exposes the active governed synthesis-policy summary (no secrets) so an administrator can see the semantic levels and configured operators used by the application.
+`GET /api/config` reports the active framework, governed synthesis summary, configured human/PUID lookup limit and batch maximum without exposing secrets.
 
 ## Relationship to scheduled reports
 
-The web batch job and:
+The web report job and:
 
 ```powershell
 python -m preservation_risk_manager batch-report ...
 ```
 
-use the same reusable batch assessment/report code. The dashboard is therefore an interactive front end to the same periodic-report workflow rather than a separate implementation.
+use the same reusable batch assessment/report core. The dashboard is therefore an interactive front end to the periodic-report workflow, not a separate implementation.
 
-## Security/deployment boundary
+## Security boundary
 
-The default bind address is `127.0.0.1`. The application does not currently implement an authentication/authorization layer.
+The default bind address is `127.0.0.1`. The application has no built-in authentication layer.
 
-Do not expose it directly to a network/public internet. A shared QNL deployment should sit behind authenticated institutional access/SSO and normal controls for TLS, secrets, logging, job storage and process supervision.
+Do not expose it directly to an untrusted network. A shared institutional deployment should sit behind authenticated access/SSO and normal TLS, secret, logging and job-retention controls.
 
-AI input logging is separately opt-in through the AI configuration. If enabled, those log files may contain complete assessment/evidence prompts and must be protected as potentially sensitive data.
+AI input logging remains separately opt-in. If enabled, prompt log files may contain full evidence context and must be protected accordingly.
