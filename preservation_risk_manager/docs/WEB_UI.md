@@ -1,11 +1,13 @@
 # Web UI
 
-The preservation risk manager includes a lightweight local web interface for two workflows:
+The Preservation Risk Manager includes a lightweight curator-facing web interface built on the same assessment code as the CLI.
 
-1. **Human risk questions** — ask natural-language questions using the same controlled routing, format identification, deterministic assessment, and optional AI interpretation used by the CLI.
-2. **Batch risk reports** — paste format IDs or upload TXT/CSV, run assessments as a background job with progress, and download CSV/JSON/ZIP reports.
+It supports two workflows:
 
-The web layer does **not** implement a second scoring engine. It calls the existing resolver, request executor, framework, evidence, and AI components.
+1. **Human risk questions** — natural-language query, normal format resolution, governed source-risk synthesis and optional AI assistance.
+2. **Batch risk reports** — paste/upload controlled format identifiers, run the assessment as a background job, preview governed/AI results and download HTML/CSV/JSON/ZIP artifacts.
+
+The web layer does **not** contain a second preservation-risk engine. It calls the same request executor, governed synthesis policy, evidence layer and AI synthesis used by command-line workflows.
 
 ## Install
 
@@ -15,91 +17,43 @@ From `preservation_risk_manager`:
 python -m pip install -e ".[dev,ai,web]"
 ```
 
-For MongoDB-backed registry access, also install the sibling registry builder with its Mongo extra:
-
-```powershell
-cd ..\qnl_format_registry_builder
-python -m pip install -e ".[dev,mongo]"
-cd ..\preservation_risk_manager
-```
+For MongoDB-backed registry access, install the sibling builder's Mongo extra as well.
 
 ## Run
 
-Example using the current MongoDB registry and AI configuration:
-
 ```powershell
 python -m preservation_risk_manager web `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
+  --framework examples\qnl_preservation_risk_questions.framework.draft.json `
+  --storage-config ..\qnl_format_registry_builder\config\sources.qnl.json `
   --ai-config config\ai.local.json `
   --jobs-dir web-jobs `
   --open-browser
 ```
 
-Default URL:
+Default local URL:
 
 ```text
 http://127.0.0.1:8080/
 ```
 
-Alternative port:
-
-```powershell
-python -m preservation_risk_manager web `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json `
-  --port 8090
-```
-
-The console script is also available after installing the `web` extra:
-
-```powershell
-preservation-risk-web `
-  --framework examples\qnl_sustainability.framework.example.json `
-  --storage-config ..\qnl_format_registry_builder\config\storage.mongodb.example.json `
-  --ai-config config\ai.local.json
-```
-
 ## Human question workflow
 
-The **Ask a risk question** tab accepts natural-language preservation questions.
+The **Ask a risk question** tab uses the same human-query path as the CLI.
 
-Examples:
+AI modes exposed by the API/UI are:
 
-```text
-What is the risk of PDF?
-What are the software dependency risks of fmt/18?
-What is the preservation risk of Adobe Flash version 8?
-```
+- `synthesize` — AI-assisted overall synthesis alongside the governed baseline;
+- `off` — governed/database evidence only;
+- `fill-gaps` — additionally interpret unresolved framework questions;
+- `review-all` — question-evidence review mode.
 
-Controls:
+The existing `human_format_assessment_limit` applies before broad human queries fan out into many PUID assessments.
 
-- AI risk mode: `off`, `fill-gaps`, or `review-all`.
-- optional bounded AI identification fallback for descriptive format references.
-- global or institution scope.
+AI never changes the source-native records or the governed config baseline. Both remain visible/auditable.
 
-The existing `human_format_assessment_limit` from the AI config applies before a broad human query fans out into many PUID assessments. If PDF matches 36 PUIDs and the configured limit is 10, only 10 are assessed; the remaining matches are reported as not assessed.
+## Batch risk-report workflow
 
-Human jobs run in the background and expose progress/status in the browser. Completed jobs can be downloaded as:
-
-```text
-human-risk-result.txt
-human-risk-result.json
-human-risk-result.zip
-```
-
-## Batch risk report workflow
-
-The **Batch risk report** tab accepts:
-
-- pasted format IDs;
-- uploaded `.txt` files;
-- uploaded `.csv` files.
-
-Plain text accepts newline, comma, semicolon, or tab separation.
-
-CSV files may use one of these columns:
+The **Batch risk report** tab accepts pasted IDs or `.txt`/`.csv` uploads. CSV may use:
 
 ```text
 puid
@@ -110,19 +64,94 @@ format
 id
 ```
 
-Headerless CSV uses the first column. Duplicate IDs are removed while preserving first-seen order. Safe identifier normalization is applied, so examples such as `[fmt 18]` and `"x-fmt 123"` are normalized before lookup.
-
-Batch mode expects identifiers, not descriptive format names. AI identification is not used for batch input.
+Batch input is intended to be a controlled watchlist of PUIDs/canonical identifiers, not ambiguous descriptive names. AI identification is not used for the uploaded list.
 
 ### Batch AI modes
 
-`off` is the default and runs deterministic assessment only.
+`off` is the default:
 
-`fill-gaps` first runs deterministic assessment for every supplied/resolved ID, then uses the existing batched AI evidence interpreter for unresolved framework questions. AI responses remain keyed by PUID and question ID. Provider errors/rate limiting do not erase the deterministic report.
+```text
+registry evidence
+   -> configured governed synthesis
+   -> report
+```
 
-## Progress and background execution
+`synthesize` adds the capability-driven AI result:
 
-The local server uses an in-process thread pool. Jobs expose:
+```text
+registry evidence + governed baseline + framework/methodology
+   -> configured AI client
+   -> AI-assisted risk/confidence/rationale/uncertainty
+```
+
+The governed result and AI result are reported separately. If AI fails, the governed result remains.
+
+`fill-gaps` remains for the older question-level evidence-gap workflow and is not the default overall-risk AI mode.
+
+## Curator report
+
+A completed batch produces:
+
+```text
+risk-report.html
+risk-report.csv
+risk-report.json
+risk-report.zip
+```
+
+### HTML
+
+The HTML report is self-contained and intended for curator review. It includes:
+
+- search/filter by format, PUID, source or risk;
+- governed overall risk;
+- governed selected scope;
+- governed headline and broader-context sources;
+- AI-assisted overall risk and confidence;
+- relation of AI level to the governed baseline;
+- AI considerations and uncertainty;
+- external URLs returned/consulted by the AI provider;
+- expandable full machine record for audit.
+
+### CSV
+
+The CSV provides a compact management/analysis view. Key columns include:
+
+```text
+input_format_id
+puid
+label
+governed_risk_level
+governed_risk_label
+governed_selected_scope
+governed_headline_sources
+governed_context_sources
+ai_status
+ai_risk_level
+ai_risk_label
+ai_confidence
+ai_relation_to_governed
+ai_web_search_used
+ai_external_source_count
+ai_quality_warning_count
+framework_analysis_status
+framework_evidence_completeness_pct
+error
+```
+
+Framework score/completeness fields are supporting diagnostics. They do not replace the configured governed source-risk synthesis.
+
+### JSON
+
+`risk-report.json` preserves the full per-format source assessments, governed synthesis, AI audit information and framework diagnostics.
+
+### ZIP
+
+The ZIP contains HTML, CSV and JSON.
+
+## Background execution
+
+The current local server uses the existing in-process `JobManager` thread pool. Jobs expose:
 
 ```text
 queued
@@ -131,66 +160,15 @@ completed
 failed
 ```
 
-and a 0–100 progress value. The browser polls the job API while work continues.
-
-Job metadata and outputs are stored under:
+and progress from 0–100. Artifacts/status are stored under:
 
 ```text
 web-jobs/<job-id>/
 ```
 
-including a `job.json` audit/status record.
-
-The default worker count is 2. Override it with:
-
-```powershell
---workers 4
-```
-
-The default maximum batch size is 5,000 distinct IDs. Override it with:
-
-```powershell
---batch-max-formats 1000
-```
-
-## Downloads
-
-A completed batch produces:
-
-```text
-risk-report.csv
-risk-report.json
-risk-report.zip
-```
-
-The ZIP contains the CSV summary and full JSON report.
-
-The CSV intentionally separates deterministic and AI-assisted fields. It does not silently replace the deterministic result with an AI-derived value. Typical columns include:
-
-```text
-input_format_id
-resolved_format_id
-puid
-label
-version
-deterministic_risk_band
-deterministic_analysis_status
-deterministic_score
-deterministic_evidence_completeness_pct
-ai_mode
-ai_status
-ai_risk_band
-ai_analysis_status
-ai_score
-ai_evidence_completeness_pct
-error
-```
-
-The JSON report preserves the complete per-format response and audit detail.
+This is appropriate for a single local/internal application instance. For a horizontally scaled deployment, move execution/state to a shared queue before adding multiple application servers.
 
 ## API endpoints
-
-The browser uses a small JSON API:
 
 ```text
 GET  /api/health
@@ -202,16 +180,28 @@ POST /api/jobs/batch
 GET  /api/jobs/{job_id}/download/{artifact}
 ```
 
-Interactive FastAPI API documentation is available at:
+FastAPI documentation:
 
 ```text
 /api/docs
 ```
 
-## Security / deployment boundary
+`GET /api/config` also exposes the active governed synthesis-policy summary (no secrets) so an administrator can see the semantic levels and configured operators used by the application.
 
-The default bind address is `127.0.0.1`, so the development UI is local to the machine.
+## Relationship to scheduled reports
 
-The application currently has **no built-in authentication or authorization layer**. Do not expose it directly on a network or the public internet. If QNL deploys it as a shared internal service, place it behind an authenticated reverse proxy/SSO layer and use normal production controls for TLS, secrets, logging, process supervision, and persistent job storage.
+The web batch job and:
 
-The current in-process job queue is intended for a single application instance. If later deployed across multiple workers/servers, move job state/execution to a shared queue/service before horizontal scaling.
+```powershell
+python -m preservation_risk_manager batch-report ...
+```
+
+use the same reusable batch assessment/report code. The dashboard is therefore an interactive front end to the same periodic-report workflow rather than a separate implementation.
+
+## Security/deployment boundary
+
+The default bind address is `127.0.0.1`. The application does not currently implement an authentication/authorization layer.
+
+Do not expose it directly to a network/public internet. A shared QNL deployment should sit behind authenticated institutional access/SSO and normal controls for TLS, secrets, logging, job storage and process supervision.
+
+AI input logging is separately opt-in through the AI configuration. If enabled, those log files may contain complete assessment/evidence prompts and must be protected as potentially sensitive data.
