@@ -52,7 +52,7 @@ def _public_format_context(format_context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _public_governed_summary(governed: dict[str, Any]) -> dict[str, Any]:
-    """Keep only public/global baseline details in the Bing/web-grounding prompt."""
+    """Keep only public/global baseline details in the web-grounding prompt."""
     summary_keys = (
         "assessed", "semantic_level", "semantic_label", "method", "basis", "policy_id", "policy_version",
         "missing_evidence_policy", "numeric_aggregation", "same_scope_aggregation", "broader_scope_policy",
@@ -207,8 +207,15 @@ def _validate_synthesis(
         raise AIProviderError("AI researched synthesis cited unknown database refs.")
     if set(used_web) - web_refs:
         raise AIProviderError("AI researched synthesis cited unknown web refs.")
-    if level != "unassessed" and not (used_db or used_web):
-        raise AIProviderError("An assessed researched synthesis must cite database or web evidence.")
+    if level != "unassessed":
+        if database_evidence and not used_db:
+            raise AIProviderError(
+                "An assessed researched synthesis must cite registry/database evidence when it is available."
+            )
+        if not used_web:
+            raise AIProviderError(
+                "An assessed researched synthesis must cite web evidence because web research is enabled."
+            )
 
     findings = []
     for item in data.get("verification_findings") or []:
@@ -304,8 +311,6 @@ def synthesize_with_web_research(
 
     synthesis_context = {
         "format": _public_format_context(format_context),
-        # The second synthesis call stays inside the configured Azure model boundary,
-        # but public database refs remain the only detailed evidence being researched.
         "governed_config_synthesis": _safe(governed_synthesis),
         "synthesis_policy": _safe(policy.raw),
         "assessment_framework": _safe(_framework_summary(framework)),
@@ -315,6 +320,7 @@ def synthesize_with_web_research(
         "search_queries": list(research.search_queries),
         "instructions": {
             "registry_evidence_is_primary_input": True,
+            "assessed_result_must_use_registry_evidence_when_available": True,
             "web_research_role": "verify_and_supplement",
             "configured_source_mappings_are_binding": True,
             "native_source_assessments_are_immutable": True,
@@ -331,8 +337,9 @@ def synthesize_with_web_research(
                 "user",
                 "Using registry evidence as the primary evidence base and the grounded web report only as "
                 "verification/supplementary evidence, produce the final AI-assisted preservation-risk synthesis. "
-                "Explain confirmations, contradictions, updates, or additions. Apply configured QNL rules and do "
-                "not modify source-native ratings or mappings.\n\n"
+                "An assessed result must cite registry evidence whenever any is supplied, and must cite the web "
+                "evidence used for verification. Explain confirmations, contradictions, updates, or additions. "
+                "Apply configured QNL rules and do not modify source-native ratings or mappings.\n\n"
                 + json.dumps(synthesis_context, indent=2, sort_keys=True, default=str),
             ),
         ),
@@ -368,8 +375,9 @@ def synthesize_with_web_research(
         "provider": provider.describe(),
         "authority_boundary": (
             "The AI-assisted result begins with collected public/global registry evidence and configured mappings. "
-            "Public-web research only verifies, qualifies, or supplements that evidence. Institution-scoped evidence "
-            "is not sent to public web grounding. Source-native ratings and configured mappings are not rewritten, "
-            "missing evidence contributes nothing, and researched findings are not persisted to the registry."
+            "An assessed researched result must use registry evidence when available and cited public-web evidence. "
+            "Public-web research only verifies, qualifies, or supplements the registry evidence. Institution-scoped "
+            "evidence is not sent to public web grounding. Source-native ratings and configured mappings are not "
+            "rewritten, missing evidence contributes nothing, and researched findings are not persisted."
         ),
     }
