@@ -22,6 +22,7 @@ from preservation_risk_manager.ai.risk_analysis import (
     interpret_question_with_ai,
     question_evidence,
 )
+from preservation_risk_manager.ai.synthesis import build_synthesis_evidence, synthesize_with_ai
 
 __all__ = [
     "AIConfigurationError",
@@ -38,9 +39,11 @@ __all__ = [
     "AIUsage",
     "AI_ELIGIBLE_STATUSES",
     "build_ai_provider",
+    "build_synthesis_evidence",
     "derive_answers_with_ai",
     "interpret_question_with_ai",
     "load_ai_config",
     "question_evidence",
     "review_answers_with_ai",
+    "synthesize_with_ai",
 ]
