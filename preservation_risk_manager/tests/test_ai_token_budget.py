@@ -67,7 +67,7 @@ def test_tokens_per_minute_must_be_positive():
 def test_synthesis_compacts_lower_priority_context_to_fit_tpm_budget():
     config = AIProviderConfig.from_dict({
         "provider": "budget-test",
-        "tokens_per_minute": 3000,
+        "tokens_per_minute": 5000,
         "max_output_tokens": 600,
     })
     provider = _BudgetProvider(config)
@@ -106,10 +106,10 @@ def test_synthesis_compacts_lower_priority_context_to_fit_tpm_budget():
     )
 
     budget = result["token_budget"]
-    assert budget["configured_tokens_per_minute"] == 3000
+    assert budget["configured_tokens_per_minute"] == 5000
     assert budget["effective_max_output_tokens"] == 600
-    assert budget["safety_reserve_tokens"] == 500
-    assert budget["prompt_budget_tokens"] == 1900
+    assert budget["safety_reserve_tokens"] == 750
+    assert budget["prompt_budget_tokens"] == 3650
     assert budget["estimated_prompt_tokens"] <= budget["prompt_budget_tokens"]
     assert budget["evidence_items_available"] == 31
     assert budget["evidence_items_supplied"] < budget["evidence_items_available"]
