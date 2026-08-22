@@ -17,12 +17,21 @@ def _parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--storage-config", help="Path to registry-builder storage configuration (for example MongoDB).")
     source.add_argument("--registry-json", help="Path to a registry JSON export.")
-    parser.add_argument("--ai-config", help="Path to AI provider configuration. Required for human AI features or batch fill-gaps.")
+    parser.add_argument("--ai-config", help="Path to AI provider configuration. Required for general human AI features or AI-assisted reports.")
     parser.add_argument("--jobs-dir", default="web-jobs", help="Directory for job metadata and downloadable reports. Default: web-jobs")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address. Default: 127.0.0.1")
     parser.add_argument("--port", type=int, default=8080, help="HTTP port. Default: 8080")
     parser.add_argument("--workers", type=int, default=2, help="Background job worker threads. Default: 2")
     parser.add_argument("--batch-max-formats", type=int, default=5000, help="Maximum distinct IDs accepted in one batch. Default: 5000")
+    parser.add_argument(
+        "--human-match-limit",
+        type=int,
+        default=10,
+        help=(
+            "Maximum PUID matches used by the curator Ask/Lookup workflows when no AI config supplies "
+            "human_format_assessment_limit. Default: 10"
+        ),
+    )
     parser.add_argument("--default-institution", help="Default institution ID used when Institution scope is selected.")
     parser.add_argument("--max-ai-evidence-items", type=int, default=20, help="Maximum evidence items supplied per AI framework question. Default: 20")
     parser.add_argument("--open-browser", action="store_true", help="Open the local UI in the default browser after startup.")
@@ -37,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--workers must be greater than zero")
     if args.batch_max_formats <= 0:
         raise SystemExit("--batch-max-formats must be greater than zero")
+    if args.human_match_limit <= 0:
+        raise SystemExit("--human-match-limit must be greater than zero")
     if args.max_ai_evidence_items <= 0:
         raise SystemExit("--max-ai-evidence-items must be greater than zero")
 
@@ -50,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         max_workers=args.workers,
         batch_max_formats=args.batch_max_formats,
         max_ai_evidence_items=args.max_ai_evidence_items,
+        human_match_limit=args.human_match_limit,
     )
     config.validate()
 
