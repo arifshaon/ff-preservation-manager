@@ -52,11 +52,11 @@ def test_tokens_per_minute_is_configurable_and_redacted():
     })
 
     assert config.tokens_per_minute == 10000
-    # TPM-aware configuration raises an unsafe 1,200-token structured-output
-    # allowance to 2,000 and lets the prompt budgeter shrink input instead.
-    assert config.max_output_tokens == 2000
+    assert config.max_output_tokens == 1200
+    assert config.synthesis_max_output_tokens == 2000
     assert config.redacted()["tokens_per_minute"] == 10000
-    assert config.redacted()["max_output_tokens"] == 2000
+    assert config.redacted()["max_output_tokens"] == 1200
+    assert config.redacted()["synthesis_max_output_tokens"] == 2000
 
 
 def test_tokens_per_minute_must_be_positive():
@@ -101,7 +101,7 @@ def test_synthesis_uses_10000_tpm_to_reserve_output_and_shrink_prompt_budget():
 
     budget = result["token_budget"]
     assert budget["configured_tokens_per_minute"] == 10000
-    assert budget["configured_max_output_tokens"] == 2000
+    assert budget["configured_max_output_tokens"] == 1200
     assert budget["effective_max_output_tokens"] == 2000
     assert budget["safety_reserve_tokens"] == 1500
     assert budget["prompt_budget_tokens"] == 6500
@@ -151,6 +151,7 @@ def test_synthesis_compacts_lower_priority_context_to_fit_tpm_budget():
 
     budget = result["token_budget"]
     assert budget["configured_tokens_per_minute"] == 5000
+    assert budget["configured_max_output_tokens"] == 600
     assert budget["effective_max_output_tokens"] == 1000
     assert budget["safety_reserve_tokens"] == 750
     assert budget["prompt_budget_tokens"] == 3250
