@@ -162,7 +162,35 @@ def test_openai_compatible_provider_uses_same_contract_with_injected_client():
     assert provider.provider_name == "openai_compatible"
     assert provider.model_name == "local-risk-model"
     assert result.text == "Local response"
+    assert provider.describe()["capabilities"]["web_search"] is False
     assert client.completions.last_payload["model"] == "local-risk-model"
+
+
+def test_openai_compatible_capability_synthesis_reuses_chat_completions_contract():
+    config = AIProviderConfig.from_dict({
+        "provider": "openai_compatible",
+        "endpoint": "https://example.compatible.invalid/v1",
+        "api_key": "test-key",
+        "model": "compatible-risk-model",
+    })
+    client = FakeClient(_completion(content='{"semantic_level":"low"}'))
+    provider = build_ai_provider(config, client=client)
+    request = AIRequest(
+        messages=(AIMessage("user", "Synthesize risk."),),
+        response_schema={
+            "type": "object",
+            "properties": {"semantic_level": {"type": "string"}},
+            "required": ["semantic_level"],
+            "additionalProperties": False,
+        },
+        response_schema_name="risk_synthesis",
+    )
+
+    result = provider.generate_with_capabilities(request)
+
+    assert result.structured == {"semantic_level": "low"}
+    assert client.completions.last_payload["model"] == "compatible-risk-model"
+    assert client.completions.last_payload["response_format"]["type"] == "json_schema"
 
 
 def test_ai_info_cli_does_not_expose_placeholder_key(tmp_path: Path, capsys):
