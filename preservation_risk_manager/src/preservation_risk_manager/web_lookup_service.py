@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from preservation_risk_manager.format_identification import normalize_format_observation
 from preservation_risk_manager.request_api import search_format_docs
 from preservation_risk_manager.web_service import WebRuntimeConfig, _reader
 
@@ -67,6 +68,21 @@ def _lookup_row(format_doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _search_query(value: str) -> str:
+    """Normalize syntax without inferring a format.
+
+    Reuse the existing PUID normalization so values such as ``PRONOM fmt 276``
+    resolve like ``fmt/276``. A leading dot is stripped only for a simple file
+    extension query such as ``.docx``.
+    """
+    variants = normalize_format_observation(value)
+    if variants:
+        return variants[0]
+    if value.startswith(".") and len(value) > 1 and value.count(".") == 1 and "/" not in value and " " not in value:
+        return value[1:]
+    return value
+
+
 def lookup_puids(reader, query: str, *, limit: int = 10) -> dict[str, Any]:
     """Find PRONOM-PUID-backed canonical formats by name, PUID, MIME, extension or other indexed text.
 
@@ -78,13 +94,15 @@ def lookup_puids(reader, query: str, *, limit: int = 10) -> dict[str, Any]:
     if not text:
         raise ValueError("A format name, PUID, MIME type, extension, or identifier is required.")
     bounded_limit = max(1, int(limit))
+    normalized_query = _search_query(text)
 
-    rows = search_format_docs(reader, text)
+    rows = search_format_docs(reader, normalized_query)
     puid_rows = [_lookup_row(row) for row in rows]
     puid_rows = [row for row in puid_rows if row.get("puid")]
     returned = puid_rows[:bounded_limit]
     return {
         "query": text,
+        "normalized_query": normalized_query,
         "match_count": len(puid_rows),
         "returned_count": len(returned),
         "limit": bounded_limit,
