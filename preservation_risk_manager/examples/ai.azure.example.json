@@ -8,8 +8,7 @@
     "temperature": 0.0,
     "max_output_tokens": 1200,
     "timeout_seconds": 60,
-    "web_research": {
-      "enabled": false,
+    "external_research": {
       "allowed_domains": [],
       "blocked_domains": []
     }
