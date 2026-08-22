@@ -55,6 +55,7 @@ class AIProviderConfig:
     max_output_tokens: int | None = None
     tokens_per_minute: int | None = None
     response_verbosity: str = "medium"
+    input_log_file: str | None = None
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
@@ -133,6 +134,7 @@ class AIProviderConfig:
             max_output_tokens=max_output_tokens,
             tokens_per_minute=tokens_per_minute,
             response_verbosity=response_verbosity,
+            input_log_file=_optional_string(data.get("input_log_file")),
             timeout_seconds=float(data.get("timeout_seconds", 60.0)),
             max_retries=max_retries,
             human_format_assessment_limit=human_format_assessment_limit,
@@ -209,6 +211,7 @@ class AIProviderConfig:
             "synthesis_max_output_tokens": self.synthesis_max_output_tokens,
             "tokens_per_minute": self.tokens_per_minute,
             "response_verbosity": self.response_verbosity,
+            "input_log_file": self.input_log_file,
             "timeout_seconds": self.timeout_seconds,
             "max_retries": self.max_retries,
             "human_format_assessment_limit": self.human_format_assessment_limit,
