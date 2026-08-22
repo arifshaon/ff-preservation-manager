@@ -87,7 +87,33 @@ def _render_ai_synthesis_disclosure(response: dict[str, Any]) -> list[str]:
         lines.append(f"- Provider: {provider_name}.")
 
     overall = synthesis.get("overall_synthesized_risk") or {}
-    if status == "ok":
+    research = synthesis.get("web_research") if isinstance(synthesis.get("web_research"), dict) else None
+    if status == "ok" and research is not None:
+        citations = [item for item in research.get("citations") or [] if isinstance(item, dict)]
+        queries = research.get("search_queries") or []
+        lines.append(
+            f"- Registry-first web verification was performed using {len(citations)} cited web source(s)."
+        )
+        if queries:
+            lines.append(f"- Web search actions: {len(queries)}.")
+        if overall.get("semantic_level"):
+            lines.append(f"- Final AI-assisted synthesized level: {overall.get('semantic_level')}.")
+        relation = overall.get("governed_baseline_relation")
+        if relation:
+            lines.append(f"- Relation to governed config baseline: {str(relation).replace('_', ' ')}.")
+        findings = [item for item in overall.get("verification_findings") or [] if isinstance(item, dict)]
+        if findings:
+            lines.append("- Material verification findings:")
+            for item in findings[:8]:
+                relation_text = str(item.get("relationship_to_database") or "unclear").replace("_", " ")
+                effect = str(item.get("risk_effect") or "uncertain").replace("_", " ")
+                lines.append(f"  - {item.get('finding')} [{relation_text}; {effect}]")
+        if citations:
+            lines.append("- Web sources:")
+            for item in citations[:10]:
+                title = item.get("title") or item.get("url")
+                lines.append(f"  - {item.get('ref')}: {title} — {item.get('url')}")
+    elif status == "ok":
         interpreted = synthesis.get("ai_interpreted_assessments") or []
         if interpreted:
             lines.append(
@@ -96,16 +122,19 @@ def _render_ai_synthesis_disclosure(response: dict[str, Any]) -> list[str]:
             )
         else:
             lines.append(
-                "- AI was consulted, but no configured source assessment required AI interpretation; "
-                "the config-driven synthesis remained authoritative."
+                "- No configured source assessment required AI interpretation; the config-driven synthesis remained authoritative."
             )
         proposed = (synthesis.get("ai") or {}).get("proposed_overall_level")
         if proposed:
             lines.append(f"- AI proposed overall level: {proposed}.")
         if overall.get("semantic_level"):
             lines.append(f"- Final policy-governed overall level: {overall.get('semantic_level')}.")
+    elif status == "skipped_no_ai_work_required":
+        lines.append("- No AI interpretation was needed because configured source mappings already resolved the available source-level risk.")
+        if overall.get("semantic_level"):
+            lines.append(f"- Final policy-governed overall level: {overall.get('semantic_level')}.")
     elif status == "error_config_synthesis_retained":
-        lines.append("- AI synthesis failed; the config-driven deterministic synthesis was retained unchanged.")
+        lines.append("- AI research/synthesis failed; the config-driven deterministic synthesis was retained unchanged.")
         if synthesis.get("error"):
             lines.append(f"- Error: {synthesis.get('error')}")
         if overall.get("semantic_level"):
@@ -131,7 +160,7 @@ def _append_ai_disclosure(rendered: str, response: dict[str, Any]) -> str:
     synthesis_only = (
         isinstance(ai_risk, dict)
         and ai_risk.get("ai_mode") == "synthesize"
-        and ai_risk.get("status") == "not_requested_synthesis_only"
+        and ai_risk.get("status") in {"not_requested_synthesis_only", "synthesis_only"}
     )
     if not synthesis_only:
         risk = base._render_ai_risk_disclosure(response)
@@ -162,6 +191,9 @@ def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | Non
     heading = label + (f" — {puid}" if puid and str(puid) not in label else "")
     lines = [heading, ""]
 
+    web_researched = bool(overall.get("web_researched"))
+    governed_baseline = overall.get("governed_baseline") if isinstance(overall.get("governed_baseline"), dict) else {}
+
     if overall.get("assessed") and overall.get("semantic_level"):
         overall_label = overall.get("semantic_label") or str(overall.get("semantic_level")).replace("_", " ").title()
         lines.extend([
@@ -177,7 +209,12 @@ def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | Non
             lines.append(
                 f"Policy: {policy_id}" + (f" v{policy_version}" if policy_version else "")
             )
-        if overall.get("ai_assisted"):
+        if web_researched:
+            baseline_label = governed_baseline.get("semantic_label") or governed_baseline.get("semantic_level")
+            if baseline_label:
+                lines.append(f"Governed config baseline: {baseline_label}")
+            lines.append("AI assistance: yes — registry evidence was verified and supplemented using cited public-web research.")
+        elif overall.get("ai_assisted"):
             lines.append("AI assistance: yes — an unmapped finding was interpreted within the configured policy boundary.")
         elif overall.get("ai_consulted"):
             lines.append("AI consulted: yes — no source mapping required AI interpretation; config remained authoritative.")
@@ -187,14 +224,15 @@ def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | Non
             "Not assessed — no source assessment could be mapped or supported sufficiently for synthesis.",
         ])
 
+    role_basis = governed_baseline if web_researched and governed_baseline else overall
     primary_keys = {
         _source_key(item)
-        for item in overall.get("contributors") or []
+        for item in role_basis.get("contributors") or []
         if isinstance(item, dict)
     }
     contextual_keys = {
         _source_key(item)
-        for item in overall.get("contextual_contributors") or []
+        for item in role_basis.get("contextual_contributors") or []
         if isinstance(item, dict)
     }
 
@@ -204,52 +242,67 @@ def _render_synthesized_single_assessment(response: dict[str, Any]) -> str | Non
             key = _source_key(item)
             role = None
             if key in primary_keys:
-                role = "headline contributor"
+                role = "governed baseline headline contributor"
             elif key in contextual_keys:
-                role = "broader-scope context"
+                role = "governed baseline broader-scope context"
             lines.extend(_render_source_assessment(item, role=role))
 
     if overall.get("assessed"):
         lines.extend(["", "How the overall risk was determined"])
-        selected_scopes = overall.get("selected_scope_types") or []
-        if selected_scopes:
+        if web_researched:
             lines.append(
-                "The configured policy selected the most-specific populated scope: "
-                + ", ".join(str(scope).replace("_", " ") for scope in selected_scopes)
-                + "."
+                "The configured synthesis was used as the governed baseline. AI then checked the collected evidence "
+                "against cited current public-web sources and used those findings only to verify, qualify, or supplement the evidence base."
             )
-        levels = overall.get("contributing_levels") or []
-        if len(levels) > 1:
-            lines.append(
-                "Multiple assessments existed at that same scope; the configured conservative rule selected "
-                "the highest semantic concern at that scope."
-            )
-        elif levels:
-            lines.append(
-                f"The applicable headline assessment at that scope mapped to {str(levels[0]).replace('_', ' ')} concern."
-            )
-        if overall.get("contextual_contributors"):
-            lines.append(
-                "Broader-scope assessments are retained as context and do not override the more-specific headline assessment."
-            )
+            relation = overall.get("governed_baseline_relation")
+            if relation:
+                lines.append(f"The researched result is {str(relation).replace('_', ' ')} relative to the governed baseline.")
+            findings = [item for item in overall.get("verification_findings") or [] if isinstance(item, dict)]
+            for item in findings[:8]:
+                lines.append(
+                    f"- {item.get('finding')} — {str(item.get('relationship_to_database') or 'unclear').replace('_', ' ')}; "
+                    f"{str(item.get('risk_effect') or 'uncertain').replace('_', ' ')}."
+                )
+            lines.append("Source-native ratings and configured source mappings were not rewritten by the web research step.")
+        else:
+            selected_scopes = overall.get("selected_scope_types") or []
+            if selected_scopes:
+                lines.append(
+                    "The configured policy selected the most-specific populated scope: "
+                    + ", ".join(str(scope).replace("_", " ") for scope in selected_scopes)
+                    + "."
+                )
+            levels = overall.get("contributing_levels") or []
+            if len(levels) > 1:
+                lines.append(
+                    "Multiple assessments existed at that same scope; the configured conservative rule selected "
+                    "the highest semantic concern at that scope."
+                )
+            elif levels:
+                lines.append(
+                    f"The applicable headline assessment at that scope mapped to {str(levels[0]).replace('_', ' ')} concern."
+                )
+            if overall.get("contextual_contributors"):
+                lines.append(
+                    "Broader-scope assessments are retained as context and do not override the more-specific headline assessment."
+                )
         lines.append("Missing sources contribute nothing, and heterogeneous native source scales are not numerically averaged.")
 
     rationale = overall.get("ai_rationale") or overall.get("rationale")
     uncertainty = overall.get("ai_uncertainty") or overall.get("uncertainty")
     if rationale:
-        lines.extend(["", "AI synthesis rationale", str(rationale)])
+        lines.extend(["", "AI synthesis rationale" if not web_researched else "Research-assisted synthesis rationale", str(rationale)])
     if uncertainty:
         lines.append(f"Uncertainty: {uncertainty}")
 
     parity = context.get("registry_synthesis_parity") or {}
     if isinstance(parity, dict) and parity.get("registry_level") is not None:
         if parity.get("semantic_level_match"):
-            lines.append(
-                "Config migration check: the policy-derived semantic level matches the existing locked MongoDB synthesis."
-            )
+            prefix = "Governed config baseline" if web_researched else "Policy-derived semantic level"
+            lines.append(f"Config migration check: the {prefix.lower()} matches the existing locked MongoDB synthesis.")
         else:
             lines.append(
-                "Config migration warning: the policy-derived semantic level differs from the existing locked MongoDB synthesis; review before operational use."
+                "Config migration warning: the governed policy-derived semantic level differs from the existing locked MongoDB synthesis; review before operational use."
             )
 
     return "\n".join(lines)
