@@ -127,7 +127,17 @@ The historical `web_research.enabled` property is accepted for backward compatib
 
 For Azure OpenAI, global/public overall synthesis uses one Responses API request. The `web_search` tool is exposed with automatic tool choice, so the model may call it or decline it. The same response returns the final structured synthesis.
 
-For structured Responses output, the provider requests low response verbosity to reduce avoidable output growth while preserving the required JSON fields.
+Responses verbosity is configurable with `response_verbosity` (`low`, `medium`, or `high`) and defaults to `medium`. This avoids hard-coding a verbosity level that may not be supported by a particular deployed model. The synthesis prompt itself still asks for a concise structured answer.
+
+Example:
+
+```json
+{
+  "ai": {
+    "response_verbosity": "medium"
+  }
+}
+```
 
 The runtime records:
 
