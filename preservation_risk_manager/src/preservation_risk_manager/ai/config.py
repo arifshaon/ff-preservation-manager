@@ -55,7 +55,7 @@ class AIProviderConfig:
     timeout_seconds: float = 60.0
     max_retries: int = 0
     human_format_assessment_limit: int = 10
-    # Compatibility field retained because older integration code reads it.
+    # Compatibility fields retained because older integration code reads them.
     # Capability-driven synthesis is automatic whenever AI is enabled; legacy
     # ai.web_research.enabled values are intentionally ignored.
     web_research_enabled: bool = True
@@ -126,6 +126,16 @@ class AIProviderConfig:
         """Backward-compatible alias for the former setting name."""
         return self.human_format_assessment_limit
 
+    @property
+    def external_research_allowed_domains(self) -> tuple[str, ...]:
+        """Current-name alias for the retained web_research compatibility field."""
+        return self.web_research_allowed_domains
+
+    @property
+    def external_research_blocked_domains(self) -> tuple[str, ...]:
+        """Current-name alias for the retained web_research compatibility field."""
+        return self.web_research_blocked_domains
+
     def resolve_api_key(self, *, required: bool = True) -> str | None:
         if self.api_key_env:
             value = os.getenv(self.api_key_env)
@@ -164,8 +174,8 @@ class AIProviderConfig:
             "human_format_assessment_limit": self.human_format_assessment_limit,
             "external_capabilities": {
                 "mode": "automatic_when_supported",
-                "allowed_domains": list(self.web_research_allowed_domains),
-                "blocked_domains": list(self.web_research_blocked_domains),
+                "allowed_domains": list(self.external_research_allowed_domains),
+                "blocked_domains": list(self.external_research_blocked_domains),
             },
         }
 
