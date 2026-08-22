@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from preservation_risk_manager.synthesis_policy import load_synthesis_policy, synthesize_assessments
+from copy import deepcopy
+
+from preservation_risk_manager.synthesis_policy import (
+    SynthesisPolicy,
+    load_synthesis_policy,
+    map_risk_term,
+    synthesize_assessments,
+)
+
+
+def _default_policy_dict():
+    return deepcopy(load_synthesis_policy().raw)
 
 
 def test_default_policy_prefers_exact_nara_over_broader_dpc_group():
@@ -71,6 +82,78 @@ def test_absent_source_contributes_nothing():
     assert len(result["contributors"]) == 1
     assert result["contextual_contributors"] == []
     assert result["missing_evidence_policy"] == "exclude"
+
+
+def test_policy_can_change_scope_and_aggregation_without_code_changes():
+    data = _default_policy_dict()
+    data["synthesis"] = {
+        **data["synthesis"],
+        "scope_selection": "all_mapped_assessments",
+        "broader_scope_policy": "context_only",
+        "same_scope_aggregation": "lowest_semantic_concern",
+    }
+    policy = SynthesisPolicy.from_dict(data)
+
+    result = synthesize_assessments([
+        {
+            "source_id": "nara_digital_preservation_framework",
+            "native_label": "High Risk",
+            "scope_type": "exact_format",
+        },
+        {
+            "source_type": "dpc_bit_list",
+            "native_label": "Vulnerable",
+            "scope_type": "format_group",
+        },
+    ], policy)
+
+    assert result["scope_selection"] == "all_mapped_assessments"
+    assert result["same_scope_aggregation"] == "lowest_semantic_concern"
+    assert result["semantic_level"] == "moderate"
+    assert len(result["contributors"]) == 2
+    assert result["contextual_contributors"] == []
+
+
+def test_majority_aggregation_tie_break_is_configurable():
+    data = _default_policy_dict()
+    data["synthesis"] = {
+        **data["synthesis"],
+        "scope_selection": "all_mapped_assessments",
+        "same_scope_aggregation": {
+            "operator": "majority_semantic_level",
+            "tie_break": "lowest_semantic_concern",
+        },
+    }
+    policy = SynthesisPolicy.from_dict(data)
+
+    result = synthesize_assessments([
+        {"source_id": "x", "semantic_level": "low", "scope_type": "exact_format"},
+        {"source_id": "y", "semantic_level": "high", "scope_type": "format_group"},
+    ], policy)
+
+    assert result["semantic_level"] == "low"
+    assert result["same_scope_aggregation"] == "majority_semantic_level"
+
+
+def test_source_native_risk_terminology_maps_only_through_configured_rule():
+    policy = load_synthesis_policy()
+
+    dpc = map_risk_term(
+        "Vulnerable",
+        policy,
+        source_context={"source_type": "dpc_bit_list"},
+    )
+    unknown = map_risk_term(
+        "Needs watching",
+        policy,
+        source_context={"source_type": "dpc_bit_list"},
+    )
+
+    assert dpc["mapped"] is True
+    assert dpc["semantic_level"] == "moderate"
+    assert dpc["rule_id"] == "dpc-global-bit-list"
+    assert unknown["mapped"] is False
+    assert unknown["semantic_level"] is None
 
 
 def test_ai_policy_is_capability_driven_and_keeps_governed_result_as_baseline():
