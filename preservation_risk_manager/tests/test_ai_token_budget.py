@@ -52,7 +52,11 @@ def test_tokens_per_minute_is_configurable_and_redacted():
     })
 
     assert config.tokens_per_minute == 10000
+    # TPM-aware configuration raises an unsafe 1,200-token structured-output
+    # allowance to 2,000 and lets the prompt budgeter shrink input instead.
+    assert config.max_output_tokens == 2000
     assert config.redacted()["tokens_per_minute"] == 10000
+    assert config.redacted()["max_output_tokens"] == 2000
 
 
 def test_tokens_per_minute_must_be_positive():
@@ -62,6 +66,46 @@ def test_tokens_per_minute_must_be_positive():
         assert "tokens_per_minute" in str(exc)
     else:
         raise AssertionError("tokens_per_minute=0 must be rejected")
+
+
+def test_synthesis_uses_10000_tpm_to_reserve_output_and_shrink_prompt_budget():
+    config = AIProviderConfig.from_dict({
+        "provider": "budget-test",
+        "tokens_per_minute": 10000,
+        "max_output_tokens": 1200,
+    })
+    provider = _BudgetProvider(config)
+    policy = load_synthesis_policy()
+
+    result = synthesize_with_capabilities(
+        provider,
+        format_context={"canonical_id": "puid-fmt-276", "label": "PDF 1.7", "puids": ["fmt/276"]},
+        policy=policy,
+        governed_synthesis={
+            "assessed": True,
+            "semantic_level": "low",
+            "semantic_label": "Low concern",
+        },
+        risk_assessments=[
+            {
+                "source_id": "nara_digital_preservation_framework",
+                "source_record_id": "NF00369",
+                "native_label": "Low Risk",
+                "semantic_level": "low",
+                "scope_type": "exact_format",
+            }
+        ],
+        criterion_claims=[],
+        source_evidence=[],
+    )
+
+    budget = result["token_budget"]
+    assert budget["configured_tokens_per_minute"] == 10000
+    assert budget["configured_max_output_tokens"] == 2000
+    assert budget["effective_max_output_tokens"] == 2000
+    assert budget["safety_reserve_tokens"] == 1500
+    assert budget["prompt_budget_tokens"] == 6500
+    assert provider.requests[0].max_output_tokens == 2000
 
 
 def test_synthesis_compacts_lower_priority_context_to_fit_tpm_budget():
@@ -107,13 +151,13 @@ def test_synthesis_compacts_lower_priority_context_to_fit_tpm_budget():
 
     budget = result["token_budget"]
     assert budget["configured_tokens_per_minute"] == 5000
-    assert budget["effective_max_output_tokens"] == 600
+    assert budget["effective_max_output_tokens"] == 1000
     assert budget["safety_reserve_tokens"] == 750
-    assert budget["prompt_budget_tokens"] == 3650
+    assert budget["prompt_budget_tokens"] == 3250
     assert budget["estimated_prompt_tokens"] <= budget["prompt_budget_tokens"]
     assert budget["evidence_items_available"] == 31
     assert budget["evidence_items_supplied"] < budget["evidence_items_available"]
     assert budget["evidence_items_omitted"] > 0
     assert budget["context_trimmed_for_token_budget"] is True
-    assert provider.requests[0].max_output_tokens == 600
+    assert provider.requests[0].max_output_tokens == 1000
     assert any(item["ref"] == "R001" for item in result["database_evidence_refs"])
